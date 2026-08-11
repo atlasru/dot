@@ -1,6 +1,17 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+val stableDebugKeystore = layout.buildDirectory.file("signing/dot-dev.jks").get().asFile
+val stableDebugKeystoreBase64 = file("signing/dot-dev.jks.b64")
+stableDebugKeystore.parentFile.mkdirs()
+if (!stableDebugKeystore.exists()) {
+    stableDebugKeystore.writeBytes(
+        Base64.getDecoder().decode(stableDebugKeystoreBase64.readText().trim()),
+    )
 }
 
 android {
@@ -11,8 +22,8 @@ android {
         applicationId = "dev.dotclient.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.0.5"
+        versionCode = 6
+        versionName = "0.0.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -27,10 +38,20 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        create("stableDebug") {
+            storeFile = stableDebugKeystore
+            storePassword = "dot-debug"
+            keyAlias = "dotdev"
+            keyPassword = "dot-debug"
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            signingConfig = signingConfigs.getByName("stableDebug")
         }
         release {
             isMinifyEnabled = false
