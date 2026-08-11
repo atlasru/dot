@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -112,14 +113,48 @@ class DotVpnService : VpnService() {
         if (generatedJson.isBlank()) error("libXray returned an empty config")
 
         val config = JSONObject(generatedJson)
+        val shareUri = Uri.parse(rawUri)
 
-        // libXray v26.7.28 abuses Xray's sendThrough field to preserve a human-readable
-        // outbound name. Xray itself interprets sendThrough as a local source IP, so a
-        // node name such as "France #28" makes the generated config invalid at runtime.
-        // Share links do not carry a legitimate sendThrough value, so it is safe to strip.
         config.optJSONArray("outbounds")?.let { outbounds ->
             for (index in 0 until outbounds.length()) {
-                outbounds.optJSONObject(index)?.remove("sendThrough")
+                val outbound = outbounds.optJSONObject(index) ?: continue
+
+                // libXray uses sendThrough as temporary storage for a display name.
+                // Xray interprets it as a local source IP, so it must not reach core.
+                outbound.remove("sendThrough")
+
+                val stream = outbound.optJSONObject("streamSettings") ?: continue
+                if (!stream.optString("security").equals("reality", ignoreCase = true)) continue
+
+                val reality = stream.optJSONObject("realitySettings") ?: JSONObject().also {
+                    stream.put("realitySettings", it)
+                }
+
+                // v26.7.28 serializes zero-valued server-side REALITY members as JSON null.
+                // Xray treats the mere presence of dest/target as a server config and then
+                // asks for serverNames/privateKey/shortIds. This is a client outbound, so
+                // strip every server-only member and restore client values from the share URI.
+                SERVER_ONLY_REALITY_KEYS.forEach(reality::remove)
+
+                shareUri.getQueryParameter("fp")?.takeIf { it.isNotBlank() }?.let {
+                    reality.put("fingerprint", it)
+                }
+                shareUri.getQueryParameter("sni")?.takeIf { it.isNotBlank() }?.let {
+                    reality.put("serverName", it)
+                }
+                shareUri.getQueryParameter("pbk")?.takeIf { it.isNotBlank() }?.let {
+                    reality.put("password", it)
+                    reality.put("publicKey", it)
+                }
+                shareUri.getQueryParameter("sid")?.let {
+                    reality.put("shortId", it)
+                }
+                shareUri.getQueryParameter("spx")?.takeIf { it.isNotBlank() }?.let {
+                    reality.put("spiderX", it)
+                }
+                shareUri.getQueryParameter("pqv")?.takeIf { it.isNotBlank() }?.let {
+                    reality.put("mldsa65Verify", it)
+                }
             }
         }
 
@@ -226,5 +261,21 @@ class DotVpnService : VpnService() {
         private const val CHANNEL_ID = "dot_vpn"
         private const val NOTIFICATION_ID = 1001
         private const val MTU = 1500
+
+        private val SERVER_ONLY_REALITY_KEYS = listOf(
+            "target",
+            "dest",
+            "type",
+            "xver",
+            "serverNames",
+            "privateKey",
+            "minClientVer",
+            "maxClientVer",
+            "maxTimeDiff",
+            "shortIds",
+            "mldsa65Seed",
+            "limitFallbackUpload",
+            "limitFallbackDownload",
+        )
     }
 }
