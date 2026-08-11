@@ -775,7 +775,6 @@ private fun AboutScreen(
         Text("project", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(8.dp))
         AboutLink("github", "atlasru/dot") { openUrl("https://github.com/atlasru/dot") }
-        AboutLink("license", "open source") { openUrl("https://github.com/atlasru/dot/blob/main/LICENSE") }
 
         Spacer(Modifier.weight(1f))
         Text(
