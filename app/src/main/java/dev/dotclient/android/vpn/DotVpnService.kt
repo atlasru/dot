@@ -82,8 +82,7 @@ class DotVpnService : VpnService() {
                 LibXray.setDNS(controller, "1.1.1.1:53")
 
                 val config = buildXrayConfig(rawUri, vpnInterface.fd)
-                invokeChecked("testXray", config)
-                invokeChecked("runXray", config)
+                invokeRunXrayFromJson(config)
 
                 VpnRuntime.update(VpnConnectionState.CONNECTED, nodeName, "connected")
                 val manager = getSystemService(NotificationManager::class.java)
@@ -100,7 +99,7 @@ class DotVpnService : VpnService() {
 
     private fun buildXrayConfig(rawUri: String, tunFd: Int): String {
         val conversionRequest = JSONObject()
-            .put("apiVersion", 2)
+            .put("apiVersion", LIBXRAY_API_VERSION)
             .put("method", "convertShareLinksToXrayJson")
             .put("payload", JSONObject().put("text", rawUri))
 
@@ -124,7 +123,7 @@ class DotVpnService : VpnService() {
                 "settings",
                 JSONObject()
                     .put("name", "dot0")
-                    .put("MTU", MTU),
+                    .put("mtu", MTU),
             )
 
         config.put("inbounds", JSONArray().put(tunInbound))
@@ -132,14 +131,14 @@ class DotVpnService : VpnService() {
         return config.toString()
     }
 
-    private fun invokeChecked(method: String, config: String) {
+    private fun invokeRunXrayFromJson(config: String) {
         val request = JSONObject()
-            .put("apiVersion", 2)
-            .put("method", method)
-            .put("payload", JSONObject().put("xrayJson", config))
+            .put("apiVersion", LIBXRAY_API_VERSION)
+            .put("method", "runXrayFromJson")
+            .put("payload", JSONObject().put("configJSON", config))
         val response = JSONObject(LibXray.invoke(request.toString()))
         if (!response.optBoolean("success")) {
-            error(response.optString("error", "$method failed"))
+            error(response.optString("error", "runXrayFromJson failed"))
         }
     }
 
@@ -156,7 +155,7 @@ class DotVpnService : VpnService() {
     private fun shutdownCore() {
         runCatching {
             val request = JSONObject()
-                .put("apiVersion", 2)
+                .put("apiVersion", LIBXRAY_API_VERSION)
                 .put("method", "stopXray")
                 .put("payload", JSONObject())
             LibXray.invoke(request.toString())
@@ -212,6 +211,7 @@ class DotVpnService : VpnService() {
         const val ACTION_DISCONNECT = "dev.dotclient.android.DISCONNECT"
         const val EXTRA_VLESS_URI = "vless_uri"
         const val EXTRA_NODE_NAME = "node_name"
+        private const val LIBXRAY_API_VERSION = 1
         private const val CHANNEL_ID = "dot_vpn"
         private const val NOTIFICATION_ID = 1001
         private const val MTU = 1500
