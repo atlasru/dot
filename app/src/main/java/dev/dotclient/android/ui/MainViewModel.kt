@@ -33,7 +33,10 @@ class MainViewModel(
                 mutableState.update {
                     it.copy(
                         requestingVpnPermission = false,
-                        vpnPermissionGranted = runtime.state != VpnConnectionState.DISCONNECTED,
+                        vpnPermissionGranted = runtime.state == VpnConnectionState.CONNECTING ||
+                            runtime.state == VpnConnectionState.CONNECTED ||
+                            runtime.state == VpnConnectionState.DISCONNECTING,
+                        vpnState = runtime.state,
                         message = runtime.message,
                     )
                 }
@@ -208,6 +211,7 @@ class MainViewModel(
             it.copy(
                 requestingVpnPermission = false,
                 vpnPermissionGranted = true,
+                vpnState = VpnConnectionState.CONNECTING,
                 message = "starting VLESS tunnel…",
             )
         }
@@ -221,6 +225,12 @@ class MainViewModel(
     }
 
     fun disconnect() {
+        mutableState.update {
+            it.copy(
+                vpnState = VpnConnectionState.DISCONNECTING,
+                message = "disconnecting…",
+            )
+        }
         val application = getApplication<Application>()
         val intent = Intent(application, DotVpnService::class.java)
             .setAction(DotVpnService.ACTION_DISCONNECT)
@@ -232,6 +242,7 @@ class MainViewModel(
             it.copy(
                 requestingVpnPermission = false,
                 vpnPermissionGranted = false,
+                vpnState = VpnConnectionState.DISCONNECTED,
                 message = "VPN permission was not granted",
             )
         }
