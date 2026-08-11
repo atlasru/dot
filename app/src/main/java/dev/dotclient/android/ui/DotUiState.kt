@@ -14,6 +14,10 @@ data class DotUiState(
     val vpnState: VpnConnectionState = VpnConnectionState.DISCONNECTED,
     val message: String? = null,
     val themeMode: DotThemeMode = DotThemeMode.AMOLED,
+    val downloadBytesPerSecond: Long = 0L,
+    val uploadBytesPerSecond: Long = 0L,
+    val sessionDownloadBytes: Long = 0L,
+    val sessionUploadBytes: Long = 0L,
 ) {
     val selectedSubscription: Subscription?
         get() = subscriptions.firstOrNull { it.id == selectedSubscriptionId }
