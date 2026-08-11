@@ -112,6 +112,17 @@ class DotVpnService : VpnService() {
         if (generatedJson.isBlank()) error("libXray returned an empty config")
 
         val config = JSONObject(generatedJson)
+
+        // libXray v26.7.28 abuses Xray's sendThrough field to preserve a human-readable
+        // outbound name. Xray itself interprets sendThrough as a local source IP, so a
+        // node name such as "France #28" makes the generated config invalid at runtime.
+        // Share links do not carry a legitimate sendThrough value, so it is safe to strip.
+        config.optJSONArray("outbounds")?.let { outbounds ->
+            for (index in 0 until outbounds.length()) {
+                outbounds.optJSONObject(index)?.remove("sendThrough")
+            }
+        }
+
         val env = config.optJSONObject("env") ?: JSONObject()
         env.put("xray.tun.fd", tunFd.toString())
         config.put("env", env)
