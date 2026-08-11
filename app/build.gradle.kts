@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "dev.dotclient.android"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "dev.dotclient.android"
