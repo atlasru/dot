@@ -2,6 +2,7 @@ package dev.dotclient.android.ui
 
 import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.ui.theme.DotThemeMode
 import dev.dotclient.android.vpn.VpnConnectionState
 
 data class DotUiState(
@@ -12,6 +13,7 @@ data class DotUiState(
     val vpnPermissionGranted: Boolean = false,
     val vpnState: VpnConnectionState = VpnConnectionState.DISCONNECTED,
     val message: String? = null,
+    val themeMode: DotThemeMode = DotThemeMode.AMOLED,
 ) {
     val selectedSubscription: Subscription?
         get() = subscriptions.firstOrNull { it.id == selectedSubscriptionId }
