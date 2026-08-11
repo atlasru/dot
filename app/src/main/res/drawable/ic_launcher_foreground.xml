@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Pixel shield, recreated from the supplied dot. icon so adaptive masks stay crisp. -->
+    <path android:fillColor="#FFFFFF" android:pathData="M51,22h6v5h-6z M46,27h5v5h-5z M57,27h5v5h-5z M40,32h6v5h-6z M62,32h6v5h-6z M28,37h12v5h-12z M68,37h12v5h-12z M28,42h5v22h-5z M75,42h5v22h-5z M33,64h5v6h-5z M70,64h5v6h-5z M38,70h5v6h-5z M65,70h5v6h-5z M43,76h5v5h-5z M60,76h5v5h-5z M48,81h6v5h-6z M54,81h6v5h-6z M51,86h6v5h-6z" />
+    <path android:fillColor="#FF0000" android:pathData="M51,48h6v5h-6z M46,53h16v6h-16z M46,59h16v6h-16z M51,65h6v5h-6z" />
+</vector>
