@@ -1,10 +1,14 @@
 package dev.dotclient.android.ui
 
+import android.Manifest
 import android.app.Activity
+import android.content.pm.PackageManager
 import android.net.VpnService
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -74,6 +78,23 @@ fun DotApp(viewModel: MainViewModel) {
         }
     }
 
+    val beginVpnPermissionFlow = {
+        if (viewModel.requestVpnPermission()) {
+            val permissionIntent = VpnService.prepare(context)
+            if (permissionIntent != null) {
+                vpnPermissionLauncher.launch(permissionIntent)
+            } else {
+                viewModel.onVpnPermissionGranted()
+            }
+        }
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) {
+        beginVpnPermissionFlow()
+    }
+
     val requestConnect = {
         when (state.vpnState) {
             VpnConnectionState.CONNECTED,
@@ -82,13 +103,12 @@ fun DotApp(viewModel: MainViewModel) {
 
             VpnConnectionState.DISCONNECTED,
             VpnConnectionState.ERROR -> {
-                if (viewModel.requestVpnPermission()) {
-                    val permissionIntent = VpnService.prepare(context)
-                    if (permissionIntent != null) {
-                        vpnPermissionLauncher.launch(permissionIntent)
-                    } else {
-                        viewModel.onVpnPermissionGranted()
-                    }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    beginVpnPermissionFlow()
                 }
             }
         }
@@ -149,23 +169,30 @@ private fun HomeScreen(
 
         Spacer(Modifier.weight(0.65f))
 
-        Box(
-            modifier = Modifier.size(96.dp).border(1.dp, MaterialTheme.colorScheme.primary, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (state.requestingVpnPermission || state.vpnBusy) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(34.dp),
-                    strokeWidth = 1.5.dp,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            } else {
-                Box(
-                    Modifier.size(14.dp).background(
-                        if (state.vpnConnected) MaterialTheme.colorScheme.primary else Color(0xFF7A7A7A),
-                        CircleShape,
+        if (state.themeMode == DotThemeMode.AMOLED) {
+            PixelStatusMatrix(
+                active = state.vpnConnected,
+                busy = state.requestingVpnPermission || state.vpnBusy,
+            )
+        } else {
+            Box(
+                modifier = Modifier.size(96.dp).border(1.dp, MaterialTheme.colorScheme.primary, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (state.requestingVpnPermission || state.vpnBusy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(34.dp),
+                        strokeWidth = 1.5.dp,
+                        color = MaterialTheme.colorScheme.primary,
                     )
-                )
+                } else {
+                    Box(
+                        Modifier.size(14.dp).background(
+                            if (state.vpnConnected) MaterialTheme.colorScheme.primary else Color(0xFF7A7A7A),
+                            CircleShape,
+                        )
+                    )
+                }
             }
         }
 
@@ -222,8 +249,16 @@ private fun HomeScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text("↓ 0 B", color = Color(0xFF686868), style = MaterialTheme.typography.labelMedium)
-            Text("↑ 0 B", color = Color(0xFF686868), style = MaterialTheme.typography.labelMedium)
+            Text(
+                "↓ ${formatRate(state.downloadBytesPerSecond)}",
+                color = Color(0xFF868686),
+                style = MaterialTheme.typography.labelMedium,
+            )
+            Text(
+                "↑ ${formatRate(state.uploadBytesPerSecond)}",
+                color = Color(0xFF868686),
+                style = MaterialTheme.typography.labelMedium,
+            )
         }
 
         Spacer(Modifier.weight(1f))
@@ -240,6 +275,43 @@ private fun HomeScreen(
 }
 
 @Composable
+private fun PixelStatusMatrix(active: Boolean, busy: Boolean) {
+    val pattern = listOf(
+        "0011100",
+        "0110110",
+        "1100011",
+        "1000001",
+        "1100011",
+        "0110110",
+        "0011100",
+    )
+    val on = if (active) MaterialTheme.colorScheme.primary else Color(0xFF666666)
+    val off = Color(0xFF151515)
+
+    Column(
+        modifier = Modifier
+            .size(96.dp)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(2.dp))
+            .padding(13.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        pattern.forEachIndexed { rowIndex, row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                row.forEachIndexed { colIndex, cell ->
+                    val blink = busy && ((rowIndex + colIndex) % 3 == 0)
+                    Box(
+                        Modifier
+                            .size(7.dp)
+                            .background(if (cell == '1' || blink) on else off)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SelectedNodeControl(
     groupName: String,
     nodeName: String?,
@@ -248,7 +320,7 @@ private fun SelectedNodeControl(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF181818), RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 13.dp),
     ) {
@@ -608,10 +680,18 @@ private fun SettingsScreen(
             Spacer(Modifier.height(22.dp))
             Text("connection", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(6.dp))
-            SettingLine("vpn permission", if (state.vpnPermissionGranted) "granted" else "not requested")
-            SettingLine("app routing", "all apps")
-            SettingLine("dns", "automatic")
+            SettingLine(
+                "status",
+                when (state.vpnState) {
+                    VpnConnectionState.CONNECTED -> "connected"
+                    VpnConnectionState.CONNECTING -> "connecting"
+                    VpnConnectionState.DISCONNECTING -> "disconnecting"
+                    VpnConnectionState.ERROR -> "error"
+                    VpnConnectionState.DISCONNECTED -> "offline"
+                },
+            )
             SettingLine("protocol", "VLESS")
+            SettingLine("traffic", "realtime")
 
             Spacer(Modifier.height(18.dp))
             Text("advanced", style = MaterialTheme.typography.titleLarge)
@@ -869,5 +949,15 @@ private fun updatedAgo(epochMs: Long): String {
         deltaSeconds < 3600L -> "updated ${deltaSeconds / 60L}m ago"
         deltaSeconds < 86400L -> "updated ${deltaSeconds / 3600L}h ago"
         else -> "updated ${deltaSeconds / 86400L}d ago"
+    }
+}
+
+
+private fun formatRate(bytesPerSecond: Long): String {
+    val value = bytesPerSecond.coerceAtLeast(0L).toDouble()
+    return when {
+        value >= 1024.0 * 1024.0 -> String.format("%.1f MB/s", value / (1024.0 * 1024.0))
+        value >= 1024.0 -> String.format("%.0f KB/s", value / 1024.0)
+        else -> "${value.toLong()} B/s"
     }
 }
