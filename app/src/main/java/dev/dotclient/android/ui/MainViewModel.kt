@@ -9,10 +9,10 @@ import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.subscription.SecretRedactor
 import dev.dotclient.android.core.subscription.SubscriptionClient
 import dev.dotclient.android.core.subscription.SubscriptionStore
+import dev.dotclient.android.ui.theme.DotThemeMode
 import dev.dotclient.android.vpn.DotVpnService
 import dev.dotclient.android.vpn.VpnConnectionState
 import dev.dotclient.android.vpn.VpnRuntime
-import dev.dotclient.android.ui.theme.DotThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,6 +40,10 @@ class MainViewModel(
                             runtime.state == VpnConnectionState.DISCONNECTING,
                         vpnState = runtime.state,
                         message = runtime.message,
+                        downloadBytesPerSecond = runtime.downloadBytesPerSecond,
+                        uploadBytesPerSecond = runtime.uploadBytesPerSecond,
+                        sessionDownloadBytes = runtime.sessionDownloadBytes,
+                        sessionUploadBytes = runtime.sessionUploadBytes,
                     )
                 }
             }
