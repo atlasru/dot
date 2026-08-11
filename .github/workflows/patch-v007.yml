@@ -1,0 +1,28 @@
+name: patch-v007
+
+on:
+  push:
+    branches: [ agent/v0.0.7-ui-state ]
+    paths:
+      - 'tools/patch_v007.py'
+      - '.github/workflows/patch-v007.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/v0.0.7-ui-state
+      - name: Apply UI state patch
+        run: python3 tools/patch_v007.py
+      - name: Commit generated source changes
+        run: |
+          git config user.name "dot. build bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app/src/main/java/dev/dotclient/android/ui/DotApp.kt app/build.gradle.kts
+          git commit -m "Fix connect/disconnect UI state" || exit 0
+          git push origin HEAD:agent/v0.0.7-ui-state
