@@ -12,6 +12,7 @@ import dev.dotclient.android.core.subscription.SubscriptionStore
 import dev.dotclient.android.vpn.DotVpnService
 import dev.dotclient.android.vpn.VpnConnectionState
 import dev.dotclient.android.vpn.VpnRuntime
+import dev.dotclient.android.ui.theme.DotThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,6 +24,7 @@ class MainViewModel(
 ) : AndroidViewModel(application) {
     private val subscriptionClient = SubscriptionClient()
     private val subscriptionStore = SubscriptionStore(application)
+    private val uiPreferences = application.getSharedPreferences("dot_ui", Application.MODE_PRIVATE)
 
     private val mutableState = MutableStateFlow(loadInitialState())
     val state: StateFlow<DotUiState> = mutableState.asStateFlow()
@@ -49,6 +51,7 @@ class MainViewModel(
         return DotUiState(
             subscriptions = stored.subscriptions,
             selectedSubscriptionId = stored.selectedSubscriptionId,
+            themeMode = DotThemeMode.fromStorage(uiPreferences.getString("theme", null)),
         )
     }
 
@@ -246,6 +249,11 @@ class MainViewModel(
                 message = "VPN permission was not granted",
             )
         }
+    }
+
+    fun setTheme(theme: DotThemeMode) {
+        mutableState.update { it.copy(themeMode = theme) }
+        uiPreferences.edit().putString("theme", theme.name).apply()
     }
 
     fun redactedSubscriptionUrl(url: String): String = SecretRedactor.url(url)

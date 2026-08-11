@@ -2,6 +2,7 @@ package dev.dotclient.android.ui
 
 import android.app.Activity
 import android.net.VpnService
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -50,6 +51,7 @@ import dev.dotclient.android.BuildConfig
 import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.model.VlessProfile
 import dev.dotclient.android.vpn.VpnConnectionState
+import dev.dotclient.android.ui.theme.DotThemeMode
 import kotlin.math.max
 
 private enum class Screen { HOME, NODES, SETTINGS }
@@ -59,6 +61,8 @@ fun DotApp(viewModel: MainViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var screen by remember { mutableStateOf(Screen.HOME) }
+
+    BackHandler(enabled = screen == Screen.NODES) { screen = Screen.HOME }
 
     val vpnPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
@@ -91,12 +95,7 @@ fun DotApp(viewModel: MainViewModel) {
     }
 
     Scaffold(
-        containerColor = Color.Black,
-        bottomBar = {
-            if (screen != Screen.SETTINGS) {
-                DotBottomBar(screen = screen, onScreen = { screen = it })
-            }
-        },
+        containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
         when (screen) {
             Screen.HOME -> HomeScreen(
@@ -112,6 +111,7 @@ fun DotApp(viewModel: MainViewModel) {
                 viewModel = viewModel,
                 onSettings = { screen = Screen.SETTINGS },
                 onAddSubscription = { screen = Screen.SETTINGS },
+                onClose = { screen = Screen.HOME },
                 onConnect = {
                     screen = Screen.HOME
                     requestConnect()
@@ -150,19 +150,19 @@ private fun HomeScreen(
         Spacer(Modifier.weight(0.65f))
 
         Box(
-            modifier = Modifier.size(96.dp).border(1.dp, Color.White, CircleShape),
+            modifier = Modifier.size(96.dp).border(1.dp, MaterialTheme.colorScheme.primary, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             if (state.requestingVpnPermission || state.vpnBusy) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(34.dp),
                     strokeWidth = 1.5.dp,
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             } else {
                 Box(
                     Modifier.size(14.dp).background(
-                        if (state.vpnConnected) Color.White else Color(0xFF7A7A7A),
+                        if (state.vpnConnected) MaterialTheme.colorScheme.primary else Color(0xFF7A7A7A),
                         CircleShape,
                     )
                 )
@@ -203,8 +203,8 @@ private fun HomeScreen(
             onClick = onConnect,
             enabled = !state.loading && !state.requestingVpnPermission && !state.vpnBusy,
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color.White,
-                contentColor = Color.Black,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
                 disabledContainerColor = Color(0xFF2A2A2A),
                 disabledContentColor = Color(0xFF777777),
             ),
@@ -279,6 +279,7 @@ private fun NodesScreen(
     viewModel: MainViewModel,
     onSettings: () -> Unit,
     onAddSubscription: () -> Unit,
+    onClose: () -> Unit,
     onConnect: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -293,7 +294,16 @@ private fun NodesScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("nodes.", style = MaterialTheme.typography.headlineLarge)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("nodes.", style = MaterialTheme.typography.headlineLarge)
+                Spacer(Modifier.size(10.dp))
+                Text(
+                    "×",
+                    modifier = Modifier.clickable(onClick = onClose).padding(horizontal = 8.dp, vertical = 4.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.titleLarge,
+                )
+            }
 
             Box {
                 Row(
@@ -501,6 +511,10 @@ private fun SettingsScreen(
         editorOpen = true
     }
 
+    BackHandler {
+        if (editorOpen) editorOpen = false else onBack()
+    }
+
     Column(modifier.fillMaxSize().padding(horizontal = 22.dp, vertical = 18.dp)) {
         SettingsHeader(onBack = onBack)
         Spacer(Modifier.height(24.dp))
@@ -584,6 +598,14 @@ private fun SettingsScreen(
             }
 
             Spacer(Modifier.height(22.dp))
+            Text("appearance", style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.height(10.dp))
+            ThemePicker(
+                selected = state.themeMode,
+                onSelect = viewModel::setTheme,
+            )
+
+            Spacer(Modifier.height(22.dp))
             Text("connection", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(6.dp))
             SettingLine("vpn permission", if (state.vpnPermissionGranted) "granted" else "not requested")
@@ -594,10 +616,8 @@ private fun SettingsScreen(
             Spacer(Modifier.height(18.dp))
             Text("advanced", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(6.dp))
-            SettingLine("core", "libXray · next")
-            SettingLine("theme", "AMOLED")
+            SettingLine("core", "libXray")
             SettingLine("type", "monospace / courier-like")
-            SettingLine("telemetry", "off")
 
             Spacer(Modifier.weight(1f))
 
@@ -801,6 +821,37 @@ private fun DotTextField(
 }
 
 @Composable
+private fun ThemePicker(selected: DotThemeMode, onSelect: (DotThemeMode) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        DotThemeMode.entries.forEach { theme ->
+            val active = theme == selected
+            Text(
+                text = theme.label,
+                modifier = Modifier
+                    .weight(1f)
+                    .border(
+                        1.dp,
+                        if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                        RoundedCornerShape(4.dp),
+                    )
+                    .background(
+                        if (active) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
+                        RoundedCornerShape(4.dp),
+                    )
+                    .clickable { onSelect(theme) }
+                    .padding(vertical = 11.dp),
+                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelMedium,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+        }
+    }
+}
+
+@Composable
 private fun SettingLine(name: String, value: String) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 9.dp),
@@ -808,28 +859,6 @@ private fun SettingLine(name: String, value: String) {
     ) {
         Text(name, color = Color(0xFFB0B0B0))
         Text(value, color = Color(0xFF666666), style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-    }
-}
-
-@Composable
-private fun DotBottomBar(screen: Screen, onScreen: (Screen) -> Unit) {
-    val items = listOf(Screen.HOME, Screen.NODES)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(Color.Black)
-            .border(1.dp, Color(0xFF191919))
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-    ) {
-        items.forEach { item ->
-            Text(
-                text = item.name.lowercase(),
-                modifier = Modifier.clickable { onScreen(item) }.padding(horizontal = 32.dp, vertical = 6.dp),
-                color = if (item == screen) Color.White else Color(0xFF555555),
-                style = MaterialTheme.typography.labelLarge,
-            )
-        }
     }
 }
 
