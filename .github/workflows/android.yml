@@ -24,6 +24,17 @@ jobs:
       - uses: android-actions/setup-android@v3
       - name: Install SDK
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Fetch libXray
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p app/libs
+          curl -fL --retry 3 \
+            https://github.com/XTLS/libXray/releases/download/v26.7.28/libxray-android.zip \
+            -o /tmp/libxray-android.zip
+          unzip -j /tmp/libxray-android.zip '*libXray.aar' -d app/libs
+          test -s app/libs/libXray.aar
+          ls -lh app/libs/libXray.aar
       - name: Unit tests
         run: gradle testDebugUnitTest
       - name: Build debug APK

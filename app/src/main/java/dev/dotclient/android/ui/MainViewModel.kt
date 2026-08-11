@@ -1,12 +1,17 @@
 package dev.dotclient.android.ui
 
 import android.app.Application
+import android.content.Intent
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.subscription.SecretRedactor
 import dev.dotclient.android.core.subscription.SubscriptionClient
 import dev.dotclient.android.core.subscription.SubscriptionStore
+import dev.dotclient.android.vpn.DotVpnService
+import dev.dotclient.android.vpn.VpnConnectionState
+import dev.dotclient.android.vpn.VpnRuntime
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +26,20 @@ class MainViewModel(
 
     private val mutableState = MutableStateFlow(loadInitialState())
     val state: StateFlow<DotUiState> = mutableState.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            VpnRuntime.state.collect { runtime ->
+                mutableState.update {
+                    it.copy(
+                        requestingVpnPermission = false,
+                        vpnPermissionGranted = runtime.state != VpnConnectionState.DISCONNECTED,
+                        message = runtime.message,
+                    )
+                }
+            }
+        }
+    }
 
     private fun loadInitialState(): DotUiState {
         val stored = subscriptionStore.load()
@@ -179,13 +198,33 @@ class MainViewModel(
     }
 
     fun onVpnPermissionGranted() {
+        val profile = state.value.selectedProfile
+        if (profile == null) {
+            mutableState.update { it.copy(requestingVpnPermission = false, message = "select a node first") }
+            return
+        }
+
         mutableState.update {
             it.copy(
                 requestingVpnPermission = false,
                 vpnPermissionGranted = true,
-                message = "VPN permission granted · libXray tunnel hookup is next",
+                message = "starting VLESS tunnel…",
             )
         }
+
+        val application = getApplication<Application>()
+        val intent = Intent(application, DotVpnService::class.java)
+            .setAction(DotVpnService.ACTION_CONNECT)
+            .putExtra(DotVpnService.EXTRA_VLESS_URI, profile.rawUri)
+            .putExtra(DotVpnService.EXTRA_NODE_NAME, profile.name)
+        ContextCompat.startForegroundService(application, intent)
+    }
+
+    fun disconnect() {
+        val application = getApplication<Application>()
+        val intent = Intent(application, DotVpnService::class.java)
+            .setAction(DotVpnService.ACTION_DISCONNECT)
+        application.startService(intent)
     }
 
     fun onVpnPermissionDenied() {
