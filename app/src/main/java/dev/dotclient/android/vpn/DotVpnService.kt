@@ -4,10 +4,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.net.TrafficStats
 import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.Process
 import androidx.core.app.NotificationCompat
 import dev.dotclient.android.MainActivity
 import libXray.DialerController
@@ -15,9 +17,13 @@ import libXray.LibXray
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 class DotVpnService : VpnService() {
     private val worker = Executors.newSingleThreadExecutor()
+    private val trafficWorker = Executors.newSingleThreadScheduledExecutor()
+    private var trafficFuture: ScheduledFuture<*>? = null
     private var tun: ParcelFileDescriptor? = null
     private var runningNodeName: String? = null
 
@@ -47,6 +53,7 @@ class DotVpnService : VpnService() {
     override fun onDestroy() {
         shutdownCore()
         worker.shutdownNow()
+        trafficWorker.shutdownNow()
         super.onDestroy()
     }
 
@@ -86,8 +93,7 @@ class DotVpnService : VpnService() {
                 invokeRunXrayFromJson(config)
 
                 VpnRuntime.update(VpnConnectionState.CONNECTED, nodeName, "connected")
-                val manager = getSystemService(NotificationManager::class.java)
-                manager.notify(NOTIFICATION_ID, notification("connected", nodeName))
+                startTrafficMeter(nodeName)
             } catch (error: Throwable) {
                 val message = error.message ?: error.javaClass.simpleName
                 shutdownCore()
@@ -97,6 +103,47 @@ class DotVpnService : VpnService() {
             }
         }
     }
+
+    private fun startTrafficMeter(nodeName: String?) {
+        trafficFuture?.cancel(true)
+
+        val uid = Process.myUid()
+        val baselineRx = uidRxBytes(uid)
+        val baselineTx = uidTxBytes(uid)
+        var previousRx = baselineRx
+        var previousTx = baselineTx
+        var previousAt = System.nanoTime()
+
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(NOTIFICATION_ID, notification("connected", nodeName, 0L, 0L))
+
+        trafficFuture = trafficWorker.scheduleAtFixedRate({
+            val now = System.nanoTime()
+            val rx = uidRxBytes(uid)
+            val tx = uidTxBytes(uid)
+            val elapsedSeconds = ((now - previousAt).coerceAtLeast(1L) / 1_000_000_000.0).coerceAtLeast(0.001)
+
+            val downRate = ((rx - previousRx).coerceAtLeast(0L) / elapsedSeconds).toLong()
+            val upRate = ((tx - previousTx).coerceAtLeast(0L) / elapsedSeconds).toLong()
+            val sessionDown = (rx - baselineRx).coerceAtLeast(0L)
+            val sessionUp = (tx - baselineTx).coerceAtLeast(0L)
+
+            previousRx = rx
+            previousTx = tx
+            previousAt = now
+
+            VpnRuntime.updateTraffic(
+                downloadBytesPerSecond = downRate,
+                uploadBytesPerSecond = upRate,
+                sessionDownloadBytes = sessionDown,
+                sessionUploadBytes = sessionUp,
+            )
+            manager.notify(NOTIFICATION_ID, notification("connected", nodeName, downRate, upRate))
+        }, 1L, 1L, TimeUnit.SECONDS)
+    }
+
+    private fun uidRxBytes(uid: Int): Long = TrafficStats.getUidRxBytes(uid).takeIf { it >= 0L } ?: 0L
+    private fun uidTxBytes(uid: Int): Long = TrafficStats.getUidTxBytes(uid).takeIf { it >= 0L } ?: 0L
 
     private fun buildXrayConfig(rawUri: String, tunFd: Int): String {
         val conversionRequest = JSONObject()
@@ -118,9 +165,6 @@ class DotVpnService : VpnService() {
         config.optJSONArray("outbounds")?.let { outbounds ->
             for (index in 0 until outbounds.length()) {
                 val outbound = outbounds.optJSONObject(index) ?: continue
-
-                // libXray uses sendThrough as temporary storage for a display name.
-                // Xray interprets it as a local source IP, so it must not reach core.
                 outbound.remove("sendThrough")
 
                 val stream = outbound.optJSONObject("streamSettings") ?: continue
@@ -130,10 +174,6 @@ class DotVpnService : VpnService() {
                     stream.put("realitySettings", it)
                 }
 
-                // v26.7.28 serializes zero-valued server-side REALITY members as JSON null.
-                // Xray treats the mere presence of dest/target as a server config and then
-                // asks for serverNames/privateKey/shortIds. This is a client outbound, so
-                // strip every server-only member and restore client values from the share URI.
                 SERVER_ONLY_REALITY_KEYS.forEach(reality::remove)
 
                 shareUri.getQueryParameter("fp")?.takeIf { it.isNotBlank() }?.let {
@@ -199,6 +239,8 @@ class DotVpnService : VpnService() {
     }
 
     private fun shutdownCore() {
+        trafficFuture?.cancel(true)
+        trafficFuture = null
         runCatching {
             val request = JSONObject()
                 .put("apiVersion", LIBXRAY_API_VERSION)
@@ -212,7 +254,12 @@ class DotVpnService : VpnService() {
         runningNodeName = null
     }
 
-    private fun notification(status: String, nodeName: String?): android.app.Notification {
+    private fun notification(
+        status: String,
+        nodeName: String?,
+        downloadBytesPerSecond: Long = 0L,
+        uploadBytesPerSecond: Long = 0L,
+    ): android.app.Notification {
         val launchIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this,
@@ -228,15 +275,32 @@ class DotVpnService : VpnService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
+        val traffic = "↓ ${formatRate(downloadBytesPerSecond)}   ↑ ${formatRate(uploadBytesPerSecond)}"
+        val title = when (status) {
+            "connected" -> nodeName ?: "dot. VPN"
+            else -> "dot. · $status"
+        }
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)
-            .setContentTitle("dot. · $status")
-            .setContentText(nodeName ?: "VLESS")
+            .setContentTitle(title)
+            .setContentText(if (status == "connected") traffic else (nodeName ?: "VLESS"))
+            .setSubText(if (status == "connected") "dot. · connected" else null)
             .setContentIntent(pendingIntent)
             .setOngoing(status == "connected" || status == "connecting")
             .setOnlyAlertOnce(true)
+            .setSilent(true)
             .addAction(0, "Disconnect", disconnectPending)
             .build()
+    }
+
+    private fun formatRate(bytesPerSecond: Long): String {
+        val value = bytesPerSecond.coerceAtLeast(0L).toDouble()
+        return when {
+            value >= 1024.0 * 1024.0 -> String.format("%.1f MB/s", value / (1024.0 * 1024.0))
+            value >= 1024.0 -> String.format("%.0f KB/s", value / 1024.0)
+            else -> "${value.toLong()} B/s"
+        }
     }
 
     private fun createNotificationChannel() {
