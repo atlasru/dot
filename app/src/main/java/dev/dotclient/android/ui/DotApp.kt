@@ -49,6 +49,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.dotclient.android.BuildConfig
 import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.vpn.VpnConnectionState
 import kotlin.math.max
 
 private enum class Screen { HOME, NODES, SETTINGS }
@@ -70,12 +71,21 @@ fun DotApp(viewModel: MainViewModel) {
     }
 
     val requestConnect = {
-        if (viewModel.requestVpnPermission()) {
-            val permissionIntent = VpnService.prepare(context)
-            if (permissionIntent != null) {
-                vpnPermissionLauncher.launch(permissionIntent)
-            } else {
-                viewModel.onVpnPermissionGranted()
+        when (state.vpnState) {
+            VpnConnectionState.CONNECTED,
+            VpnConnectionState.CONNECTING,
+            VpnConnectionState.DISCONNECTING -> viewModel.disconnect()
+
+            VpnConnectionState.DISCONNECTED,
+            VpnConnectionState.ERROR -> {
+                if (viewModel.requestVpnPermission()) {
+                    val permissionIntent = VpnService.prepare(context)
+                    if (permissionIntent != null) {
+                        vpnPermissionLauncher.launch(permissionIntent)
+                    } else {
+                        viewModel.onVpnPermissionGranted()
+                    }
+                }
             }
         }
     }
@@ -143,7 +153,7 @@ private fun HomeScreen(
             modifier = Modifier.size(96.dp).border(1.dp, Color.White, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            if (state.requestingVpnPermission) {
+            if (state.requestingVpnPermission || state.vpnBusy) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(34.dp),
                     strokeWidth = 1.5.dp,
@@ -152,7 +162,7 @@ private fun HomeScreen(
             } else {
                 Box(
                     Modifier.size(14.dp).background(
-                        if (state.vpnPermissionGranted) Color(0xFF7A7A7A) else Color.White,
+                        if (state.vpnConnected) Color.White else Color(0xFF7A7A7A),
                         CircleShape,
                     )
                 )
@@ -161,7 +171,14 @@ private fun HomeScreen(
 
         Spacer(Modifier.height(22.dp))
         Text(
-            text = if (state.requestingVpnPermission) "permission" else "offline",
+            text = when {
+                state.requestingVpnPermission -> "permission"
+                state.vpnState == VpnConnectionState.CONNECTING -> "connecting"
+                state.vpnState == VpnConnectionState.CONNECTED -> "connected"
+                state.vpnState == VpnConnectionState.DISCONNECTING -> "disconnecting"
+                state.vpnState == VpnConnectionState.ERROR -> "error"
+                else -> "offline"
+            },
             style = MaterialTheme.typography.titleLarge,
         )
 
@@ -184,7 +201,7 @@ private fun HomeScreen(
         Spacer(Modifier.height(12.dp))
         Button(
             onClick = onConnect,
-            enabled = !state.loading && !state.requestingVpnPermission,
+            enabled = !state.loading && !state.requestingVpnPermission && !state.vpnBusy,
             colors = ButtonDefaults.buttonColors(
                 containerColor = Color.White,
                 contentColor = Color.Black,
@@ -194,7 +211,10 @@ private fun HomeScreen(
             shape = RoundedCornerShape(2.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("CONNECT", style = MaterialTheme.typography.labelLarge)
+            Text(
+                if (state.vpnConnected) "DISCONNECT" else "CONNECT",
+                style = MaterialTheme.typography.labelLarge,
+            )
         }
 
         Spacer(Modifier.height(12.dp))
