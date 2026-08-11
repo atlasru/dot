@@ -2,6 +2,7 @@ package dev.dotclient.android.ui
 
 import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.vpn.VpnConnectionState
 
 data class DotUiState(
     val subscriptions: List<Subscription> = emptyList(),
@@ -9,6 +10,7 @@ data class DotUiState(
     val loadingSubscriptionId: String? = null,
     val requestingVpnPermission: Boolean = false,
     val vpnPermissionGranted: Boolean = false,
+    val vpnState: VpnConnectionState = VpnConnectionState.DISCONNECTED,
     val message: String? = null,
 ) {
     val selectedSubscription: Subscription?
@@ -25,4 +27,10 @@ data class DotUiState(
 
     val loading: Boolean
         get() = loadingSubscriptionId != null
+
+    val vpnBusy: Boolean
+        get() = vpnState == VpnConnectionState.CONNECTING || vpnState == VpnConnectionState.DISCONNECTING
+
+    val vpnConnected: Boolean
+        get() = vpnState == VpnConnectionState.CONNECTED
 }
