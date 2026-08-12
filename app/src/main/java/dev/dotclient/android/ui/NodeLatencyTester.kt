@@ -2,8 +2,6 @@ package dev.dotclient.android.ui
 
 import android.content.Context
 import android.net.Uri
-import dev.dotclient.android.vpn.VpnConnectionState
-import dev.dotclient.android.vpn.VpnRuntime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import libXray.LibXray
@@ -15,11 +13,6 @@ import java.util.UUID
 class NodeLatencyTester(private val context: Context) {
     suspend fun test(rawUri: String): Result<Long> = withContext(Dispatchers.IO) {
         runCatching {
-            val vpnState = VpnRuntime.state.value.state
-            if (vpnState != VpnConnectionState.DISCONNECTED && vpnState != VpnConnectionState.ERROR) {
-                error("disconnect VPN before url test")
-            }
-
             val config = convertProfile(rawUri)
             val file = File(context.cacheDir, "dot-url-test-${UUID.randomUUID()}.json")
             try {

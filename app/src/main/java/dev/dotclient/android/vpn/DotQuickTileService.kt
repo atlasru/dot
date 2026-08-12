@@ -1,6 +1,8 @@
 package dev.dotclient.android.vpn
 
 import android.app.PendingIntent
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
@@ -18,26 +20,20 @@ class DotQuickTileService : TileService() {
 
     override fun onClick() {
         super.onClick()
-
         when (VpnRuntime.state.value.state) {
             VpnConnectionState.CONNECTED,
             VpnConnectionState.CONNECTING,
             VpnConnectionState.DISCONNECTING -> {
-                startService(
-                    Intent(this, DotVpnService::class.java)
-                        .setAction(DotVpnService.ACTION_DISCONNECT),
-                )
+                startService(Intent(this, DotVpnService::class.java).setAction(DotVpnService.ACTION_DISCONNECT))
                 setTileState(Tile.STATE_INACTIVE, "dot.", "disconnecting")
             }
-
             VpnConnectionState.DISCONNECTED,
             VpnConnectionState.ERROR -> connectSelectedNode()
         }
     }
 
     private fun connectSelectedNode() {
-        val permissionIntent = VpnService.prepare(this)
-        if (permissionIntent != null) {
+        if (VpnService.prepare(this) != null) {
             openApp()
             return
         }
@@ -53,11 +49,13 @@ class DotQuickTileService : TileService() {
             return
         }
 
-        val intent = Intent(this, DotVpnService::class.java)
-            .setAction(DotVpnService.ACTION_CONNECT)
-            .putExtra(DotVpnService.EXTRA_VLESS_URI, profile.rawUri)
-            .putExtra(DotVpnService.EXTRA_NODE_NAME, profile.name)
-        ContextCompat.startForegroundService(this, intent)
+        ContextCompat.startForegroundService(
+            this,
+            Intent(this, DotVpnService::class.java)
+                .setAction(DotVpnService.ACTION_CONNECT)
+                .putExtra(DotVpnService.EXTRA_VLESS_URI, profile.rawUri)
+                .putExtra(DotVpnService.EXTRA_NODE_NAME, profile.name),
+        )
         setTileState(Tile.STATE_ACTIVE, "dot.", profile.name)
     }
 
@@ -84,9 +82,7 @@ class DotQuickTileService : TileService() {
         qsTile?.let { tile ->
             tile.state = state
             tile.label = label
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                tile.subtitle = subtitle
-            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) tile.subtitle = subtitle
             tile.contentDescription = "$label · $subtitle"
             tile.updateTile()
         }
@@ -98,15 +94,21 @@ class DotQuickTileService : TileService() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             val pendingIntent = PendingIntent.getActivity(
-                this,
-                2001,
-                intent,
+                this, 2001, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             startActivityAndCollapse(pendingIntent)
         } else {
             @Suppress("DEPRECATION")
             startActivityAndCollapse(intent)
+        }
+    }
+
+    companion object {
+        fun requestRefresh(context: Context) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                requestListeningState(context, ComponentName(context, DotQuickTileService::class.java))
+            }
         }
     }
 }

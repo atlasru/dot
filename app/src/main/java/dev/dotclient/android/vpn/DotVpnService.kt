@@ -1,5 +1,6 @@
 package dev.dotclient.android.vpn
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -7,12 +8,12 @@ import android.content.Intent
 import android.net.TrafficStats
 import android.net.Uri
 import android.net.VpnService
-import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.Process
-import androidx.core.app.NotificationCompat
 import dev.dotclient.android.MainActivity
 import dev.dotclient.android.R
+import dev.dotclient.android.ui.LauncherIcon
+import dev.dotclient.android.ui.LauncherIconManager
 import libXray.DialerController
 import libXray.LibXray
 import org.json.JSONArray
@@ -40,10 +41,17 @@ class DotVpnService : VpnService() {
                 val rawUri = intent.getStringExtra(EXTRA_VLESS_URI)
                 val nodeName = intent.getStringExtra(EXTRA_NODE_NAME)
                 if (rawUri.isNullOrBlank()) {
-                    VpnRuntime.update(VpnConnectionState.ERROR, message = "missing VLESS profile")
+                    publishState(VpnConnectionState.ERROR, message = "missing VLESS profile")
                     stopSelf()
                 } else {
-                    startForeground(NOTIFICATION_ID, notification("connecting", nodeName))
+                    // Foreground startup must never depend on a user-selected icon. Android gives a
+                    // foreground service only a very small window to post a valid notification, so
+                    // always bootstrap with the long-tested shield vector and switch the glyph only
+                    // after Xray is actually connected.
+                    startForeground(
+                        NOTIFICATION_ID,
+                        notification("connecting", nodeName, preferSelectedIcon = false),
+                    )
                     worker.execute { connect(rawUri, nodeName) }
                 }
             }
@@ -67,7 +75,7 @@ class DotVpnService : VpnService() {
         synchronized(this) {
             shutdownCore()
             runningNodeName = nodeName
-            VpnRuntime.update(VpnConnectionState.CONNECTING, nodeName, "starting libXray…")
+            publishState(VpnConnectionState.CONNECTING, nodeName, "starting libXray…")
 
             try {
                 val vpnInterface = Builder()
@@ -93,12 +101,12 @@ class DotVpnService : VpnService() {
                 val config = buildXrayConfig(rawUri, vpnInterface.fd)
                 invokeRunXrayFromJson(config)
 
-                VpnRuntime.update(VpnConnectionState.CONNECTED, nodeName, "connected")
+                publishState(VpnConnectionState.CONNECTED, nodeName, "connected")
                 startTrafficMeter(nodeName)
             } catch (error: Throwable) {
                 val message = error.message ?: error.javaClass.simpleName
                 shutdownCore()
-                VpnRuntime.update(VpnConnectionState.ERROR, nodeName, message)
+                publishState(VpnConnectionState.ERROR, nodeName, message)
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
@@ -107,28 +115,27 @@ class DotVpnService : VpnService() {
 
     private fun startTrafficMeter(nodeName: String?) {
         trafficFuture?.cancel(true)
-
         val uid = Process.myUid()
         val baselineRx = uidRxBytes(uid)
         val baselineTx = uidTxBytes(uid)
         var previousRx = baselineRx
         var previousTx = baselineTx
         var previousAt = System.nanoTime()
-
         val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, notification("connected", nodeName, 0L, 0L))
+        manager.notify(
+            NOTIFICATION_ID,
+            notification("connected", nodeName, 0L, 0L, preferSelectedIcon = true),
+        )
 
         trafficFuture = trafficWorker.scheduleAtFixedRate({
             val now = System.nanoTime()
             val rx = uidRxBytes(uid)
             val tx = uidTxBytes(uid)
             val elapsedSeconds = ((now - previousAt).coerceAtLeast(1L) / 1_000_000_000.0).coerceAtLeast(0.001)
-
             val downRate = ((rx - previousRx).coerceAtLeast(0L) / elapsedSeconds).toLong()
             val upRate = ((tx - previousTx).coerceAtLeast(0L) / elapsedSeconds).toLong()
             val sessionDown = (rx - baselineRx).coerceAtLeast(0L)
             val sessionUp = (tx - baselineTx).coerceAtLeast(0L)
-
             previousRx = rx
             previousTx = tx
             previousAt = now
@@ -139,7 +146,10 @@ class DotVpnService : VpnService() {
                 sessionDownloadBytes = sessionDown,
                 sessionUploadBytes = sessionUp,
             )
-            manager.notify(NOTIFICATION_ID, notification("connected", nodeName, downRate, upRate))
+            manager.notify(
+                NOTIFICATION_ID,
+                notification("connected", nodeName, downRate, upRate, preferSelectedIcon = true),
+            )
         }, 1L, 1L, TimeUnit.SECONDS)
     }
 
@@ -151,15 +161,12 @@ class DotVpnService : VpnService() {
             .put("apiVersion", LIBXRAY_API_VERSION)
             .put("method", "convertShareLinksToXrayJson")
             .put("payload", JSONObject().put("text", rawUri))
-
         val conversionResponse = JSONObject(LibXray.invoke(conversionRequest.toString()))
         if (!conversionResponse.optBoolean("success")) {
             error(conversionResponse.optString("error", "failed to convert VLESS link"))
         }
-
         val generatedJson = conversionResponse.optString("data")
         if (generatedJson.isBlank()) error("libXray returned an empty config")
-
         val config = JSONObject(generatedJson)
         val shareUri = Uri.parse(rawUri)
 
@@ -167,52 +174,29 @@ class DotVpnService : VpnService() {
             for (index in 0 until outbounds.length()) {
                 val outbound = outbounds.optJSONObject(index) ?: continue
                 outbound.remove("sendThrough")
-
                 val stream = outbound.optJSONObject("streamSettings") ?: continue
                 if (!stream.optString("security").equals("reality", ignoreCase = true)) continue
-
-                val reality = stream.optJSONObject("realitySettings") ?: JSONObject().also {
-                    stream.put("realitySettings", it)
-                }
-
+                val reality = stream.optJSONObject("realitySettings") ?: JSONObject().also { stream.put("realitySettings", it) }
                 SERVER_ONLY_REALITY_KEYS.forEach(reality::remove)
-
-                shareUri.getQueryParameter("fp")?.takeIf { it.isNotBlank() }?.let {
-                    reality.put("fingerprint", it)
-                }
-                shareUri.getQueryParameter("sni")?.takeIf { it.isNotBlank() }?.let {
-                    reality.put("serverName", it)
-                }
+                shareUri.getQueryParameter("fp")?.takeIf { it.isNotBlank() }?.let { reality.put("fingerprint", it) }
+                shareUri.getQueryParameter("sni")?.takeIf { it.isNotBlank() }?.let { reality.put("serverName", it) }
                 shareUri.getQueryParameter("pbk")?.takeIf { it.isNotBlank() }?.let {
                     reality.put("password", it)
                     reality.put("publicKey", it)
                 }
-                shareUri.getQueryParameter("sid")?.let {
-                    reality.put("shortId", it)
-                }
-                shareUri.getQueryParameter("spx")?.takeIf { it.isNotBlank() }?.let {
-                    reality.put("spiderX", it)
-                }
-                shareUri.getQueryParameter("pqv")?.takeIf { it.isNotBlank() }?.let {
-                    reality.put("mldsa65Verify", it)
-                }
+                shareUri.getQueryParameter("sid")?.let { reality.put("shortId", it) }
+                shareUri.getQueryParameter("spx")?.takeIf { it.isNotBlank() }?.let { reality.put("spiderX", it) }
+                shareUri.getQueryParameter("pqv")?.takeIf { it.isNotBlank() }?.let { reality.put("mldsa65Verify", it) }
             }
         }
 
         val env = config.optJSONObject("env") ?: JSONObject()
         env.put("xray.tun.fd", tunFd.toString())
         config.put("env", env)
-
         val tunInbound = JSONObject()
             .put("tag", "dot-tun")
             .put("protocol", "tun")
-            .put(
-                "settings",
-                JSONObject()
-                    .put("name", "dot0")
-                    .put("mtu", MTU),
-            )
-
+            .put("settings", JSONObject().put("name", "dot0").put("mtu", MTU))
         config.put("inbounds", JSONArray().put(tunInbound))
         config.put("log", JSONObject().put("loglevel", "warning"))
         return config.toString()
@@ -224,19 +208,22 @@ class DotVpnService : VpnService() {
             .put("method", "runXrayFromJson")
             .put("payload", JSONObject().put("configJSON", config))
         val response = JSONObject(LibXray.invoke(request.toString()))
-        if (!response.optBoolean("success")) {
-            error(response.optString("error", "runXrayFromJson failed"))
-        }
+        if (!response.optBoolean("success")) error(response.optString("error", "runXrayFromJson failed"))
     }
 
     private fun disconnect() {
         worker.execute {
-            VpnRuntime.update(VpnConnectionState.DISCONNECTING, runningNodeName, "disconnecting…")
+            publishState(VpnConnectionState.DISCONNECTING, runningNodeName, "disconnecting…")
             shutdownCore()
-            VpnRuntime.update(VpnConnectionState.DISCONNECTED, null, "disconnected")
+            publishState(VpnConnectionState.DISCONNECTED, null, "disconnected")
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
+    }
+
+    private fun publishState(state: VpnConnectionState, nodeName: String? = null, message: String? = null) {
+        VpnRuntime.update(state, nodeName, message)
+        runCatching { DotQuickTileService.requestRefresh(this) }
     }
 
     private fun shutdownCore() {
@@ -255,44 +242,61 @@ class DotVpnService : VpnService() {
         runningNodeName = null
     }
 
+    @Suppress("DEPRECATION")
     private fun notification(
         status: String,
         nodeName: String?,
         downloadBytesPerSecond: Long = 0L,
         uploadBytesPerSecond: Long = 0L,
-    ): android.app.Notification {
+        preferSelectedIcon: Boolean,
+    ): Notification {
+        val preferredIcon = if (preferSelectedIcon) notificationIconRes() else SAFE_NOTIFICATION_ICON
+        return runCatching {
+            buildNotification(status, nodeName, downloadBytesPerSecond, uploadBytesPerSecond, preferredIcon)
+        }.getOrElse {
+            // A cosmetic icon failure must never be able to take down the VPN service.
+            buildNotification(status, nodeName, downloadBytesPerSecond, uploadBytesPerSecond, SAFE_NOTIFICATION_ICON)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun buildNotification(
+        status: String,
+        nodeName: String?,
+        downloadBytesPerSecond: Long,
+        uploadBytesPerSecond: Long,
+        smallIconRes: Int,
+    ): Notification {
         val launchIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            launchIntent,
+            this, 0, launchIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val disconnectIntent = Intent(this, DotVpnService::class.java).setAction(ACTION_DISCONNECT)
         val disconnectPending = PendingIntent.getService(
-            this,
-            1,
-            disconnectIntent,
+            this, 1, disconnectIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-
         val traffic = "↓ ${formatRate(downloadBytesPerSecond)}   ↑ ${formatRate(uploadBytesPerSecond)}"
-        val title = when (status) {
-            "connected" -> nodeName ?: "dot. VPN"
-            else -> "dot. · $status"
-        }
+        val title = if (status == "connected") nodeName ?: "dot. VPN" else "dot. · $status"
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification_dot)
+        return Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(smallIconRes)
             .setContentTitle(title)
             .setContentText(if (status == "connected") traffic else (nodeName ?: "VLESS"))
             .setSubText(if (status == "connected") "dot. · connected" else null)
             .setContentIntent(pendingIntent)
             .setOngoing(status == "connected" || status == "connecting")
             .setOnlyAlertOnce(true)
-            .setSilent(true)
+            .setSound(null)
             .addAction(0, "Disconnect", disconnectPending)
             .build()
+    }
+
+    private fun notificationIconRes(): Int = when (LauncherIconManager.current(this)) {
+        LauncherIcon.SHIELD -> R.drawable.ic_notification_dot
+        LauncherIcon.RED_DOT -> R.drawable.ic_notification_red_dot
+        LauncherIcon.WORDMARK -> R.drawable.ic_notification_wordmark
     }
 
     private fun formatRate(bytesPerSecond: Long): String {
@@ -305,16 +309,9 @@ class DotVpnService : VpnService() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "dot. VPN",
-                    NotificationManager.IMPORTANCE_LOW,
-                ),
-            )
-        }
+        getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, "dot. VPN", NotificationManager.IMPORTANCE_LOW),
+        )
     }
 
     companion object {
@@ -326,21 +323,10 @@ class DotVpnService : VpnService() {
         private const val CHANNEL_ID = "dot_vpn"
         private const val NOTIFICATION_ID = 1001
         private const val MTU = 1500
-
+        private val SAFE_NOTIFICATION_ICON = R.drawable.ic_notification_dot
         private val SERVER_ONLY_REALITY_KEYS = listOf(
-            "target",
-            "dest",
-            "type",
-            "xver",
-            "serverNames",
-            "privateKey",
-            "minClientVer",
-            "maxClientVer",
-            "maxTimeDiff",
-            "shortIds",
-            "mldsa65Seed",
-            "limitFallbackUpload",
-            "limitFallbackDownload",
+            "target", "dest", "type", "xver", "serverNames", "privateKey", "minClientVer", "maxClientVer",
+            "maxTimeDiff", "shortIds", "mldsa65Seed", "limitFallbackUpload", "limitFallbackDownload",
         )
     }
 }

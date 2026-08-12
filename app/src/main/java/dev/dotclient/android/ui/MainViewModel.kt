@@ -46,6 +46,9 @@ class MainViewModel(
                         sessionDownloadBytes = runtime.sessionDownloadBytes,
                         sessionUploadBytes = runtime.sessionUploadBytes,
                         runningNodeName = runtime.nodeName,
+                        connectionTestRunning = if (runtime.state == VpnConnectionState.CONNECTED) it.connectionTestRunning else false,
+                        connectionTestLatencyMs = if (runtime.state == VpnConnectionState.CONNECTED) it.connectionTestLatencyMs else null,
+                        connectionTestError = if (runtime.state == VpnConnectionState.CONNECTED) it.connectionTestError else null,
                     )
                 }
             }
@@ -222,6 +225,8 @@ class MainViewModel(
                 vpnPermissionGranted = true,
                 vpnState = VpnConnectionState.CONNECTING,
                 message = "starting VLESS tunnel…",
+                connectionTestLatencyMs = null,
+                connectionTestError = null,
             )
         }
 
@@ -238,6 +243,9 @@ class MainViewModel(
             it.copy(
                 vpnState = VpnConnectionState.DISCONNECTING,
                 message = "disconnecting…",
+                connectionTestRunning = false,
+                connectionTestLatencyMs = null,
+                connectionTestError = null,
             )
         }
         val application = getApplication<Application>()
@@ -288,11 +296,7 @@ class MainViewModel(
 
     fun testAllNodes() {
         val profiles = state.value.profiles
-        if (profiles.isEmpty()) return
-        if (state.value.vpnState != VpnConnectionState.DISCONNECTED && state.value.vpnState != VpnConnectionState.ERROR) {
-            mutableState.update { it.copy(message = "disconnect VPN before url test") }
-            return
-        }
+        if (profiles.isEmpty() || state.value.testingNodeIds.isNotEmpty()) return
         viewModelScope.launch {
             mutableState.update { it.copy(testingNodeIds = it.testingNodeIds + profiles.map { p -> p.id }) }
             for (profile in profiles) {
@@ -313,6 +317,53 @@ class MainViewModel(
         }
     }
 
+    fun testConnection() {
+        val current = state.value
+        if (!current.vpnConnected || current.connectionTestRunning) return
+
+        val runningProfile = current.subscriptions
+            .asSequence()
+            .flatMap { it.profiles.asSequence() }
+            .firstOrNull { it.name == current.runningNodeName }
+            ?: current.selectedProfile
+
+        if (runningProfile == null) {
+            mutableState.update { it.copy(connectionTestError = "active node is unavailable") }
+            return
+        }
+
+        viewModelScope.launch {
+            mutableState.update {
+                it.copy(
+                    connectionTestRunning = true,
+                    connectionTestLatencyMs = null,
+                    connectionTestError = null,
+                )
+            }
+
+            nodeLatencyTester.test(runningProfile.rawUri)
+                .onSuccess { latency ->
+                    mutableState.update {
+                        it.copy(
+                            connectionTestRunning = false,
+                            connectionTestLatencyMs = latency,
+                            connectionTestError = null,
+                            nodeLatenciesMs = it.nodeLatenciesMs + (runningProfile.id to latency),
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update {
+                        it.copy(
+                            connectionTestRunning = false,
+                            connectionTestLatencyMs = null,
+                            connectionTestError = error.message ?: "connection test failed",
+                        )
+                    }
+                }
+        }
+    }
+
     fun switchProfile(id: String) {
         val group = state.value.selectedSubscription ?: return
         val profile = group.profiles.firstOrNull { it.id == id } ?: return
@@ -323,6 +374,9 @@ class MainViewModel(
             it.copy(
                 vpnState = VpnConnectionState.CONNECTING,
                 message = "switching to ${profile.name}…",
+                connectionTestRunning = false,
+                connectionTestLatencyMs = null,
+                connectionTestError = null,
             )
         }
         val application = getApplication<Application>()
