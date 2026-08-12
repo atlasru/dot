@@ -189,15 +189,9 @@ class DotVpnService : VpnService() {
                     reality.put("password", it)
                     reality.put("publicKey", it)
                 }
-                shareUri.getQueryParameter("sid")?.let {
-                    reality.put("shortId", it)
-                }
-                shareUri.getQueryParameter("spx")?.takeIf { it.isNotBlank() }?.let {
-                    reality.put("spiderX", it)
-                }
-                shareUri.getQueryParameter("pqv")?.takeIf { it.isNotBlank() }?.let {
-                    reality.put("mldsa65Verify", it)
-                }
+                shareUri.getQueryParameter("sid")?.let { reality.put("shortId", it) }
+                shareUri.getQueryParameter("spx")?.takeIf { it.isNotBlank() }?.let { reality.put("spiderX", it) }
+                shareUri.getQueryParameter("pqv")?.takeIf { it.isNotBlank() }?.let { reality.put("mldsa65Verify", it) }
             }
         }
 
@@ -208,12 +202,7 @@ class DotVpnService : VpnService() {
         val tunInbound = JSONObject()
             .put("tag", "dot-tun")
             .put("protocol", "tun")
-            .put(
-                "settings",
-                JSONObject()
-                    .put("name", "dot0")
-                    .put("mtu", MTU),
-            )
+            .put("settings", JSONObject().put("name", "dot0").put("mtu", MTU))
 
         config.put("inbounds", JSONArray().put(tunInbound))
         config.put("log", JSONObject().put("loglevel", "warning"))
@@ -226,9 +215,7 @@ class DotVpnService : VpnService() {
             .put("method", "runXrayFromJson")
             .put("payload", JSONObject().put("configJSON", config))
         val response = JSONObject(LibXray.invoke(request.toString()))
-        if (!response.optBoolean("success")) {
-            error(response.optString("error", "runXrayFromJson failed"))
-        }
+        if (!response.optBoolean("success")) error(response.optString("error", "runXrayFromJson failed"))
     }
 
     private fun disconnect() {
@@ -241,11 +228,7 @@ class DotVpnService : VpnService() {
         }
     }
 
-    private fun publishState(
-        state: VpnConnectionState,
-        nodeName: String? = null,
-        message: String? = null,
-    ) {
+    private fun publishState(state: VpnConnectionState, nodeName: String? = null, message: String? = null) {
         VpnRuntime.update(state, nodeName, message)
         runCatching { DotQuickTileService.requestRefresh(this) }
     }
@@ -273,25 +256,12 @@ class DotVpnService : VpnService() {
         uploadBytesPerSecond: Long = 0L,
     ): android.app.Notification {
         val launchIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            launchIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
+        val pendingIntent = PendingIntent.getActivity(this, 0, launchIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val disconnectIntent = Intent(this, DotVpnService::class.java).setAction(ACTION_DISCONNECT)
-        val disconnectPending = PendingIntent.getService(
-            this,
-            1,
-            disconnectIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
+        val disconnectPending = PendingIntent.getService(this, 1, disconnectIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val traffic = "↓ ${formatRate(downloadBytesPerSecond)}   ↑ ${formatRate(uploadBytesPerSecond)}"
-        val title = when (status) {
-            "connected" -> nodeName ?: "dot. VPN"
-            else -> "dot. · $status"
-        }
+        val title = if (status == "connected") nodeName ?: "dot. VPN" else "dot. · $status"
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(notificationIcon())
@@ -306,6 +276,8 @@ class DotVpnService : VpnService() {
             .build()
     }
 
+    // red dot / wordmark masks are generated at build time directly from the user's
+    // launcher bitmap resources. No hand-drawn replacement artwork is involved.
     private fun notificationIcon(): Int = when (LauncherIconManager.current(this)) {
         LauncherIcon.SHIELD -> R.drawable.ic_notification_dot
         LauncherIcon.RED_DOT -> R.drawable.ic_notification_red_dot
@@ -323,13 +295,8 @@ class DotVpnService : VpnService() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "dot. VPN",
-                    NotificationManager.IMPORTANCE_LOW,
-                ),
+            getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "dot. VPN", NotificationManager.IMPORTANCE_LOW),
             )
         }
     }
@@ -345,19 +312,8 @@ class DotVpnService : VpnService() {
         private const val MTU = 1500
 
         private val SERVER_ONLY_REALITY_KEYS = listOf(
-            "target",
-            "dest",
-            "type",
-            "xver",
-            "serverNames",
-            "privateKey",
-            "minClientVer",
-            "maxClientVer",
-            "maxTimeDiff",
-            "shortIds",
-            "mldsa65Seed",
-            "limitFallbackUpload",
-            "limitFallbackDownload",
+            "target", "dest", "type", "xver", "serverNames", "privateKey", "minClientVer", "maxClientVer",
+            "maxTimeDiff", "shortIds", "mldsa65Seed", "limitFallbackUpload", "limitFallbackDownload",
         )
     }
 }
