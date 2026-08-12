@@ -47,7 +47,9 @@ jobs:
       - name: Generate Windows icons
         run: npm run icons
 
-      - name: Rust unit tests
+      - name: Rust unit and Xray compatibility tests
+        env:
+          DOT_XRAY_EXE: ${{ github.workspace }}\desktop\src-tauri\runtime\xray.exe
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: Frontend build
@@ -61,3 +63,11 @@ jobs:
         with:
           name: dot-desktop-alpha
           path: desktop/src-tauri/target/debug/dot-desktop.exe
+
+      - name: Upload dependency locks for bootstrap
+        uses: actions/upload-artifact@v4
+        with:
+          name: dot-desktop-lockfiles
+          path: |
+            desktop/package-lock.json
+            desktop/src-tauri/Cargo.lock
