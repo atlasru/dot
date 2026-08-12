@@ -13,6 +13,8 @@ import android.os.Process
 import androidx.core.app.NotificationCompat
 import dev.dotclient.android.MainActivity
 import dev.dotclient.android.R
+import dev.dotclient.android.ui.LauncherIcon
+import dev.dotclient.android.ui.LauncherIconManager
 import libXray.DialerController
 import libXray.LibXray
 import org.json.JSONArray
@@ -40,7 +42,7 @@ class DotVpnService : VpnService() {
                 val rawUri = intent.getStringExtra(EXTRA_VLESS_URI)
                 val nodeName = intent.getStringExtra(EXTRA_NODE_NAME)
                 if (rawUri.isNullOrBlank()) {
-                    VpnRuntime.update(VpnConnectionState.ERROR, message = "missing VLESS profile")
+                    publishState(VpnConnectionState.ERROR, message = "missing VLESS profile")
                     stopSelf()
                 } else {
                     startForeground(NOTIFICATION_ID, notification("connecting", nodeName))
@@ -67,7 +69,7 @@ class DotVpnService : VpnService() {
         synchronized(this) {
             shutdownCore()
             runningNodeName = nodeName
-            VpnRuntime.update(VpnConnectionState.CONNECTING, nodeName, "starting libXray…")
+            publishState(VpnConnectionState.CONNECTING, nodeName, "starting libXray…")
 
             try {
                 val vpnInterface = Builder()
@@ -93,12 +95,12 @@ class DotVpnService : VpnService() {
                 val config = buildXrayConfig(rawUri, vpnInterface.fd)
                 invokeRunXrayFromJson(config)
 
-                VpnRuntime.update(VpnConnectionState.CONNECTED, nodeName, "connected")
+                publishState(VpnConnectionState.CONNECTED, nodeName, "connected")
                 startTrafficMeter(nodeName)
             } catch (error: Throwable) {
                 val message = error.message ?: error.javaClass.simpleName
                 shutdownCore()
-                VpnRuntime.update(VpnConnectionState.ERROR, nodeName, message)
+                publishState(VpnConnectionState.ERROR, nodeName, message)
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
@@ -231,12 +233,21 @@ class DotVpnService : VpnService() {
 
     private fun disconnect() {
         worker.execute {
-            VpnRuntime.update(VpnConnectionState.DISCONNECTING, runningNodeName, "disconnecting…")
+            publishState(VpnConnectionState.DISCONNECTING, runningNodeName, "disconnecting…")
             shutdownCore()
-            VpnRuntime.update(VpnConnectionState.DISCONNECTED, null, "disconnected")
+            publishState(VpnConnectionState.DISCONNECTED, null, "disconnected")
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
+    }
+
+    private fun publishState(
+        state: VpnConnectionState,
+        nodeName: String? = null,
+        message: String? = null,
+    ) {
+        VpnRuntime.update(state, nodeName, message)
+        runCatching { DotQuickTileService.requestRefresh(this) }
     }
 
     private fun shutdownCore() {
@@ -283,7 +294,7 @@ class DotVpnService : VpnService() {
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification_dot)
+            .setSmallIcon(notificationIcon())
             .setContentTitle(title)
             .setContentText(if (status == "connected") traffic else (nodeName ?: "VLESS"))
             .setSubText(if (status == "connected") "dot. · connected" else null)
@@ -293,6 +304,12 @@ class DotVpnService : VpnService() {
             .setSilent(true)
             .addAction(0, "Disconnect", disconnectPending)
             .build()
+    }
+
+    private fun notificationIcon(): Int = when (LauncherIconManager.current(this)) {
+        LauncherIcon.SHIELD -> R.drawable.ic_notification_dot
+        LauncherIcon.RED_DOT -> R.drawable.ic_notification_red_dot
+        LauncherIcon.WORDMARK -> R.drawable.ic_notification_wordmark
     }
 
     private fun formatRate(bytesPerSecond: Long): String {
