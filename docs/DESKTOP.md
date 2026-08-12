@@ -2,11 +2,11 @@
 
 Desktop development is intentionally staged behind CI and is not released until the VPN path is complete and regression-tested.
 
-## Current milestone: M2 lifecycle
+## Current milestone: M3 product
 
 The Windows client uses Tauri 2 + React for the UI and a Rust backend. Xray-core v26.7.28 is pinned as a runtime dependency and is downloaded by CI rather than committed to the repository.
 
-The data path is real, not simulated:
+The VPN data path remains the M1/M2 path and is real, not simulated:
 
 ```text
 subscription URL
@@ -15,7 +15,7 @@ subscription URL
   -> VLESS parser
   -> persisted subscription group
   -> selected node
-  -> current Xray JSON generator
+  -> Xray JSON generator
   -> xray run -test
   -> Xray Windows TUN / Wintun
   -> automatic Windows routes + DNS
@@ -25,20 +25,33 @@ subscription URL
 
 `CONNECTED` is returned only after Xray remains alive through TUN startup and at least one external HTTP connectivity probe succeeds.
 
-## M2 lifecycle guarantees
-
-M2 makes the Xray process a strict child of the dot. lifetime instead of a best-effort subprocess:
+## Lifecycle guarantees
 
 - every running Xray instance is assigned to a Windows Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`;
-- if dot. is closed normally, the job is closed and the entire Xray process tree is terminated;
-- if dot. crashes or is killed through Task Manager, Windows closes the process-owned job handle and terminates the Xray process tree;
-- a session journal records the active Xray PID, executable path and selected node and is cleared on clean shutdown;
-- a stale journal is consumed on the next startup rather than being treated as a live connection;
-- a backend watchdog checks the Xray process even when the UI is idle;
-- VPN state is stored independently from the engine mutex, so status polling remains responsive while Xray/TUN is starting;
-- `DISCONNECT` is available during startup and sends a cancellation signal without waiting for the startup mutex.
+- normal exit and process crashes both close the process-owned job and terminate the Xray process tree;
+- a session journal records the active Xray PID/path/node and is cleared on clean shutdown;
+- a stale journal is consumed safely on the next startup and never kills an arbitrary process by PID;
+- a backend watchdog detects unexpected Xray exits;
+- VPN state is independent from the engine mutex, so status polling remains responsive during startup;
+- `DISCONNECT` remains available while Xray/TUN/connectivity checks are still starting.
 
-The Job Object is the cleanup authority. The session journal is bookkeeping/recovery metadata and never kills an arbitrary process by a stale PID.
+## M3 product layer
+
+M3 adds only controls backed by real backend behavior:
+
+- Home / Nodes / Settings flow in the AMOLED-first Courier/pixel style;
+- persistent selected subscription and node;
+- AMOLED, Graphite and Matrix themes;
+- native Tauri system tray;
+- left-clicking the tray icon opens/focuses dot.;
+- tray menu provides Open, Connect/Disconnect and Exit;
+- `close to tray` is a persisted setting; when enabled, closing the main window hides it without stopping the VPN;
+- subscription add/refresh and node selection are backed by the same persisted state used by tray connect;
+- realtime traffic is sampled from Windows interface counters for the `dot0` TUN, not from hardcoded values or total process traffic;
+- Home displays realtime download/upload rate, per-session byte totals and connection duration;
+- application state is committed through a temporary file followed by Windows `MoveFileExW` with replace + write-through semantics.
+
+The traffic sampler uses Windows IP Helper interface counters (`InOctets` / `OutOctets`) and resets its session baseline whenever VPN state leaves `connected`.
 
 ## Runtime files
 
@@ -65,14 +78,15 @@ The Windows application manifest requests administrator privileges because creat
 
 ## CI gates
 
-Windows CI must pass all of the following before Desktop changes are merged:
+Desktop changes must pass:
 
-1. subscription/VLESS/Rust unit tests;
+1. subscription/VLESS/Rust tests;
 2. Windows Job Object kill-on-close test;
-3. generated config validation using the pinned real `xray.exe run -test`;
-4. React/Vite frontend build;
-5. Tauri Windows executable compilation.
+3. Windows IP Helper interface-enumeration test;
+4. generated config validation using the pinned real `xray.exe run -test`;
+5. React/Vite frontend build;
+6. Tauri Windows executable compilation.
 
-## Not yet considered release-ready
+## Not yet release-ready
 
-M2 still deliberately does not advertise unfinished controls. Tray integration, traffic accounting, network-change auto-recovery, updater signing and the final installer belong to later milestones and will only appear in the UI once implemented.
+M3 is still an internal alpha. M4 must produce and test the actual installer/runtime layout, pin dependency lockfiles, introduce private release/update signing, add the updater path and exercise install/update/uninstall and network-recovery scenarios before a public Desktop release is cut.
