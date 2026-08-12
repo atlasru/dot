@@ -5,9 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.drawable.Icon
 import android.net.TrafficStats
 import android.net.Uri
 import android.net.VpnService
@@ -31,7 +28,6 @@ class DotVpnService : VpnService() {
     private var trafficFuture: ScheduledFuture<*>? = null
     private var tun: ParcelFileDescriptor? = null
     private var runningNodeName: String? = null
-    private val notificationIconCache = mutableMapOf<LauncherIcon, Icon>()
 
     override fun onCreate() {
         super.onCreate()
@@ -254,7 +250,7 @@ class DotVpnService : VpnService() {
         val title = if (status == "connected") nodeName ?: "dot. VPN" else "dot. · $status"
 
         return Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(notificationIcon())
+            .setSmallIcon(notificationIconRes())
             .setContentTitle(title)
             .setContentText(if (status == "connected") traffic else (nodeName ?: "VLESS"))
             .setSubText(if (status == "connected") "dot. · connected" else null)
@@ -266,37 +262,10 @@ class DotVpnService : VpnService() {
             .build()
     }
 
-    private fun notificationIcon(): Icon {
-        val selected = LauncherIconManager.current(this)
-        return notificationIconCache.getOrPut(selected) {
-            when (selected) {
-                LauncherIcon.SHIELD -> Icon.createWithResource(this, R.drawable.ic_notification_dot)
-                LauncherIcon.RED_DOT -> launcherBitmapMaskIcon(R.drawable.ic_launcher_red_dot_foreground)
-                LauncherIcon.WORDMARK -> launcherBitmapMaskIcon(R.drawable.ic_launcher_wordmark_foreground)
-            }
-        }
-    }
-
-    private fun launcherBitmapMaskIcon(resourceId: Int): Icon {
-        val source = BitmapFactory.decodeResource(resources, resourceId)
-            ?: return Icon.createWithResource(this, R.drawable.ic_notification_dot)
-        val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
-        val pixels = IntArray(source.width * source.height)
-        source.getPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
-        for (index in pixels.indices) {
-            val argb = pixels[index]
-            val sourceAlpha = argb ushr 24 and 0xff
-            val red = argb ushr 16 and 0xff
-            val green = argb ushr 8 and 0xff
-            val blue = argb and 0xff
-            val signal = maxOf(red, green, blue)
-            val maskAlpha = if (sourceAlpha == 0 || signal <= 20) 0
-            else (((signal - 20) * 255) / 235).coerceIn(0, 255) * sourceAlpha / 255
-            pixels[index] = (maskAlpha shl 24) or 0x00ffffff
-        }
-        output.setPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
-        source.recycle()
-        return Icon.createWithBitmap(output)
+    private fun notificationIconRes(): Int = when (LauncherIconManager.current(this)) {
+        LauncherIcon.SHIELD -> R.drawable.ic_notification_dot
+        LauncherIcon.RED_DOT -> R.drawable.ic_notification_red_dot
+        LauncherIcon.WORDMARK -> R.drawable.ic_notification_wordmark
     }
 
     private fun formatRate(bytesPerSecond: Long): String {
