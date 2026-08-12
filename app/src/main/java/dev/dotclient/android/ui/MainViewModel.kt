@@ -2,7 +2,6 @@ package dev.dotclient.android.ui
 
 import android.app.Application
 import android.content.Intent
-import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -14,16 +13,11 @@ import dev.dotclient.android.ui.theme.DotThemeMode
 import dev.dotclient.android.vpn.DotVpnService
 import dev.dotclient.android.vpn.VpnConnectionState
 import dev.dotclient.android.vpn.VpnRuntime
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.util.concurrent.TimeUnit
 
 class MainViewModel(
     application: Application,
@@ -32,12 +26,6 @@ class MainViewModel(
     private val subscriptionStore = SubscriptionStore(application)
     private val uiPreferences = application.getSharedPreferences("dot_ui", Application.MODE_PRIVATE)
     private val nodeLatencyTester = NodeLatencyTester(application)
-    private val connectionTestClient = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
-        .callTimeout(7, TimeUnit.SECONDS)
-        .followRedirects(false)
-        .build()
 
     private val mutableState = MutableStateFlow(loadInitialState())
     val state: StateFlow<DotUiState> = mutableState.asStateFlow()
@@ -330,7 +318,20 @@ class MainViewModel(
     }
 
     fun testConnection() {
-        if (!state.value.vpnConnected || state.value.connectionTestRunning) return
+        val current = state.value
+        if (!current.vpnConnected || current.connectionTestRunning) return
+
+        val runningProfile = current.subscriptions
+            .asSequence()
+            .flatMap { it.profiles.asSequence() }
+            .firstOrNull { it.name == current.runningNodeName }
+            ?: current.selectedProfile
+
+        if (runningProfile == null) {
+            mutableState.update { it.copy(connectionTestError = "active node is unavailable") }
+            return
+        }
+
         viewModelScope.launch {
             mutableState.update {
                 it.copy(
@@ -340,37 +341,26 @@ class MainViewModel(
                 )
             }
 
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val request = Request.Builder()
-                        .url(NodeLatencyTester.TEST_URL)
-                        .header("Cache-Control", "no-cache")
-                        .build()
-                    val startedAt = SystemClock.elapsedRealtime()
-                    connectionTestClient.newCall(request).execute().use { response ->
-                        if (response.code !in 200..399) error("HTTP ${response.code}")
+            nodeLatencyTester.test(runningProfile.rawUri)
+                .onSuccess { latency ->
+                    mutableState.update {
+                        it.copy(
+                            connectionTestRunning = false,
+                            connectionTestLatencyMs = latency,
+                            connectionTestError = null,
+                            nodeLatenciesMs = it.nodeLatenciesMs + (runningProfile.id to latency),
+                        )
                     }
-                    SystemClock.elapsedRealtime() - startedAt
                 }
-            }
-
-            result.onSuccess { latency ->
-                mutableState.update {
-                    it.copy(
-                        connectionTestRunning = false,
-                        connectionTestLatencyMs = latency,
-                        connectionTestError = null,
-                    )
+                .onFailure { error ->
+                    mutableState.update {
+                        it.copy(
+                            connectionTestRunning = false,
+                            connectionTestLatencyMs = null,
+                            connectionTestError = error.message ?: "connection test failed",
+                        )
+                    }
                 }
-            }.onFailure { error ->
-                mutableState.update {
-                    it.copy(
-                        connectionTestRunning = false,
-                        connectionTestLatencyMs = null,
-                        connectionTestError = error.message ?: "connection test failed",
-                    )
-                }
-            }
         }
     }
 
