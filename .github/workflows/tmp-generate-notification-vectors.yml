@@ -22,43 +22,76 @@ jobs:
         with:
           python-version: '3.12'
 
-      - run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
-          python -m pip install --disable-pip-version-check pillow
+      - run: python -m pip install --disable-pip-version-check pillow
 
-      - name: Recover launcher PNGs with ffmpeg
+      - name: Build source-derived monochrome masks
         shell: bash
         run: |
-          set -x
           mkdir -p /tmp/icon-preview
-          for f in ic_launcher_red_dot_foreground.png ic_launcher_wordmark_foreground.png; do
-            src="app/src/main/res/drawable/$f"
-            dst="/tmp/icon-preview/$f"
-            ffmpeg -y -v warning -i "$src" -frames:v 1 "$dst" || true
-            file "$src" || true
-            if [ -f "$dst" ]; then file "$dst"; fi
-          done
-
-      - name: Make visible previews
-        shell: bash
-        run: |
           python - <<'PY'
           from pathlib import Path
-          from PIL import Image
-          root=Path('/tmp/icon-preview')
-          for p in root.glob('*.png'):
-              try:
-                  im=Image.open(p).convert('RGBA')
-                  bg=Image.new('RGBA', im.size, (80,80,80,255))
-                  bg.alpha_composite(im)
-                  bg.convert('RGB').resize((640,640)).save(root/(p.stem+'_preview.jpg'), quality=95)
-                  print(p.name, im.size, im.getbbox(), im.getextrema())
-              except Exception as e:
-                  print(p.name, 'preview failed', repr(e))
+          from statistics import median
+          from PIL import Image, ImageChops, ImageFilter, ImageOps
+
+          src_root = Path('app/src/main/res/mipmap-nodpi')
+          out_root = Path('/tmp/icon-preview')
+
+          def source_mask(path: Path):
+              image = Image.open(path).convert('RGBA')
+              w, h = image.size
+              px = image.load()
+
+              border = []
+              band = max(1, min(w, h) // 24)
+              for y in range(h):
+                  for x in range(w):
+                      if x < band or y < band or x >= w-band or y >= h-band:
+                          r,g,b,a = px[x,y]
+                          if a > 8:
+                              border.append((r,g,b))
+              if border:
+                  bg = tuple(int(median([c[i] for c in border])) for i in range(3))
+              else:
+                  bg = (0,0,0)
+
+              mask = Image.new('L', (w,h), 0)
+              m = mask.load()
+              for y in range(h):
+                  for x in range(w):
+                      r,g,b,a = px[x,y]
+                      if a <= 12:
+                          continue
+                      dist = ((r-bg[0])**2 + (g-bg[1])**2 + (b-bg[2])**2) ** 0.5
+                      # Foreground is defined only by deviation from the artwork's own border/background.
+                      if dist >= 34:
+                          m[x,y] = a
+
+              # Remove isolated compression noise while preserving the supplied geometry.
+              mask = mask.filter(ImageFilter.MedianFilter(3))
+              bbox = mask.getbbox()
+              if not bbox:
+                  raise RuntimeError(f'No foreground detected in {path}')
+              return image, mask, bg, bbox
+
+          for name in ('ic_launcher_red_dot_exact.webp', 'ic_launcher_wordmark_exact.webp'):
+              image, mask, bg, bbox = source_mask(src_root/name)
+              print(name, 'size=', image.size, 'bg=', bg, 'bbox=', bbox, 'mask_extrema=', mask.getextrema())
+
+              # Source preview.
+              image.save(out_root/(name.replace('.webp', '_source.png')))
+
+              # Mask preview on gray.
+              rgba = Image.new('RGBA', mask.size, (255,255,255,0))
+              rgba.putalpha(mask)
+              canvas = Image.new('RGBA', mask.size, (80,80,80,255))
+              canvas.alpha_composite(rgba)
+              canvas.convert('RGB').resize((640,640)).save(out_root/(name.replace('.webp', '_mask_preview.jpg')), quality=96)
+
+              # Also store the raw mask for local inspection.
+              mask.save(out_root/(name.replace('.webp', '_mask.png')))
           PY
 
       - uses: actions/upload-artifact@v4
         with:
-          name: icon-preview-ffmpeg
+          name: exact-icon-masks
           path: /tmp/icon-preview
