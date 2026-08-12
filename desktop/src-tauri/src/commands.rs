@@ -1,12 +1,13 @@
-use std::{sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, RwLock}, time::{SystemTime, UNIX_EPOCH}};
+use std::{path::PathBuf, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, RwLock}, time::{SystemTime, UNIX_EPOCH}};
 use tauri::State;
 use uuid::Uuid;
 
 use crate::{
     engine::VpnEngine,
-    model::{AppPreferences, AppTheme, EnginePhase, EngineSnapshot, GroupView, SelectionView, SubscriptionGroup, TrafficSnapshot},
+    model::{AppPreferences, AppTheme, EnginePhase, EngineSnapshot, GroupView, SelectionView, SubscriptionGroup, TrafficSnapshot, UrlTestResult},
     storage::Store,
     subscription::SubscriptionClient,
+    url_test,
 };
 
 pub struct SharedState {
@@ -16,6 +17,8 @@ pub struct SharedState {
     pub traffic: Arc<RwLock<TrafficSnapshot>>,
     pub cancel: Arc<AtomicBool>,
     pub exiting: Arc<AtomicBool>,
+    pub runtime_source: PathBuf,
+    pub url_test_dir: PathBuf,
 }
 
 #[tauri::command]
@@ -116,6 +119,35 @@ pub fn disconnect(state: State<'_, SharedState>) -> EngineSnapshot { request_dis
 pub fn vpn_status(state: State<'_, SharedState>) -> EngineSnapshot {
     if let Ok(mut engine) = state.engine.try_lock() { engine.poll(); }
     read_snapshot(&state.snapshot)
+}
+
+#[tauri::command]
+pub async fn url_test(group_id: String, node_id: String, state: State<'_, SharedState>) -> Result<UrlTestResult, String> {
+    let node = state.store.node(&group_id, &node_id)?;
+    let current = read_snapshot(&state.snapshot);
+    if matches!(current.phase, EnginePhase::Starting | EnginePhase::Stopping) {
+        return Err("wait for the VPN state change to finish before URL testing".into());
+    }
+
+    let active_tunnel = current.phase == EnginePhase::Connected && current.node_name.as_deref() == Some(node.name.as_str());
+    if current.phase == EnginePhase::Connected && !active_tunnel {
+        return Err("switch to this node before URL testing while VPN is connected".into());
+    }
+
+    let tested_node_id = node.id.clone();
+    let latency_ms = if active_tunnel {
+        tauri::async_runtime::spawn_blocking(url_test::test_active_connection)
+            .await
+            .map_err(|e| format!("active URL test task failed: {e}"))??
+    } else {
+        let runtime_source = state.runtime_source.clone();
+        let work_dir = state.url_test_dir.clone();
+        tauri::async_runtime::spawn_blocking(move || url_test::test_node(&runtime_source, &work_dir, &node))
+            .await
+            .map_err(|e| format!("node URL test task failed: {e}"))??
+    };
+
+    Ok(UrlTestResult { node_id: tested_node_id, latency_ms, active_tunnel })
 }
 
 pub fn request_disconnect(state: &SharedState) -> EngineSnapshot {
