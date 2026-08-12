@@ -18,42 +18,38 @@ jobs:
         with:
           ref: android/v0.1.1-tile-notification-sync
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - run: python -m pip install --disable-pip-version-check pillow
-
-      - name: Decode launcher PNGs for inspection
+      - name: Recover launcher PNGs with ffmpeg
         shell: bash
         run: |
+          set -x
           mkdir -p /tmp/icon-preview
+          for f in ic_launcher_red_dot_foreground.png ic_launcher_wordmark_foreground.png; do
+            src="app/src/main/res/drawable/$f"
+            dst="/tmp/icon-preview/$f"
+            ffmpeg -y -v warning -i "$src" -frames:v 1 "$dst" || true
+            file "$src" || true
+            if [ -f "$dst" ]; then file "$dst"; fi
+          done
+
+      - name: Make visible previews
+        shell: bash
+        run: |
           python - <<'PY'
-          from collections import Counter
           from pathlib import Path
-          from PIL import Image, ImageFile
-
-          ImageFile.LOAD_TRUNCATED_IMAGES = True
-          root = Path('app/src/main/res/drawable')
-          out = Path('/tmp/icon-preview')
-
-          for name in ('ic_launcher_red_dot_foreground.png', 'ic_launcher_wordmark_foreground.png'):
-              image = Image.open(root / name).convert('RGBA')
-              data = list(image.getdata())
-              alpha = [p[3] for p in data]
-              visible = [p for p in data if p[3] > 0]
-              print(name, 'size=', image.size, 'alpha=', min(alpha), max(alpha), 'visible=', len(visible))
-              print('common=', Counter(visible).most_common(12))
-              print('extrema=', image.getextrema())
-
-              # Save canonical decode and a gray-background preview.
-              image.save(out / name)
-              bg = Image.new('RGBA', image.size, (80, 80, 80, 255))
-              bg.alpha_composite(image)
-              bg.convert('RGB').resize((640, 640)).save(out / (name.replace('.png', '_preview.png')))
+          from PIL import Image
+          root=Path('/tmp/icon-preview')
+          for p in root.glob('*.png'):
+              try:
+                  im=Image.open(p).convert('RGBA')
+                  bg=Image.new('RGBA', im.size, (80,80,80,255))
+                  bg.alpha_composite(im)
+                  bg.convert('RGB').resize((640,640)).save(root/(p.stem+'_preview.jpg'), quality=95)
+                  print(p.name, im.size, im.getbbox(), im.getextrema())
+              except Exception as e:
+                  print(p.name, 'preview failed', repr(e))
           PY
 
       - uses: actions/upload-artifact@v4
         with:
-          name: icon-preview
+          name: icon-preview-ffmpeg
           path: /tmp/icon-preview
