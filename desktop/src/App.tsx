@@ -48,8 +48,24 @@ export default function App() {
   function openNodes() { setBrowseGroupId(activeGroup?.id ?? groups[0]?.id ?? null); setPage("nodes"); }
 
   async function chooseNode(groupId: string, nodeId: string) {
-    try { setSelection(await invoke<SelectionView>("select_node", { groupId, nodeId })); setPage("home"); }
-    catch (e) { setError(String(e)); }
+    if (busy) return;
+    setBusy(true); setError("");
+    try {
+      const switching = vpn.phase === "connected" || vpn.phase === "starting" || vpn.phase === "stopping";
+      if (switching) {
+        setVpn({ phase: "stopping", node_name: vpn.node_name, message: "switching node" });
+        const nextVpn = await invoke<EngineSnapshot>("switch_node", { groupId, nodeId });
+        setSelection({ group_id: groupId, node_id: nodeId });
+        setVpn(nextVpn);
+      } else {
+        setSelection(await invoke<SelectionView>("select_node", { groupId, nodeId }));
+      }
+      setPage("home");
+    } catch (e) {
+      setError(String(e));
+      invoke<EngineSnapshot>("vpn_status").then(setVpn).catch(() => undefined);
+      await reloadData().catch(() => undefined);
+    } finally { setBusy(false); }
   }
 
   async function toggleVpn() {
@@ -98,7 +114,7 @@ export default function App() {
     {page === "nodes" && <>
       <header className="top"><div><h1>nodes.</h1><small>{browseGroup?.nodes.length ?? 0} available</small></div><button className="icon" onClick={() => setPage("home")}>×</button></header>
       <div className="group-tabs">{groups.map(g => <button key={g.id} className={g.id === browseGroup?.id ? "selected" : ""} onClick={() => setBrowseGroupId(g.id)}>{g.name}</button>)}</div>
-      <section className="nodes">{browseGroup?.nodes.map(node => <button key={node.id} className={node.id === activeNode?.id && browseGroup.id === activeGroup?.id ? "node selected" : "node"} onClick={() => chooseNode(browseGroup.id, node.id)}><span>{node.name}</span><small>{node.security} · {node.transport}<br />{node.host}:{node.port}</small></button>)}</section>
+      <section className="nodes">{browseGroup?.nodes.map(node => <button disabled={busy} key={node.id} className={node.id === activeNode?.id && browseGroup.id === activeGroup?.id ? "node selected" : "node"} onClick={() => chooseNode(browseGroup.id, node.id)}><span>{node.name}</span><small>{node.security} · {node.transport}<br />{node.host}:{node.port}</small></button>)}</section>
       {browseGroup && <button className="quiet" disabled={busy} onClick={() => refresh(browseGroup)}>refresh subscription</button>}
     </>}
 
