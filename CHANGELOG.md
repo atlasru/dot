@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0
+
+- replace separate Home/Nodes flow with a single Happ-inspired main dashboard
+- add tappable pixel orb as the primary VPN on/off control
+- keep the selected subscription node list always visible below the orb
+- add inline realtime/session traffic to the main dashboard
+- add group selector, refresh and group-wide Cloudflare URL test controls
+- centralize node latency state and show latency directly on every node row
+- allow tapping another node while connected to switch the active Xray profile
+- preserve dot. AMOLED/monospace/pixel identity and red-point accent
+
 ## 0.0.17
 
 - replace recreated alternate launcher vectors with bitmap artwork prepared directly from the supplied red-dot and `dot.` images

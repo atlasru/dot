@@ -45,6 +45,7 @@ class MainViewModel(
                         uploadBytesPerSecond = runtime.uploadBytesPerSecond,
                         sessionDownloadBytes = runtime.sessionDownloadBytes,
                         sessionUploadBytes = runtime.sessionUploadBytes,
+                        runningNodeName = runtime.nodeName,
                     )
                 }
             }
@@ -261,7 +262,76 @@ class MainViewModel(
         uiPreferences.edit().putString("theme", theme.name).apply()
     }
 
-    suspend fun testNode(rawUri: String): Result<Long> = nodeLatencyTester.test(rawUri)
+    fun testNode(profile: dev.dotclient.android.core.model.VlessProfile) {
+        if (state.value.testingNodeIds.contains(profile.id)) return
+        viewModelScope.launch {
+            mutableState.update { it.copy(testingNodeIds = it.testingNodeIds + profile.id) }
+            nodeLatencyTester.test(profile.rawUri)
+                .onSuccess { latency ->
+                    mutableState.update { current ->
+                        current.copy(
+                            nodeLatenciesMs = current.nodeLatenciesMs + (profile.id to latency),
+                            testingNodeIds = current.testingNodeIds - profile.id,
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update { current ->
+                        current.copy(
+                            testingNodeIds = current.testingNodeIds - profile.id,
+                            message = error.message ?: "url test failed",
+                        )
+                    }
+                }
+        }
+    }
+
+    fun testAllNodes() {
+        val profiles = state.value.profiles
+        if (profiles.isEmpty()) return
+        if (state.value.vpnState != VpnConnectionState.DISCONNECTED && state.value.vpnState != VpnConnectionState.ERROR) {
+            mutableState.update { it.copy(message = "disconnect VPN before url test") }
+            return
+        }
+        viewModelScope.launch {
+            mutableState.update { it.copy(testingNodeIds = it.testingNodeIds + profiles.map { p -> p.id }) }
+            for (profile in profiles) {
+                nodeLatencyTester.test(profile.rawUri)
+                    .onSuccess { latency ->
+                        mutableState.update { current ->
+                            current.copy(
+                                nodeLatenciesMs = current.nodeLatenciesMs + (profile.id to latency),
+                                testingNodeIds = current.testingNodeIds - profile.id,
+                            )
+                        }
+                    }
+                    .onFailure {
+                        mutableState.update { current -> current.copy(testingNodeIds = current.testingNodeIds - profile.id) }
+                    }
+            }
+            mutableState.update { it.copy(message = "URL test complete · cp.cloudflare.com") }
+        }
+    }
+
+    fun switchProfile(id: String) {
+        val group = state.value.selectedSubscription ?: return
+        val profile = group.profiles.firstOrNull { it.id == id } ?: return
+        selectProfile(id)
+        if (!state.value.vpnConnected) return
+
+        mutableState.update {
+            it.copy(
+                vpnState = VpnConnectionState.CONNECTING,
+                message = "switching to ${profile.name}…",
+            )
+        }
+        val application = getApplication<Application>()
+        val intent = Intent(application, DotVpnService::class.java)
+            .setAction(DotVpnService.ACTION_CONNECT)
+            .putExtra(DotVpnService.EXTRA_VLESS_URI, profile.rawUri)
+            .putExtra(DotVpnService.EXTRA_NODE_NAME, profile.name)
+        ContextCompat.startForegroundService(application, intent)
+    }
 
     fun redactedSubscriptionUrl(url: String): String = SecretRedactor.url(url)
 

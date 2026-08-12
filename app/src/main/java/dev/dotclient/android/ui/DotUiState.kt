@@ -18,6 +18,9 @@ data class DotUiState(
     val uploadBytesPerSecond: Long = 0L,
     val sessionDownloadBytes: Long = 0L,
     val sessionUploadBytes: Long = 0L,
+    val runningNodeName: String? = null,
+    val nodeLatenciesMs: Map<String, Long> = emptyMap(),
+    val testingNodeIds: Set<String> = emptySet(),
 ) {
     val selectedSubscription: Subscription?
         get() = subscriptions.firstOrNull { it.id == selectedSubscriptionId }
