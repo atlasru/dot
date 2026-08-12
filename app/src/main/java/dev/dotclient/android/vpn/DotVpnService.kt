@@ -1,16 +1,19 @@
 package dev.dotclient.android.vpn
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.drawable.Icon
 import android.net.TrafficStats
 import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.Process
-import androidx.core.app.NotificationCompat
 import dev.dotclient.android.MainActivity
 import dev.dotclient.android.R
 import dev.dotclient.android.ui.LauncherIcon
@@ -29,6 +32,7 @@ class DotVpnService : VpnService() {
     private var trafficFuture: ScheduledFuture<*>? = null
     private var tun: ParcelFileDescriptor? = null
     private var runningNodeName: String? = null
+    private val notificationIconCache = mutableMapOf<LauncherIcon, Icon>()
 
     override fun onCreate() {
         super.onCreate()
@@ -179,12 +183,8 @@ class DotVpnService : VpnService() {
 
                 SERVER_ONLY_REALITY_KEYS.forEach(reality::remove)
 
-                shareUri.getQueryParameter("fp")?.takeIf { it.isNotBlank() }?.let {
-                    reality.put("fingerprint", it)
-                }
-                shareUri.getQueryParameter("sni")?.takeIf { it.isNotBlank() }?.let {
-                    reality.put("serverName", it)
-                }
+                shareUri.getQueryParameter("fp")?.takeIf { it.isNotBlank() }?.let { reality.put("fingerprint", it) }
+                shareUri.getQueryParameter("sni")?.takeIf { it.isNotBlank() }?.let { reality.put("serverName", it) }
                 shareUri.getQueryParameter("pbk")?.takeIf { it.isNotBlank() }?.let {
                     reality.put("password", it)
                     reality.put("publicKey", it)
@@ -254,16 +254,22 @@ class DotVpnService : VpnService() {
         nodeName: String?,
         downloadBytesPerSecond: Long = 0L,
         uploadBytesPerSecond: Long = 0L,
-    ): android.app.Notification {
+    ): Notification {
         val launchIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(this, 0, launchIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, launchIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         val disconnectIntent = Intent(this, DotVpnService::class.java).setAction(ACTION_DISCONNECT)
-        val disconnectPending = PendingIntent.getService(this, 1, disconnectIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val disconnectPending = PendingIntent.getService(
+            this, 1, disconnectIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
 
         val traffic = "↓ ${formatRate(downloadBytesPerSecond)}   ↑ ${formatRate(uploadBytesPerSecond)}"
         val title = if (status == "connected") nodeName ?: "dot. VPN" else "dot. · $status"
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(notificationIcon())
             .setContentTitle(title)
             .setContentText(if (status == "connected") traffic else (nodeName ?: "VLESS"))
@@ -272,16 +278,52 @@ class DotVpnService : VpnService() {
             .setOngoing(status == "connected" || status == "connecting")
             .setOnlyAlertOnce(true)
             .setSilent(true)
+            @Suppress("DEPRECATION")
             .addAction(0, "Disconnect", disconnectPending)
             .build()
     }
 
-    // red dot / wordmark masks are generated at build time directly from the user's
-    // launcher bitmap resources. No hand-drawn replacement artwork is involved.
-    private fun notificationIcon(): Int = when (LauncherIconManager.current(this)) {
-        LauncherIcon.SHIELD -> R.drawable.ic_notification_dot
-        LauncherIcon.RED_DOT -> R.drawable.ic_notification_red_dot
-        LauncherIcon.WORDMARK -> R.drawable.ic_notification_wordmark
+    private fun notificationIcon(): Icon {
+        val selected = LauncherIconManager.current(this)
+        return notificationIconCache.getOrPut(selected) {
+            when (selected) {
+                LauncherIcon.SHIELD -> Icon.createWithResource(this, R.drawable.ic_notification_dot)
+                LauncherIcon.RED_DOT -> launcherBitmapMaskIcon(R.drawable.ic_launcher_red_dot_foreground)
+                LauncherIcon.WORDMARK -> launcherBitmapMaskIcon(R.drawable.ic_launcher_wordmark_foreground)
+            }
+        }
+    }
+
+    /**
+     * Android small notification icons are monochrome alpha masks. This converts the
+     * selected launcher bitmap pixel-for-pixel at runtime: black/background pixels become
+     * transparent and the existing artwork becomes a white mask. The artwork is never redrawn.
+     */
+    private fun launcherBitmapMaskIcon(resourceId: Int): Icon {
+        val source = BitmapFactory.decodeResource(resources, resourceId)
+            ?: return Icon.createWithResource(this, R.drawable.ic_notification_dot)
+        val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+        val pixels = IntArray(source.width * source.height)
+        source.getPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
+
+        for (index in pixels.indices) {
+            val argb = pixels[index]
+            val sourceAlpha = argb ushr 24 and 0xff
+            val red = argb ushr 16 and 0xff
+            val green = argb ushr 8 and 0xff
+            val blue = argb and 0xff
+            val signal = maxOf(red, green, blue)
+            val maskAlpha = if (sourceAlpha == 0 || signal <= 20) {
+                0
+            } else {
+                (((signal - 20) * 255) / 235).coerceIn(0, 255) * sourceAlpha / 255
+            }
+            pixels[index] = (maskAlpha shl 24) or 0x00ffffff
+        }
+
+        output.setPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
+        if (source != output) source.recycle()
+        return Icon.createWithBitmap(output)
     }
 
     private fun formatRate(bytesPerSecond: Long): String {
@@ -294,11 +336,9 @@ class DotVpnService : VpnService() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "dot. VPN", NotificationManager.IMPORTANCE_LOW),
-            )
-        }
+        getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, "dot. VPN", NotificationManager.IMPORTANCE_LOW),
+        )
     }
 
     companion object {
