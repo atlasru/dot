@@ -41,8 +41,8 @@
             android:name=".LauncherRedDot"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/ic_launcher_red_dot"
-            android:roundIcon="@mipmap/ic_launcher_red_dot"
+            android:icon="@mipmap/ic_launcher_red_dot_exact"
+            android:roundIcon="@mipmap/ic_launcher_red_dot_exact"
             android:label="dot."
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -55,8 +55,8 @@
             android:name=".LauncherWordmark"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/ic_launcher_wordmark"
-            android:roundIcon="@mipmap/ic_launcher_wordmark"
+            android:icon="@mipmap/ic_launcher_wordmark_exact"
+            android:roundIcon="@mipmap/ic_launcher_wordmark_exact"
             android:label="dot."
             android:targetActivity=".MainActivity">
             <intent-filter>
