@@ -12,6 +12,7 @@ import android.os.ParcelFileDescriptor
 import android.os.Process
 import androidx.core.app.NotificationCompat
 import dev.dotclient.android.MainActivity
+import dev.dotclient.android.R
 import libXray.DialerController
 import libXray.LibXray
 import org.json.JSONArray
@@ -282,7 +283,7 @@ class DotVpnService : VpnService() {
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setSmallIcon(R.drawable.ic_notification_dot)
             .setContentTitle(title)
             .setContentText(if (status == "connected") traffic else (nodeName ?: "VLESS"))
             .setSubText(if (status == "connected") "dot. · connected" else null)
