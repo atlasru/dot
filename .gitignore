@@ -1,9 +1,23 @@
+# Gradle / Android
 .gradle/
-.idea/
-local.properties
 **/build/
+local.properties
+*.apk
+*.aab
+
+# IDE
+.idea/
 *.iml
-.DS_Store
+
+# Generated / local dependencies
+app/libs/libXray.aar
+
+# Signing
 keystore.properties
 *.jks
 *.keystore
+
+# Logs / OS
+*.log
+.DS_Store
+Thumbs.db
