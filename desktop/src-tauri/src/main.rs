@@ -11,6 +11,7 @@ mod storage;
 mod subscription;
 mod traffic;
 mod tray;
+mod url_test;
 mod vless;
 
 use std::{path::PathBuf, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, RwLock}};
@@ -25,15 +26,16 @@ fn main() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let runtime_source = discover_runtime_source(&app.path().resource_dir()?);
+            let url_test_dir = data_dir.join("url-test");
             let store = Store::open(data_dir.join("state.json")).map_err(std::io::Error::other)?;
             let snapshot = Arc::new(RwLock::new(EngineSnapshot::default()));
             let traffic = Arc::new(RwLock::new(TrafficSnapshot::default()));
             let cancel = Arc::new(AtomicBool::new(false));
             let exiting = Arc::new(AtomicBool::new(false));
-            let engine = Arc::new(Mutex::new(VpnEngine::new(runtime_source, data_dir.join("vpn"), Arc::clone(&snapshot), Arc::clone(&cancel)).map_err(std::io::Error::other)?));
+            let engine = Arc::new(Mutex::new(VpnEngine::new(runtime_source.clone(), data_dir.join("vpn"), Arc::clone(&snapshot), Arc::clone(&cancel)).map_err(std::io::Error::other)?));
             spawn_watchdog(&engine);
             traffic::spawn_traffic_sampler(&snapshot, &traffic);
-            app.manage(SharedState { store, engine, snapshot, traffic, cancel, exiting });
+            app.manage(SharedState { store, engine, snapshot, traffic, cancel, exiting, runtime_source, url_test_dir });
             tray::setup(app)?;
             Ok(())
         })
@@ -60,6 +62,7 @@ fn main() {
             commands::connect,
             commands::disconnect,
             commands::vpn_status,
+            commands::url_test,
         ])
         .run(tauri::generate_context!())
         .expect("error while running dot. Desktop");
