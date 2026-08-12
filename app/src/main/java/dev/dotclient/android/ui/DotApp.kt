@@ -164,11 +164,12 @@ private fun MainDashboard(
         Spacer(Modifier.height(8.dp))
         Text(connectionLabel(state), style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(3.dp))
+        val selectedProfile = state.selectedProfile
         Text(
             text = when {
-                state.vpnConnected -> state.runningNodeName ?: state.selectedProfile?.name ?: "connected"
-                state.vpnBusy -> state.runningNodeName ?: state.selectedProfile?.name ?: "working…"
-                state.selectedProfile != null -> "tap orb to connect · ${state.selectedProfile.name}"
+                state.vpnConnected -> state.runningNodeName ?: selectedProfile?.name ?: "connected"
+                state.vpnBusy -> state.runningNodeName ?: selectedProfile?.name ?: "working…"
+                selectedProfile != null -> "tap orb to connect · ${selectedProfile.name}"
                 else -> "select a node below"
             },
             color = Color(0xFF777777),
