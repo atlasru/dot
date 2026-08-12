@@ -11,6 +11,7 @@ export default function App() {
   const [page, setPage] = useState<Page>("home");
   const [groups, setGroups] = useState<GroupView[]>([]);
   const [selection, setSelection] = useState<SelectionView>({ group_id: null, node_id: null });
+  const [browseGroupId, setBrowseGroupId] = useState<string | null>(null);
   const [vpn, setVpn] = useState<EngineSnapshot>(OFFLINE);
   const [traffic, setTraffic] = useState<TrafficSnapshot>(ZERO_TRAFFIC);
   const [prefs, setPrefs] = useState<AppPreferences>(DEFAULT_PREFS);
@@ -21,12 +22,11 @@ export default function App() {
 
   const activeGroup = useMemo(() => groups.find(g => g.id === selection.group_id) ?? groups[0], [groups, selection.group_id]);
   const activeNode = useMemo(() => activeGroup?.nodes.find(n => n.id === selection.node_id) ?? activeGroup?.nodes[0], [activeGroup, selection.node_id]);
+  const browseGroup = useMemo(() => groups.find(g => g.id === browseGroupId) ?? activeGroup ?? groups[0], [groups, browseGroupId, activeGroup]);
 
   async function reloadData() {
     const [nextGroups, nextSelection, nextPrefs] = await Promise.all([
-      invoke<GroupView[]>("list_groups"),
-      invoke<SelectionView>("selection"),
-      invoke<AppPreferences>("preferences"),
+      invoke<GroupView[]>("list_groups"), invoke<SelectionView>("selection"), invoke<AppPreferences>("preferences"),
     ]);
     setGroups(nextGroups); setSelection(nextSelection); setPrefs(nextPrefs);
   }
@@ -34,15 +34,18 @@ export default function App() {
   useEffect(() => {
     reloadData().catch(e => setError(String(e)));
     const tick = () => Promise.all([
-      invoke<EngineSnapshot>("vpn_status").then(setVpn),
-      invoke<TrafficSnapshot>("traffic_status").then(setTraffic),
+      invoke<EngineSnapshot>("vpn_status").then(setVpn), invoke<TrafficSnapshot>("traffic_status").then(setTraffic),
     ]).catch(() => undefined);
     tick();
     const timer = window.setInterval(tick, 1000);
-    return () => window.clearInterval(timer);
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setPage("home"); };
+    window.addEventListener("keydown", escape);
+    return () => { window.clearInterval(timer); window.removeEventListener("keydown", escape); };
   }, []);
 
   useEffect(() => { document.documentElement.dataset.theme = prefs.theme; }, [prefs.theme]);
+
+  function openNodes() { setBrowseGroupId(activeGroup?.id ?? groups[0]?.id ?? null); setPage("nodes"); }
 
   async function chooseNode(groupId: string, nodeId: string) {
     try { setSelection(await invoke<SelectionView>("select_node", { groupId, nodeId })); setPage("home"); }
@@ -52,9 +55,7 @@ export default function App() {
   async function toggleVpn() {
     if (vpn.phase === "stopping") return;
     setError("");
-    if (vpn.phase === "connected" || vpn.phase === "starting") {
-      setVpn(await invoke<EngineSnapshot>("disconnect")); return;
-    }
+    if (vpn.phase === "connected" || vpn.phase === "starting") { setVpn(await invoke<EngineSnapshot>("disconnect")); return; }
     if (!activeGroup || !activeNode) { setError("select a node first"); return; }
     setVpn({ phase: "starting", node_name: activeNode.name, message: "starting" });
     try { setVpn(await invoke<EngineSnapshot>("connect", { groupId: activeGroup.id, nodeId: activeNode.id })); }
@@ -76,15 +77,8 @@ export default function App() {
     finally { setBusy(false); }
   }
 
-  async function changeTheme(theme: AppTheme) {
-    try { setPrefs(await invoke<AppPreferences>("set_theme", { theme })); }
-    catch (e) { setError(String(e)); }
-  }
-
-  async function changeCloseToTray(enabled: boolean) {
-    try { setPrefs(await invoke<AppPreferences>("set_close_to_tray", { enabled })); }
-    catch (e) { setError(String(e)); }
-  }
+  async function changeTheme(theme: AppTheme) { try { setPrefs(await invoke<AppPreferences>("set_theme", { theme })); } catch (e) { setError(String(e)); } }
+  async function changeCloseToTray(enabled: boolean) { try { setPrefs(await invoke<AppPreferences>("set_close_to_tray", { enabled })); } catch (e) { setError(String(e)); } }
 
   const button = vpn.phase === "stopping" ? "STOPPING" : (vpn.phase === "connected" || vpn.phase === "starting") ? "DISCONNECT" : "CONNECT";
 
@@ -95,35 +89,23 @@ export default function App() {
         <PixelShield active={vpn.phase === "connected"} pending={vpn.phase === "starting"} />
         <strong className="status">{vpn.phase}</strong>
         <small className="message">{vpn.message ?? "VLESS · Windows TUN"}</small>
-        <button className="node-card" onClick={() => setPage("nodes")}>
-          <span>{vpn.node_name ?? activeNode?.name ?? "select node"}</span>
-          <small>{activeGroup?.name ?? "no subscription"} · {activeNode ? `${activeNode.security} / ${activeNode.transport}` : "nodes"}</small>
-          <b>›</b>
-        </button>
+        <button className="node-card" onClick={openNodes}><span>{vpn.node_name ?? activeNode?.name ?? "select node"}</span><small>{activeGroup?.name ?? "no subscription"} · {activeNode ? `${activeNode.security} / ${activeNode.transport}` : "nodes"}</small><b>›</b></button>
         <button className="connect" disabled={vpn.phase === "stopping" || (!activeNode && vpn.phase === "offline")} onClick={toggleVpn}>{button}</button>
       </section>
-      <section className="traffic">
-        <TrafficCell label="download" value={formatRate(traffic.download_bytes_per_second)} total={formatBytes(traffic.session_download_bytes)} />
-        <TrafficCell label="upload" value={formatRate(traffic.upload_bytes_per_second)} total={formatBytes(traffic.session_upload_bytes)} />
-        <TrafficCell label="session" value={formatTime(traffic.connected_seconds)} />
-      </section>
+      <section className="traffic"><TrafficCell label="download" value={formatRate(traffic.download_bytes_per_second)} total={formatBytes(traffic.session_download_bytes)} /><TrafficCell label="upload" value={formatRate(traffic.upload_bytes_per_second)} total={formatBytes(traffic.session_upload_bytes)} /><TrafficCell label="session" value={formatTime(traffic.connected_seconds)} /></section>
     </>}
 
     {page === "nodes" && <>
-      <header className="top"><div><h1>nodes.</h1><small>{activeGroup?.nodes.length ?? 0} available</small></div><button className="icon" onClick={() => setPage("home")}>×</button></header>
-      <div className="group-tabs">{groups.map(g => <button key={g.id} className={g.id === activeGroup?.id ? "selected" : ""} onClick={() => g.nodes[0] && chooseNode(g.id, g.nodes[0].id)}>{g.name}</button>)}</div>
-      <section className="nodes">{activeGroup?.nodes.map(node => <button key={node.id} className={node.id === activeNode?.id ? "node selected" : "node"} onClick={() => chooseNode(activeGroup.id, node.id)}><span>{node.name}</span><small>{node.security} · {node.transport}<br />{node.host}:{node.port}</small></button>)}</section>
-      {activeGroup && <button className="quiet" disabled={busy} onClick={() => refresh()}>refresh subscription</button>}
+      <header className="top"><div><h1>nodes.</h1><small>{browseGroup?.nodes.length ?? 0} available</small></div><button className="icon" onClick={() => setPage("home")}>×</button></header>
+      <div className="group-tabs">{groups.map(g => <button key={g.id} className={g.id === browseGroup?.id ? "selected" : ""} onClick={() => setBrowseGroupId(g.id)}>{g.name}</button>)}</div>
+      <section className="nodes">{browseGroup?.nodes.map(node => <button key={node.id} className={node.id === activeNode?.id && browseGroup.id === activeGroup?.id ? "node selected" : "node"} onClick={() => chooseNode(browseGroup.id, node.id)}><span>{node.name}</span><small>{node.security} · {node.transport}<br />{node.host}:{node.port}</small></button>)}</section>
+      {browseGroup && <button className="quiet" disabled={busy} onClick={() => refresh(browseGroup)}>refresh subscription</button>}
     </>}
 
     {page === "settings" && <>
       <header className="top"><h1>settings.</h1><button className="icon" onClick={() => setPage("home")}>×</button></header>
-      <SettingsSection title="appearance">
-        <div className="theme-row">{(["amoled", "graphite", "matrix"] as AppTheme[]).map(theme => <button key={theme} className={prefs.theme === theme ? "choice selected" : "choice"} onClick={() => changeTheme(theme)}>{theme}</button>)}</div>
-      </SettingsSection>
-      <SettingsSection title="window">
-        <Toggle label="close to tray" detail="keep VPN running when the window is closed" checked={prefs.close_to_tray} onChange={changeCloseToTray} />
-      </SettingsSection>
+      <SettingsSection title="appearance"><div className="theme-row">{(["amoled", "graphite", "matrix"] as AppTheme[]).map(theme => <button key={theme} className={prefs.theme === theme ? "choice selected" : "choice"} onClick={() => changeTheme(theme)}>{theme}</button>)}</div></SettingsSection>
+      <SettingsSection title="window"><Toggle label="close to tray" detail="keep VPN running when the window is closed" checked={prefs.close_to_tray} onChange={changeCloseToTray} /></SettingsSection>
       <SettingsSection title="subscriptions">
         {groups.map(g => <div className="subscription" key={g.id}><div><strong>{g.name}</strong><small>{g.nodes.length} nodes</small></div><button className="tiny" disabled={busy} onClick={() => refresh(g)}>↻</button></div>)}
         <form onSubmit={addSubscription}><label>group<input value={name} onChange={e => setName(e.target.value)} placeholder="vpn1" /></label><label>subscription url<input value={url} onChange={e => setUrl(e.target.value)} type="url" placeholder="https://…" /></label><button className="quiet" disabled={busy || !name.trim() || !url.trim()} type="submit">add subscription</button></form>
