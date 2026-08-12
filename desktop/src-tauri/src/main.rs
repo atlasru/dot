@@ -1,27 +1,20 @@
 mod commands;
 mod config;
-#[cfg(test)]
-mod config_smoke;
+#[cfg(test)] mod config_smoke;
 mod engine;
-#[cfg(windows)]
-mod job;
+#[cfg(windows)] mod job;
 mod model;
 mod session;
 mod storage;
 mod subscription;
+mod traffic;
+mod tray;
 mod vless;
 
-use std::{
-    path::PathBuf,
-    sync::{
-        atomic::AtomicBool,
-        Arc, Mutex, RwLock,
-    },
-};
-
+use std::{path::PathBuf, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, RwLock}};
 use commands::SharedState;
 use engine::{spawn_watchdog, VpnEngine};
-use model::EngineSnapshot;
+use model::{EngineSnapshot, TrafficSnapshot};
 use storage::Store;
 use tauri::Manager;
 
@@ -29,34 +22,36 @@ fn main() {
     tauri::Builder::default()
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
-            let resource_dir = app.path().resource_dir()?;
-            let runtime_source = discover_runtime_source(&resource_dir);
-            let store = Store::open(data_dir.join("state.json"))
-                .map_err(std::io::Error::other)?;
-
+            let runtime_source = discover_runtime_source(&app.path().resource_dir()?);
+            let store = Store::open(data_dir.join("state.json")).map_err(std::io::Error::other)?;
             let snapshot = Arc::new(RwLock::new(EngineSnapshot::default()));
+            let traffic = Arc::new(RwLock::new(TrafficSnapshot::default()));
             let cancel = Arc::new(AtomicBool::new(false));
-            let engine = Arc::new(Mutex::new(
-                VpnEngine::new(
-                    runtime_source,
-                    data_dir.join("vpn"),
-                    Arc::clone(&snapshot),
-                    Arc::clone(&cancel),
-                )
-                .map_err(std::io::Error::other)?,
-            ));
+            let exiting = Arc::new(AtomicBool::new(false));
+            let engine = Arc::new(Mutex::new(VpnEngine::new(runtime_source, data_dir.join("vpn"), Arc::clone(&snapshot), Arc::clone(&cancel)).map_err(std::io::Error::other)?));
             spawn_watchdog(&engine);
-
-            app.manage(SharedState {
-                store,
-                engine,
-                snapshot,
-                cancel,
-            });
+            traffic::spawn_traffic_sampler(&snapshot, &traffic);
+            app.manage(SharedState { store, engine, snapshot, traffic, cancel, exiting });
+            tray::setup(app)?;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let state = window.app_handle().state::<SharedState>();
+                if !state.exiting.load(Ordering::SeqCst) && state.store.preferences().close_to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_groups,
+            commands::selection,
+            commands::preferences,
+            commands::traffic_status,
+            commands::select_node,
+            commands::set_theme,
+            commands::set_close_to_tray,
             commands::add_subscription,
             commands::refresh_subscription,
             commands::connect,
@@ -69,8 +64,6 @@ fn main() {
 
 fn discover_runtime_source(resource_dir: &std::path::Path) -> PathBuf {
     let bundled = resource_dir.join("runtime");
-    if bundled.join("xray.exe").exists() {
-        return bundled;
-    }
+    if bundled.join("xray.exe").exists() { return bundled; }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime")
 }

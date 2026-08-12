@@ -1,50 +1,65 @@
 # dot. Desktop
 
-Desktop development is intentionally staged behind CI and is not released until the VPN path is complete and regression-tested.
+The Windows client is built as a real VLESS/REALITY VPN product, not a UI prototype. UI controls are only exposed when their backend behavior exists.
 
-## Current milestone: M2 lifecycle
+## Current milestone: M3 product
 
-The Windows client uses Tauri 2 + React for the UI and a Rust backend. Xray-core v26.7.28 is pinned as a runtime dependency and is downloaded by CI rather than committed to the repository.
+Stack:
 
-The data path is real, not simulated:
+- Tauri 2 + React/TypeScript UI
+- Rust backend
+- Xray-core v26.7.28
+- Wintun TUN on Windows
+
+The connection path is real end-to-end:
 
 ```text
 subscription URL
   -> HTTP fetch
-  -> plaintext/Base64 detection
-  -> VLESS parser
-  -> persisted subscription group
-  -> selected node
-  -> current Xray JSON generator
+  -> plaintext/Base64 VLESS parsing
+  -> persisted groups and selected node
+  -> Xray JSON generation
   -> xray run -test
-  -> Xray Windows TUN / Wintun
-  -> automatic Windows routes + DNS
-  -> HTTP connectivity probe
-  -> connected
+  -> Xray + Wintun TUN
+  -> automatic Windows routing and DNS
+  -> external connectivity probe
+  -> CONNECTED
 ```
 
-`CONNECTED` is returned only after Xray remains alive through TUN startup and at least one external HTTP connectivity probe succeeds.
+`CONNECTED` is published only after Xray survives TUN startup and an external connectivity probe succeeds.
 
-## M2 lifecycle guarantees
+## Lifecycle and crash safety
 
-M2 makes the Xray process a strict child of the dot. lifetime instead of a best-effort subprocess:
+- Xray is assigned to a Windows Job Object using `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
+- Closing or crashing dot. terminates the owned Xray process tree.
+- A watchdog detects unexpected Xray exits while the UI is idle.
+- Startup can be cancelled with Disconnect.
+- A session journal records active-process metadata and stale records are consumed safely on the next launch.
+- VPN state is independent from the engine mutex so status remains responsive during startup/shutdown.
 
-- every running Xray instance is assigned to a Windows Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`;
-- if dot. is closed normally, the job is closed and the entire Xray process tree is terminated;
-- if dot. crashes or is killed through Task Manager, Windows closes the process-owned job handle and terminates the Xray process tree;
-- a session journal records the active Xray PID, executable path and selected node and is cleared on clean shutdown;
-- a stale journal is consumed on the next startup rather than being treated as a live connection;
-- a backend watchdog checks the Xray process even when the UI is idle;
-- VPN state is stored independently from the engine mutex, so status polling remains responsive while Xray/TUN is starting;
-- `DISCONNECT` is available during startup and sends a cancellation signal without waiting for the startup mutex.
+## M3 product features
 
-The Job Object is the cleanup authority. The session journal is bookkeeping/recovery metadata and never kills an arbitrary process by a stale PID.
+All items below have real backend behavior:
+
+- persistent subscription groups;
+- persistent selected node;
+- Home / Nodes / Settings UI;
+- AMOLED, Graphite and Matrix themes;
+- realtime download/upload rate and session totals from the `dot0` Windows TUN interface;
+- connection duration;
+- system tray with Open, Connect/Disconnect and Exit;
+- left-click tray icon opens the main window;
+- optional close-to-tray behavior;
+- subscription refresh without replacing a working group when fetch/parse fails;
+- About information tied to the pinned desktop/Xray versions.
+
+There are intentionally no UI toggles for unimplemented DNS modes, split tunneling, kill switch, autostart or updater behavior.
 
 ## Runtime files
 
-Windows requires `xray.exe` and `wintun.dll` from the same pinned Xray release. They must be adjacent at runtime. GitHub Actions downloads `Xray-windows-64.zip` and places both files in `src-tauri/runtime/` before compilation.
+Windows requires `xray.exe` and `wintun.dll` from the pinned Xray release. CI downloads the official `Xray-windows-64.zip`; the binaries are not committed to the repository.
 
-For local development, place the same two files in:
+For local development place both files in:
 
 ```text
 desktop/src-tauri/runtime/
@@ -61,18 +76,17 @@ npm run icons
 npm run tauri -- dev
 ```
 
-The Windows application manifest requests administrator privileges because creating/configuring a Wintun TUN interface and system routes requires elevation.
+The application requests administrator privileges because creating the Wintun interface and changing system routing/DNS require elevation.
 
 ## CI gates
 
-Windows CI must pass all of the following before Desktop changes are merged:
+Desktop changes must pass:
 
-1. subscription/VLESS/Rust unit tests;
+1. Rust unit tests;
 2. Windows Job Object kill-on-close test;
-3. generated config validation using the pinned real `xray.exe run -test`;
-4. React/Vite frontend build;
-5. Tauri Windows executable compilation.
+3. generated configuration validation through the pinned real `xray.exe run -test`;
+4. Windows interface API test used by traffic sampling;
+5. React/Vite build;
+6. Tauri Windows executable compilation.
 
-## Not yet considered release-ready
-
-M2 still deliberately does not advertise unfinished controls. Tray integration, traffic accounting, network-change auto-recovery, updater signing and the final installer belong to later milestones and will only appear in the UI once implemented.
+A public desktop release is only cut after the product build passes manual Windows VPN regression testing in addition to CI.
