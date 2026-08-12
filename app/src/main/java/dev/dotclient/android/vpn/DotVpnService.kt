@@ -12,8 +12,6 @@ import android.os.ParcelFileDescriptor
 import android.os.Process
 import dev.dotclient.android.MainActivity
 import dev.dotclient.android.R
-import dev.dotclient.android.ui.LauncherIcon
-import dev.dotclient.android.ui.LauncherIconManager
 import libXray.DialerController
 import libXray.LibXray
 import org.json.JSONArray
@@ -250,7 +248,7 @@ class DotVpnService : VpnService() {
         val title = if (status == "connected") nodeName ?: "dot. VPN" else "dot. · $status"
 
         return Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(notificationIconRes())
+            .setSmallIcon(R.drawable.ic_notification_dot)
             .setContentTitle(title)
             .setContentText(if (status == "connected") traffic else (nodeName ?: "VLESS"))
             .setSubText(if (status == "connected") "dot. · connected" else null)
@@ -260,12 +258,6 @@ class DotVpnService : VpnService() {
             .setSound(null)
             .addAction(0, "Disconnect", disconnectPending)
             .build()
-    }
-
-    private fun notificationIconRes(): Int = when (LauncherIconManager.current(this)) {
-        LauncherIcon.SHIELD -> R.drawable.ic_notification_dot
-        LauncherIcon.RED_DOT -> R.drawable.ic_notification_red_dot
-        LauncherIcon.WORDMARK -> R.drawable.ic_notification_wordmark
     }
 
     private fun formatRate(bytesPerSecond: Long): String {
