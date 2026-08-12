@@ -29,8 +29,9 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          from PIL import Image
+          from PIL import Image, ImageFile
 
+          ImageFile.LOAD_TRUNCATED_IMAGES = True
           ROOT = Path('app/src/main/res/drawable')
 
           def extract(source: Path, kind: str):
@@ -46,10 +47,8 @@ jobs:
                       if a < 24:
                           continue
                       if kind == 'red':
-                          # Preserve the actual red-dot pixels from the user's artwork.
                           keep = r >= 105 and r >= g + 28 and r >= b + 28
                       else:
-                          # Preserve the bright neutral wordmark pixels; ignore the dark artwork background.
                           hi, lo = max(r, g, b), min(r, g, b)
                           keep = hi >= 105 and (hi - lo) <= 85
                       if keep:
@@ -60,7 +59,6 @@ jobs:
                   raise RuntimeError(f'no notification foreground found in {source}')
               cropped = mask.crop(bbox)
 
-              # Fit source-derived silhouette into the conventional small-icon safe area.
               max_side = 44
               cw, ch = cropped.size
               scale = min(max_side / cw, max_side / ch)
@@ -76,7 +74,6 @@ jobs:
               return canvas
 
           def rectangles(mask):
-              # Run-length encode rows, then merge identical horizontal runs vertically.
               active = {}
               rects = []
               for y in range(mask.height):
@@ -132,6 +129,6 @@ jobs:
 
           git config user.name 'dot-ci'
           git config user.email 'dot-ci@users.noreply.github.com'
-          git add app/src/main/res/drawable/ic_notification_red_dot.* app/src/main/res/drawable/ic_notification_wordmark.*
+          git add -A app/src/main/res/drawable/ic_notification_red_dot.* app/src/main/res/drawable/ic_notification_wordmark.*
           git commit -m 'Generate notification vectors from launcher artwork'
           git push origin HEAD:android/v0.1.1-tile-notification-sync
