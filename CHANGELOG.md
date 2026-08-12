@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.17
+
+- replace recreated alternate launcher vectors with bitmap artwork prepared directly from the supplied red-dot and `dot.` images
+- preserve the original icon proportions while only removing the external white canvas for Android launcher masking
+
+## 0.0.16
+
+- launcher icon resource correction after the first alternate-icon implementation
+
 ## 0.0.15
 
 - add per-node URL latency test through libXray using `http://cp.cloudflare.com/`
