@@ -1,0 +1,24 @@
+{
+  "name": "dot-desktop",
+  "private": true,
+  "version": "0.1.0-alpha.1",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 1420",
+    "build": "vite build",
+    "tauri": "tauri",
+    "icons": "tauri icon app-icon.svg"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "vite": "8.1.5"
+  }
+}
