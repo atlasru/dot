@@ -1,0 +1,137 @@
+name: tmp-generate-notification-vectors
+
+on:
+  push:
+    branches:
+      - android/v0.1.1-tile-notification-sync
+    paths:
+      - .github/workflows/tmp-generate-notification-vectors.yml
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: android/v0.1.1-tile-notification-sync
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: python -m pip install --disable-pip-version-check pillow
+
+      - name: Generate monochrome VectorDrawables from original launcher PNGs
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+
+          ROOT = Path('app/src/main/res/drawable')
+
+          def extract(source: Path, kind: str):
+              image = Image.open(source).convert('RGBA')
+              w, h = image.size
+              pixels = image.load()
+              mask = Image.new('L', image.size, 0)
+              out = mask.load()
+
+              for y in range(h):
+                  for x in range(w):
+                      r, g, b, a = pixels[x, y]
+                      if a < 24:
+                          continue
+                      if kind == 'red':
+                          # Preserve the actual red-dot pixels from the user's artwork.
+                          keep = r >= 105 and r >= g + 28 and r >= b + 28
+                      else:
+                          # Preserve the bright neutral wordmark pixels; ignore the dark artwork background.
+                          hi, lo = max(r, g, b), min(r, g, b)
+                          keep = hi >= 105 and (hi - lo) <= 85
+                      if keep:
+                          out[x, y] = 255
+
+              bbox = mask.getbbox()
+              if bbox is None:
+                  raise RuntimeError(f'no notification foreground found in {source}')
+              cropped = mask.crop(bbox)
+
+              # Fit source-derived silhouette into the conventional small-icon safe area.
+              max_side = 44
+              cw, ch = cropped.size
+              scale = min(max_side / cw, max_side / ch)
+              nw = max(1, round(cw * scale))
+              nh = max(1, round(ch * scale))
+              resized = cropped.resize((nw, nh), Image.Resampling.LANCZOS)
+              resized = resized.point(lambda p: 255 if p >= 96 else 0)
+
+              canvas = Image.new('1', (64, 64), 0)
+              ox = (64 - nw) // 2
+              oy = (64 - nh) // 2
+              canvas.paste(resized.convert('1'), (ox, oy))
+              return canvas
+
+          def rectangles(mask):
+              # Run-length encode rows, then merge identical horizontal runs vertically.
+              active = {}
+              rects = []
+              for y in range(mask.height):
+                  runs = []
+                  x = 0
+                  while x < mask.width:
+                      while x < mask.width and not mask.getpixel((x, y)):
+                          x += 1
+                      if x >= mask.width:
+                          break
+                      start = x
+                      while x < mask.width and mask.getpixel((x, y)):
+                          x += 1
+                      runs.append((start, x))
+
+                  current = set(runs)
+                  for run in list(active):
+                      if run not in current:
+                          x0, x1, y0 = active.pop(run)
+                          rects.append((x0, y0, x1, y))
+                  for run in runs:
+                      if run not in active:
+                          active[run] = (run[0], run[1], y)
+
+              for x0, x1, y0 in active.values():
+                  rects.append((x0, y0, x1, mask.height))
+              return rects
+
+          def write_vector(source_name: str, target_name: str, kind: str):
+              mask = extract(ROOT / source_name, kind)
+              rects = rectangles(mask)
+              path = ''.join(f'M{x0},{y0}H{x1}V{y1}H{x0}Z' for x0, y0, x1, y1 in rects)
+              xml = f'''<vector xmlns:android="http://schemas.android.com/apk/res/android"
+                  android:width="24dp"
+                  android:height="24dp"
+                  android:viewportWidth="64"
+                  android:viewportHeight="64">
+                  <path
+                      android:fillColor="#FFFFFFFF"
+                      android:pathData="{path}" />
+              </vector>
+          '''
+              target = ROOT / target_name
+              target.write_text(xml, encoding='utf-8')
+              print(target, 'rectangles=', len(rects), 'bbox=', mask.getbbox())
+
+          for old in ('ic_notification_red_dot.png', 'ic_notification_wordmark.png'):
+              (ROOT / old).unlink(missing_ok=True)
+
+          write_vector('ic_launcher_red_dot_foreground.png', 'ic_notification_red_dot.xml', 'red')
+          write_vector('ic_launcher_wordmark_foreground.png', 'ic_notification_wordmark.xml', 'word')
+          PY
+
+          git config user.name 'dot-ci'
+          git config user.email 'dot-ci@users.noreply.github.com'
+          git add app/src/main/res/drawable/ic_notification_red_dot.* app/src/main/res/drawable/ic_notification_wordmark.*
+          git commit -m 'Generate notification vectors from launcher artwork'
+          git push origin HEAD:android/v0.1.1-tile-notification-sync
