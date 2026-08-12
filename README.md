@@ -1,57 +1,72 @@
 # dot.
 
-Minimal VLESS client for Android with an AMOLED-first interface.
+Minimal VLESS client for Android with an AMOLED-first, Nothing-inspired interface.
 
-> Current milestone: **0.0.1 / foundation**. Subscription fetching and VLESS URI parsing are implemented. libXray/TUN startup is intentionally not enabled yet, so this milestone cannot establish a working VPN tunnel.
+Current version: **0.0.14**
+
+## Features
+
+- VLESS with REALITY / TLS
+- HTTPS subscription import
+- plaintext and Base64 subscription decoding
+- multiple subscription groups
+- node selection and persistence
+- Android VpnService + TUN integration
+- libXray / Xray-core backend
+- realtime upload/download traffic
+- foreground VPN notification with node name and traffic
+- Quick Settings connect/disconnect tile
+- long-press Quick Settings tile opens dot.
+- AMOLED, Graphite and Matrix themes
+- adaptive launcher icon
+- no accounts, ads, analytics or telemetry
 
 ## Design
 
-- pure black AMOLED background
-- Courier-like system monospace typography
-- minimal `home / nodes / settings` navigation
-- no analytics, ads, accounts, or telemetry
+`dot.` intentionally keeps the interface small: pure-black AMOLED surfaces, monospace/Courier-like typography, sharp geometry and pixel-art accents inspired by Nothing OS.
 
-## Implemented
+## Installation
 
-- Kotlin + Jetpack Compose
-- VLESS URI parser
-- REALITY / TLS metadata parsing
-- TCP, WS, gRPC, XHTTP, HTTPUpgrade transport metadata
-- HTTPS subscription fetching with `Accept: */*`
-- plaintext VLESS subscription decoding
-- lenient Base64 subscription decoding
-- subscription URL redaction
-- node selection UI
-- `TunnelEngine` abstraction
-- Android `VpnService` boundary
-- parser unit tests
-- GitHub Actions debug APK build
+Development builds are produced by GitHub Actions. Open the latest successful `android` workflow run and download the `dot-debug` artifact.
 
-## Next milestone
+Debug builds use the same development signing key, so newer versions can be installed over previous builds without deleting app data.
 
-1. Build/pin libXray AAR.
-2. Implement `XrayTunnelEngine` using libXray `Invoke` API.
-3. Generate Xray JSON from `VlessProfile`.
-4. Establish Android TUN via `VpnService.Builder` only immediately before starting Xray.
-5. Put the TUN fd in Xray config root `env` as `xray.tun.fd`.
-6. Implement socket protection and DNS handling.
-7. Replace the stub CONNECT action with real VPN permission + service lifecycle.
-8. Add foreground notification and live traffic stats.
+## Build from source
 
-## Subscription URL privacy
+Requirements:
 
-Treat `/sub/user/<id>` as a credential. Never commit a real subscription URL, UUID, or raw debug log. `SecretRedactor` is the first redaction layer; production diagnostics should redact again at the logging boundary.
+- JDK 17
+- Android SDK 36 / Build Tools 36.0.0
+- Gradle 9.5.0
 
-## Build
-
-Requires JDK 17, Android SDK 37 and Gradle 9.5.0.
+The CI downloads the pinned libXray Android AAR before compilation.
 
 ```bash
+gradle testDebugUnitTest
 gradle assembleDebug
 ```
 
-The CI workflow builds `app-debug.apk` automatically.
+APK output:
 
-## Package
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
 
-Temporary application ID: `dev.dotclient.android`. Change it before the first public release if desired.
+## Privacy
+
+Treat subscription URLs containing user IDs or tokens as credentials. Do not publish real subscription links, UUIDs or unredacted runtime logs.
+
+## Stack
+
+Kotlin · Jetpack Compose · Android VpnService · OkHttp · libXray / Xray-core · GitHub Actions
+
+## Documentation
+
+- [Architecture](ARCHITECTURE.md)
+- [VPN engine](docs/VPN_ENGINE.md)
+- [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+
+## License
+
+A project license has not been selected yet.
