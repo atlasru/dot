@@ -17,8 +17,11 @@ pub fn parse_vless(raw: &str) -> Result<VlessNode, String> {
     if user_id.is_empty() {
         return Err("VLESS user id is missing".into());
     }
-    if user_id.as_bytes().len() > 30 {
-        return Err("VLESS user id is longer than 30 bytes".into());
+    // Standard VLESS UUIDs are 36 characters in their textual form. Xray also
+    // accepts short custom IDs, so only apply the 30-byte custom-ID limit when
+    // the value is not a valid UUID.
+    if Uuid::parse_str(&user_id).is_err() && user_id.as_bytes().len() > 30 {
+        return Err("custom VLESS user id is longer than 30 bytes".into());
     }
 
     let host = url
@@ -105,6 +108,18 @@ mod tests {
         assert_eq!(node.transport, Transport::Raw);
         assert_eq!(node.sni.as_deref(), Some("example.org"));
         assert_eq!(node.flow.as_deref(), Some("xtls-rprx-vision"));
+    }
+
+    #[test]
+    fn accepts_short_custom_user_id() {
+        let node = parse_vless("vless://custom-id@example.com:443?security=tls&type=tcp#custom").unwrap();
+        assert_eq!(node.user_id, "custom-id");
+    }
+
+    #[test]
+    fn rejects_oversized_custom_user_id() {
+        let error = parse_vless("vless://abcdefghijklmnopqrstuvwxyz123456@example.com:443?security=tls&type=tcp").unwrap_err();
+        assert!(error.contains("custom VLESS user id"));
     }
 
     #[test]
