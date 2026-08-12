@@ -11,7 +11,6 @@ import android.graphics.drawable.Icon
 import android.net.TrafficStats
 import android.net.Uri
 import android.net.VpnService
-import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.Process
 import dev.dotclient.android.MainActivity
@@ -113,14 +112,12 @@ class DotVpnService : VpnService() {
 
     private fun startTrafficMeter(nodeName: String?) {
         trafficFuture?.cancel(true)
-
         val uid = Process.myUid()
         val baselineRx = uidRxBytes(uid)
         val baselineTx = uidTxBytes(uid)
         var previousRx = baselineRx
         var previousTx = baselineTx
         var previousAt = System.nanoTime()
-
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIFICATION_ID, notification("connected", nodeName, 0L, 0L))
 
@@ -129,12 +126,10 @@ class DotVpnService : VpnService() {
             val rx = uidRxBytes(uid)
             val tx = uidTxBytes(uid)
             val elapsedSeconds = ((now - previousAt).coerceAtLeast(1L) / 1_000_000_000.0).coerceAtLeast(0.001)
-
             val downRate = ((rx - previousRx).coerceAtLeast(0L) / elapsedSeconds).toLong()
             val upRate = ((tx - previousTx).coerceAtLeast(0L) / elapsedSeconds).toLong()
             val sessionDown = (rx - baselineRx).coerceAtLeast(0L)
             val sessionUp = (tx - baselineTx).coerceAtLeast(0L)
-
             previousRx = rx
             previousTx = tx
             previousAt = now
@@ -157,15 +152,12 @@ class DotVpnService : VpnService() {
             .put("apiVersion", LIBXRAY_API_VERSION)
             .put("method", "convertShareLinksToXrayJson")
             .put("payload", JSONObject().put("text", rawUri))
-
         val conversionResponse = JSONObject(LibXray.invoke(conversionRequest.toString()))
         if (!conversionResponse.optBoolean("success")) {
             error(conversionResponse.optString("error", "failed to convert VLESS link"))
         }
-
         val generatedJson = conversionResponse.optString("data")
         if (generatedJson.isBlank()) error("libXray returned an empty config")
-
         val config = JSONObject(generatedJson)
         val shareUri = Uri.parse(rawUri)
 
@@ -173,16 +165,10 @@ class DotVpnService : VpnService() {
             for (index in 0 until outbounds.length()) {
                 val outbound = outbounds.optJSONObject(index) ?: continue
                 outbound.remove("sendThrough")
-
                 val stream = outbound.optJSONObject("streamSettings") ?: continue
                 if (!stream.optString("security").equals("reality", ignoreCase = true)) continue
-
-                val reality = stream.optJSONObject("realitySettings") ?: JSONObject().also {
-                    stream.put("realitySettings", it)
-                }
-
+                val reality = stream.optJSONObject("realitySettings") ?: JSONObject().also { stream.put("realitySettings", it) }
                 SERVER_ONLY_REALITY_KEYS.forEach(reality::remove)
-
                 shareUri.getQueryParameter("fp")?.takeIf { it.isNotBlank() }?.let { reality.put("fingerprint", it) }
                 shareUri.getQueryParameter("sni")?.takeIf { it.isNotBlank() }?.let { reality.put("serverName", it) }
                 shareUri.getQueryParameter("pbk")?.takeIf { it.isNotBlank() }?.let {
@@ -198,12 +184,10 @@ class DotVpnService : VpnService() {
         val env = config.optJSONObject("env") ?: JSONObject()
         env.put("xray.tun.fd", tunFd.toString())
         config.put("env", env)
-
         val tunInbound = JSONObject()
             .put("tag", "dot-tun")
             .put("protocol", "tun")
             .put("settings", JSONObject().put("name", "dot0").put("mtu", MTU))
-
         config.put("inbounds", JSONArray().put(tunInbound))
         config.put("log", JSONObject().put("loglevel", "warning"))
         return config.toString()
@@ -249,6 +233,7 @@ class DotVpnService : VpnService() {
         runningNodeName = null
     }
 
+    @Suppress("DEPRECATION")
     private fun notification(
         status: String,
         nodeName: String?,
@@ -265,7 +250,6 @@ class DotVpnService : VpnService() {
             this, 1, disconnectIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-
         val traffic = "↓ ${formatRate(downloadBytesPerSecond)}   ↑ ${formatRate(uploadBytesPerSecond)}"
         val title = if (status == "connected") nodeName ?: "dot. VPN" else "dot. · $status"
 
@@ -277,8 +261,7 @@ class DotVpnService : VpnService() {
             .setContentIntent(pendingIntent)
             .setOngoing(status == "connected" || status == "connecting")
             .setOnlyAlertOnce(true)
-            .setSilent(true)
-            @Suppress("DEPRECATION")
+            .setSound(null)
             .addAction(0, "Disconnect", disconnectPending)
             .build()
     }
@@ -294,18 +277,12 @@ class DotVpnService : VpnService() {
         }
     }
 
-    /**
-     * Android small notification icons are monochrome alpha masks. This converts the
-     * selected launcher bitmap pixel-for-pixel at runtime: black/background pixels become
-     * transparent and the existing artwork becomes a white mask. The artwork is never redrawn.
-     */
     private fun launcherBitmapMaskIcon(resourceId: Int): Icon {
         val source = BitmapFactory.decodeResource(resources, resourceId)
             ?: return Icon.createWithResource(this, R.drawable.ic_notification_dot)
         val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
         val pixels = IntArray(source.width * source.height)
         source.getPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
-
         for (index in pixels.indices) {
             val argb = pixels[index]
             val sourceAlpha = argb ushr 24 and 0xff
@@ -313,16 +290,12 @@ class DotVpnService : VpnService() {
             val green = argb ushr 8 and 0xff
             val blue = argb and 0xff
             val signal = maxOf(red, green, blue)
-            val maskAlpha = if (sourceAlpha == 0 || signal <= 20) {
-                0
-            } else {
-                (((signal - 20) * 255) / 235).coerceIn(0, 255) * sourceAlpha / 255
-            }
+            val maskAlpha = if (sourceAlpha == 0 || signal <= 20) 0
+            else (((signal - 20) * 255) / 235).coerceIn(0, 255) * sourceAlpha / 255
             pixels[index] = (maskAlpha shl 24) or 0x00ffffff
         }
-
         output.setPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
-        if (source != output) source.recycle()
+        source.recycle()
         return Icon.createWithBitmap(output)
     }
 
@@ -350,7 +323,6 @@ class DotVpnService : VpnService() {
         private const val CHANNEL_ID = "dot_vpn"
         private const val NOTIFICATION_ID = 1001
         private const val MTU = 1500
-
         private val SERVER_ONLY_REALITY_KEYS = listOf(
             "target", "dest", "type", "xver", "serverNames", "privateKey", "minClientVer", "maxClientVer",
             "maxTimeDiff", "shortIds", "mldsa65Seed", "limitFallbackUpload", "limitFallbackDownload",
