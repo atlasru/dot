@@ -11,7 +11,7 @@ export default function App() {
   const [vpn, setVpn] = useState<EngineSnapshot>(OFFLINE);
   const [name, setName] = useState("vpn1");
   const [url, setUrl] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [subscriptionBusy, setSubscriptionBusy] = useState(false);
   const [error, setError] = useState<string>("");
 
   const activeGroup = useMemo(
@@ -46,7 +46,7 @@ export default function App() {
 
   async function addSubscription(event: FormEvent) {
     event.preventDefault();
-    setBusy(true);
+    setSubscriptionBusy(true);
     setError("");
     try {
       const group = await invoke<GroupView>("add_subscription", { name, url });
@@ -57,13 +57,13 @@ export default function App() {
     } catch (e) {
       setError(String(e));
     } finally {
-      setBusy(false);
+      setSubscriptionBusy(false);
     }
   }
 
   async function refresh() {
     if (!activeGroup) return;
-    setBusy(true);
+    setSubscriptionBusy(true);
     setError("");
     try {
       await invoke("refresh_subscription", { groupId: activeGroup.id });
@@ -71,32 +71,50 @@ export default function App() {
     } catch (e) {
       setError(String(e));
     } finally {
-      setBusy(false);
+      setSubscriptionBusy(false);
     }
   }
 
   async function toggleVpn() {
-    setBusy(true);
+    if (vpn.phase === "stopping") return;
     setError("");
-    try {
-      if (vpn.phase === "connected" || vpn.phase === "starting") {
+
+    if (vpn.phase === "connected" || vpn.phase === "starting") {
+      try {
         setVpn(await invoke<EngineSnapshot>("disconnect"));
-      } else {
-        if (!activeGroup || !activeNode) throw new Error("select a node first");
-        setVpn(
-          await invoke<EngineSnapshot>("connect", {
-            groupId: activeGroup.id,
-            nodeId: activeNode.id,
-          }),
-        );
+      } catch (e) {
+        setError(String(e));
       }
+      return;
+    }
+
+    if (!activeGroup || !activeNode) {
+      setError("select a node first");
+      return;
+    }
+
+    // Publish the intended state immediately so a second click can cancel the
+    // startup while the backend is validating Xray/TUN/connectivity.
+    setVpn({ phase: "starting", node_name: activeNode.name, message: "starting" });
+    try {
+      setVpn(
+        await invoke<EngineSnapshot>("connect", {
+          groupId: activeGroup.id,
+          nodeId: activeNode.id,
+        }),
+      );
     } catch (e) {
       setError(String(e));
       invoke<EngineSnapshot>("vpn_status").then(setVpn).catch(() => undefined);
-    } finally {
-      setBusy(false);
     }
   }
+
+  const vpnButtonLabel =
+    vpn.phase === "stopping"
+      ? "STOPPING"
+      : vpn.phase === "connected" || vpn.phase === "starting"
+        ? "DISCONNECT"
+        : "CONNECT";
 
   return (
     <main className="shell">
@@ -114,8 +132,12 @@ export default function App() {
         </div>
         <strong>{vpn.node_name ?? activeNode?.name ?? "no node selected"}</strong>
         <small>{vpn.message ?? (activeNode ? `${activeNode.security} · ${activeNode.transport}` : "add a subscription")}</small>
-        <button className="connect" disabled={busy || !activeNode} onClick={toggleVpn}>
-          {vpn.phase === "connected" || vpn.phase === "starting" ? "DISCONNECT" : "CONNECT"}
+        <button
+          className="connect"
+          disabled={vpn.phase === "stopping" || (!activeNode && vpn.phase !== "connected" && vpn.phase !== "starting")}
+          onClick={toggleVpn}
+        >
+          {vpnButtonLabel}
         </button>
       </section>
 
@@ -139,7 +161,7 @@ export default function App() {
               </button>
             ))}
           </div>
-          <button className="quiet" disabled={busy} onClick={refresh}>refresh {activeGroup?.name}</button>
+          <button className="quiet" disabled={subscriptionBusy} onClick={refresh}>refresh {activeGroup?.name}</button>
         </section>
       )}
 
@@ -154,7 +176,7 @@ export default function App() {
             url
             <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" type="url" />
           </label>
-          <button className="quiet" disabled={busy || !name.trim() || !url.trim()} type="submit">add / update</button>
+          <button className="quiet" disabled={subscriptionBusy || !name.trim() || !url.trim()} type="submit">add / update</button>
         </form>
       </section>
 

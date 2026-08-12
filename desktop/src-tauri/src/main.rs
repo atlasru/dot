@@ -3,15 +3,25 @@ mod config;
 #[cfg(test)]
 mod config_smoke;
 mod engine;
+#[cfg(windows)]
+mod job;
 mod model;
+mod session;
 mod storage;
 mod subscription;
 mod vless;
 
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::AtomicBool,
+        Arc, Mutex, RwLock,
+    },
+};
 
 use commands::SharedState;
-use engine::VpnEngine;
+use engine::{spawn_watchdog, VpnEngine};
+use model::EngineSnapshot;
 use storage::Store;
 use tauri::Manager;
 
@@ -23,11 +33,25 @@ fn main() {
             let runtime_source = discover_runtime_source(&resource_dir);
             let store = Store::open(data_dir.join("state.json"))
                 .map_err(std::io::Error::other)?;
-            let engine = VpnEngine::new(runtime_source, data_dir.join("vpn"))
-                .map_err(std::io::Error::other)?;
+
+            let snapshot = Arc::new(RwLock::new(EngineSnapshot::default()));
+            let cancel = Arc::new(AtomicBool::new(false));
+            let engine = Arc::new(Mutex::new(
+                VpnEngine::new(
+                    runtime_source,
+                    data_dir.join("vpn"),
+                    Arc::clone(&snapshot),
+                    Arc::clone(&cancel),
+                )
+                .map_err(std::io::Error::other)?,
+            ));
+            spawn_watchdog(&engine);
+
             app.manage(SharedState {
                 store,
-                engine: std::sync::Mutex::new(engine),
+                engine,
+                snapshot,
+                cancel,
             });
             Ok(())
         })

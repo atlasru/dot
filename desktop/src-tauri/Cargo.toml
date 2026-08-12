@@ -1,6 +1,6 @@
 [package]
 name = "dot-desktop"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 description = "dot. VLESS client for Windows"
 authors = ["atlasru"]
 edition = "2021"
@@ -19,3 +19,10 @@ uuid = { version = "1.18", features = ["v5", "serde"] }
 base64 = "0.22"
 percent-encoding = "2.3"
 thiserror = "2.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading"
+] }
