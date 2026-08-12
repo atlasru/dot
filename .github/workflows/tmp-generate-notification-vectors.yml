@@ -18,6 +18,15 @@ jobs:
         with:
           ref: android/v0.1.1-tile-notification-sync
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install --disable-pip-version-check pillow
+
       - name: Recover launcher PNGs with ffmpeg
         shell: bash
         run: |
