@@ -1,5 +1,7 @@
 mod commands;
 mod config;
+#[cfg(test)]
+mod config_smoke;
 mod engine;
 mod model;
 mod storage;
