@@ -21,6 +21,9 @@ data class DotUiState(
     val runningNodeName: String? = null,
     val nodeLatenciesMs: Map<String, Long> = emptyMap(),
     val testingNodeIds: Set<String> = emptySet(),
+    val connectionTestRunning: Boolean = false,
+    val connectionTestLatencyMs: Long? = null,
+    val connectionTestError: String? = null,
 ) {
     val selectedSubscription: Subscription?
         get() = subscriptions.firstOrNull { it.id == selectedSubscriptionId }
