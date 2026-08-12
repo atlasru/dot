@@ -15,6 +15,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -62,44 +64,35 @@ import dev.dotclient.android.ui.theme.DotThemeMode
 import kotlinx.coroutines.launch
 import kotlin.math.max
 
-private enum class Screen { HOME, NODES, SETTINGS, ABOUT }
+private enum class Screen { MAIN, SETTINGS, ABOUT }
+private val DotRed = Color(0xFFFF2D2D)
 
 @Composable
 fun DotApp(viewModel: MainViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    var screen by remember { mutableStateOf(Screen.HOME) }
-
-    BackHandler(enabled = screen == Screen.NODES) { screen = Screen.HOME }
+    var screen by remember { mutableStateOf(Screen.MAIN) }
 
     val vpnPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            viewModel.onVpnPermissionGranted()
-        } else {
-            viewModel.onVpnPermissionDenied()
-        }
+        if (result.resultCode == Activity.RESULT_OK) viewModel.onVpnPermissionGranted()
+        else viewModel.onVpnPermissionDenied()
     }
 
     val beginVpnPermissionFlow = {
         if (viewModel.requestVpnPermission()) {
             val permissionIntent = VpnService.prepare(context)
-            if (permissionIntent != null) {
-                vpnPermissionLauncher.launch(permissionIntent)
-            } else {
-                viewModel.onVpnPermissionGranted()
-            }
+            if (permissionIntent != null) vpnPermissionLauncher.launch(permissionIntent)
+            else viewModel.onVpnPermissionGranted()
         }
     }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
-    ) {
-        beginVpnPermissionFlow()
-    }
+    ) { beginVpnPermissionFlow() }
 
-    val requestConnect = {
+    val toggleVpn = {
         when (state.vpnState) {
             VpnConnectionState.CONNECTED,
             VpnConnectionState.CONNECTING,
@@ -118,39 +111,23 @@ fun DotApp(viewModel: MainViewModel) {
         }
     }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-    ) { padding ->
+    Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
         when (screen) {
-            Screen.HOME -> HomeScreen(
-                state = state,
-                onSettings = { screen = Screen.SETTINGS },
-                onOpenNodes = { screen = Screen.NODES },
-                onConnect = requestConnect,
-                modifier = Modifier.padding(padding),
-            )
-
-            Screen.NODES -> NodesScreen(
+            Screen.MAIN -> MainDashboard(
                 state = state,
                 viewModel = viewModel,
                 onSettings = { screen = Screen.SETTINGS },
+                onToggleVpn = toggleVpn,
                 onAddSubscription = { screen = Screen.SETTINGS },
-                onClose = { screen = Screen.HOME },
-                onConnect = {
-                    screen = Screen.HOME
-                    requestConnect()
-                },
                 modifier = Modifier.padding(padding),
             )
-
             Screen.SETTINGS -> SettingsScreen(
                 state = state,
                 viewModel = viewModel,
-                onBack = { screen = Screen.HOME },
+                onBack = { screen = Screen.MAIN },
                 onAbout = { screen = Screen.ABOUT },
                 modifier = Modifier.padding(padding),
             )
-
             Screen.ABOUT -> AboutScreen(
                 onBack = { screen = Screen.SETTINGS },
                 modifier = Modifier.padding(padding),
@@ -160,15 +137,16 @@ fun DotApp(viewModel: MainViewModel) {
 }
 
 @Composable
-private fun HomeScreen(
+private fun MainDashboard(
     state: DotUiState,
+    viewModel: MainViewModel,
     onSettings: () -> Unit,
-    onOpenNodes: () -> Unit,
-    onConnect: () -> Unit,
+    onToggleVpn: () -> Unit,
+    onAddSubscription: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier.fillMaxSize().padding(horizontal = 22.dp, vertical = 18.dp),
+        modifier = modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         DotHeader(
@@ -177,176 +155,116 @@ private fun HomeScreen(
             onSettings = onSettings,
         )
 
-        Spacer(Modifier.weight(0.65f))
-
-        if (state.themeMode == DotThemeMode.AMOLED) {
-            PixelStatusMatrix(
-                active = state.vpnConnected,
-                busy = state.requestingVpnPermission || state.vpnBusy,
-            )
-        } else {
-            Box(
-                modifier = Modifier.size(96.dp).border(1.dp, MaterialTheme.colorScheme.primary, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (state.requestingVpnPermission || state.vpnBusy) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(34.dp),
-                        strokeWidth = 1.5.dp,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                } else {
-                    Box(
-                        Modifier.size(14.dp).background(
-                            if (state.vpnConnected) MaterialTheme.colorScheme.primary else Color(0xFF7A7A7A),
-                            CircleShape,
-                        )
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(22.dp))
-        Text(
-            text = when {
-                state.requestingVpnPermission -> "permission"
-                state.vpnState == VpnConnectionState.CONNECTING -> "connecting"
-                state.vpnState == VpnConnectionState.CONNECTED -> "connected"
-                state.vpnState == VpnConnectionState.DISCONNECTING -> "disconnecting"
-                state.vpnState == VpnConnectionState.ERROR -> "error"
-                else -> "offline"
-            },
-            style = MaterialTheme.typography.titleLarge,
+        Spacer(Modifier.height(10.dp))
+        PixelOrb(
+            state = state,
+            onClick = onToggleVpn,
         )
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
+        Text(connectionLabel(state), style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(3.dp))
+        val selectedProfile = state.selectedProfile
         Text(
-            text = state.selectedProfile?.name ?: "no node selected",
-            style = MaterialTheme.typography.bodyMedium,
-            color = Color(0xFF8A8A8A),
+            text = when {
+                state.vpnConnected -> state.runningNodeName ?: selectedProfile?.name ?: "connected"
+                state.vpnBusy -> state.runningNodeName ?: selectedProfile?.name ?: "working…"
+                selectedProfile != null -> "tap orb to connect · ${selectedProfile.name}"
+                else -> "select a node below"
+            },
+            color = Color(0xFF777777),
+            style = MaterialTheme.typography.labelMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
 
-        Spacer(Modifier.height(22.dp))
-        SelectedNodeControl(
-            groupName = state.selectedSubscription?.name ?: "nodes.",
-            nodeName = state.selectedProfile?.name,
-            onClick = onOpenNodes,
-        )
-
-        Spacer(Modifier.height(12.dp))
-        Button(
-            onClick = onConnect,
-            enabled = !state.loading && !state.requestingVpnPermission && !state.vpnBusy,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                disabledContainerColor = Color(0xFF2A2A2A),
-                disabledContentColor = Color(0xFF777777),
-            ),
-            shape = RoundedCornerShape(2.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                if (state.vpnConnected) "DISCONNECT" else "CONNECT",
-                style = MaterialTheme.typography.labelLarge,
-            )
-        }
-
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(
-                "↓ ${formatRate(state.downloadBytesPerSecond)}",
-                color = Color(0xFF868686),
-                style = MaterialTheme.typography.labelMedium,
-            )
-            Text(
-                "↑ ${formatRate(state.uploadBytesPerSecond)}",
-                color = Color(0xFF868686),
-                style = MaterialTheme.typography.labelMedium,
-            )
+            Column {
+                Text("DOWNLOAD", color = Color(0xFF555555), style = MaterialTheme.typography.labelMedium)
+                Text("↓ ${formatRate(state.downloadBytesPerSecond)}", style = MaterialTheme.typography.bodyMedium)
+                Text(formatBytes(state.sessionDownloadBytes), color = Color(0xFF666666), style = MaterialTheme.typography.labelMedium)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("UPLOAD", color = Color(0xFF555555), style = MaterialTheme.typography.labelMedium)
+                Text("↑ ${formatRate(state.uploadBytesPerSecond)}", style = MaterialTheme.typography.bodyMedium)
+                Text(formatBytes(state.sessionUploadBytes), color = Color(0xFF666666), style = MaterialTheme.typography.labelMedium)
+            }
         }
 
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(12.dp))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF202020)))
+        Spacer(Modifier.height(10.dp))
 
-        state.message?.let {
-            Text(
-                text = it,
-                color = Color(0xFF8A8A8A),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
-}
+        GroupToolbar(
+            state = state,
+            viewModel = viewModel,
+            onAddSubscription = onAddSubscription,
+        )
 
-@Composable
-private fun PixelStatusMatrix(active: Boolean, busy: Boolean) {
-    val pattern = listOf(
-        "0011100",
-        "0110110",
-        "1100011",
-        "1000001",
-        "1100011",
-        "0110110",
-        "0011100",
-    )
-    val on = if (active) MaterialTheme.colorScheme.primary else Color(0xFF666666)
-    val off = Color(0xFF151515)
+        Spacer(Modifier.height(8.dp))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF202020)))
 
-    Column(
-        modifier = Modifier
-            .size(96.dp)
-            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(2.dp))
-            .padding(13.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        pattern.forEachIndexed { rowIndex, row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                row.forEachIndexed { colIndex, cell ->
-                    val blink = busy && ((rowIndex + colIndex) % 3 == 0)
-                    Box(
-                        Modifier
-                            .size(7.dp)
-                            .background(if (cell == '1' || blink) on else off)
-                    )
+        val group = state.selectedSubscription
+        when {
+            group == null -> {
+                EmptyState(
+                    title = "no subscriptions",
+                    hint = "add a group to load nodes.",
+                    action = "ADD SUBSCRIPTION",
+                    onAction = onAddSubscription,
+                )
+            }
+            group.profiles.isEmpty() -> {
+                EmptyState(
+                    title = "no nodes in ${group.name}",
+                    hint = if (state.loadingSubscriptionId == group.id) "updating subscription…" else "refresh the group or edit its URL.",
+                    action = "OPEN SETTINGS",
+                    onAction = onAddSubscription,
+                )
+            }
+            else -> {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    contentPadding = PaddingValues(top = 6.dp, bottom = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    items(group.profiles, key = { it.id }) { profile ->
+                        DashboardNodeRow(
+                            profile = profile,
+                            selected = profile.id == group.selectedProfileId,
+                            running = state.vpnConnected && profile.name == state.runningNodeName,
+                            latencyMs = state.nodeLatenciesMs[profile.id],
+                            testing = profile.id in state.testingNodeIds,
+                            onSelect = {
+                                if (state.vpnConnected && profile.name != state.runningNodeName) {
+                                    viewModel.switchProfile(profile.id)
+                                } else {
+                                    viewModel.selectProfile(profile.id)
+                                }
+                            },
+                            onTest = { viewModel.testNode(profile) },
+                            onConnect = {
+                                if (state.vpnConnected) viewModel.switchProfile(profile.id)
+                                else {
+                                    viewModel.selectProfile(profile.id)
+                                    onToggleVpn()
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }
-    }
-}
 
-@Composable
-private fun SelectedNodeControl(
-    groupName: String,
-    nodeName: String?,
-    onClick: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 13.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(groupName, style = MaterialTheme.typography.titleLarge)
-            Text("⌄", style = MaterialTheme.typography.titleLarge, color = Color(0xFFB0B0B0))
-        }
-        if (!nodeName.isNullOrBlank()) {
-            Spacer(Modifier.height(3.dp))
+        state.message?.takeIf { !it.equals("connected", ignoreCase = true) }?.let {
             Text(
-                nodeName,
-                color = Color(0xFF777777),
+                it,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                color = Color(0xFF666666),
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -356,196 +274,242 @@ private fun SelectedNodeControl(
 }
 
 @Composable
-private fun NodesScreen(
-    state: DotUiState,
-    viewModel: MainViewModel,
-    onSettings: () -> Unit,
-    onAddSubscription: () -> Unit,
-    onClose: () -> Unit,
-    onConnect: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var groupMenuOpen by remember { mutableStateOf(false) }
+private fun PixelOrb(state: DotUiState, onClick: () -> Unit) {
+    val active = state.vpnConnected
+    val busy = state.requestingVpnPermission || state.vpnBusy
+    val error = state.vpnState == VpnConnectionState.ERROR
+    val pattern = listOf(
+        "00011111000",
+        "00110001100",
+        "01100000110",
+        "11001010011",
+        "10010101001",
+        "10001010001",
+        "10010101001",
+        "11001010011",
+        "01100000110",
+        "00110001100",
+        "00011111000",
+    )
 
-    Column(modifier.fillMaxSize().padding(horizontal = 22.dp, vertical = 18.dp)) {
-        DotHeader(title = "dot.", onSettings = onSettings)
-        Spacer(Modifier.height(22.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("nodes.", style = MaterialTheme.typography.headlineLarge)
-                Spacer(Modifier.size(10.dp))
-                Text(
-                    "×",
-                    modifier = Modifier.clickable(onClick = onClose).padding(horizontal = 8.dp, vertical = 4.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.titleLarge,
-                )
-            }
-
-            Box {
-                Row(
-                    modifier = Modifier
-                        .background(Color(0xFF171717), RoundedCornerShape(8.dp))
-                        .clickable { groupMenuOpen = true }
-                        .padding(horizontal = 13.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = state.selectedSubscription?.name ?: "group",
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                    )
-                    Spacer(Modifier.size(8.dp))
-                    Text("⌄", color = Color(0xFF9A9A9A))
-                }
-
-                DropdownMenu(
-                    expanded = groupMenuOpen,
-                    onDismissRequest = { groupMenuOpen = false },
-                    containerColor = Color(0xFF171717),
-                ) {
-                    state.subscriptions.forEach { subscription ->
-                        DropdownMenuItem(
-                            text = {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                ) {
-                                    Text(subscription.name)
-                                    if (subscription.id == state.selectedSubscriptionId) Text("✓")
-                                }
-                            },
-                            onClick = {
-                                viewModel.selectSubscription(subscription.id)
-                                groupMenuOpen = false
-                            },
-                        )
+    Box(
+        modifier = Modifier
+            .size(132.dp)
+            .border(
+                1.dp,
+                if (active) Color(0xFF444444) else MaterialTheme.colorScheme.outline,
+                CircleShape,
+            )
+            .clickable(enabled = !state.loading && !state.requestingVpnPermission, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            pattern.forEachIndexed { rowIndex, row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    row.forEachIndexed { colIndex, cell ->
+                        val busyPixel = busy && (rowIndex + colIndex) % 4 == 0
+                        val color = when {
+                            error && (rowIndex == colIndex || rowIndex + colIndex == 10) -> DotRed
+                            cell == '1' && active -> Color.White
+                            cell == '1' && busyPixel -> Color(0xFFBDBDBD)
+                            cell == '1' -> Color(0xFF555555)
+                            else -> Color.Transparent
+                        }
+                        Box(Modifier.size(6.dp).background(color))
                     }
-                    DropdownMenuItem(
-                        text = { Text("+ add group") },
-                        onClick = {
-                            groupMenuOpen = false
-                            onAddSubscription()
-                        },
-                    )
                 }
             }
         }
+        Box(
+            Modifier
+                .size(if (active) 12.dp else 8.dp)
+                .background(
+                    when {
+                        error -> DotRed
+                        active -> DotRed
+                        busy -> Color(0xFF8A8A8A)
+                        else -> Color(0xFF383838)
+                    },
+                    CircleShape,
+                )
+        )
+    }
+}
 
-        Spacer(Modifier.height(18.dp))
+@Composable
+private fun GroupToolbar(
+    state: DotUiState,
+    viewModel: MainViewModel,
+    onAddSubscription: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val group = state.selectedSubscription
+    val canTest = group != null && group.profiles.isNotEmpty() &&
+        (state.vpnState == VpnConnectionState.DISCONNECTED || state.vpnState == VpnConnectionState.ERROR) &&
+        state.testingNodeIds.isEmpty()
 
-        val selectedGroup = state.selectedSubscription
-        if (selectedGroup == null) {
-            EmptyState(
-                title = "no groups yet",
-                hint = "open settings and add a subscription.",
-                action = "ADD SUBSCRIPTION",
-                onAction = onAddSubscription,
-            )
-        } else if (selectedGroup.profiles.isEmpty()) {
-            EmptyState(
-                title = "no nodes in ${selectedGroup.name}",
-                hint = if (state.loadingSubscriptionId == selectedGroup.id) {
-                    "updating subscription…"
-                } else {
-                    "update the subscription in settings."
-                },
-                action = "OPEN SETTINGS",
-                onAction = onSettings,
-            )
-        } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(1.dp),
-                modifier = Modifier.fillMaxWidth(),
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box {
+            Row(
+                modifier = Modifier
+                    .clickable { menuOpen = true }
+                    .padding(vertical = 8.dp, horizontal = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                items(selectedGroup.profiles, key = { it.id }) { profile ->
-                    NodeRow(
-                        profile = profile,
-                        selected = profile.id == selectedGroup.selectedProfileId,
-                        onSelect = { viewModel.selectProfile(profile.id) },
-                        onConnect = {
-                            viewModel.selectProfile(profile.id)
-                            onConnect()
+                Text(group?.name ?: "subscriptions", style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.width(8.dp))
+                Text("⌄", color = Color(0xFF777777))
+            }
+            DropdownMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                containerColor = MaterialTheme.colorScheme.surface,
+            ) {
+                state.subscriptions.forEach { subscription ->
+                    DropdownMenuItem(
+                        text = {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(subscription.name)
+                                Text("${subscription.profiles.size}", color = Color(0xFF666666))
+                            }
                         },
-                        onTest = { viewModel.testNode(profile.rawUri) },
+                        onClick = {
+                            viewModel.selectSubscription(subscription.id)
+                            menuOpen = false
+                        },
                     )
                 }
+                DropdownMenuItem(
+                    text = { Text("+ add subscription") },
+                    onClick = {
+                        menuOpen = false
+                        onAddSubscription()
+                    },
+                )
             }
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (state.loadingSubscriptionId == group?.id) "··" else "↻",
+                modifier = Modifier
+                    .clickable(enabled = group != null && state.loadingSubscriptionId == null) {
+                        group?.let { viewModel.refreshSubscription(it.id) }
+                    }
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                color = Color(0xFFAAAAAA),
+                style = MaterialTheme.typography.titleLarge,
+            )
+            Text(
+                if (state.testingNodeIds.isNotEmpty()) "TESTING" else "TEST",
+                modifier = Modifier
+                    .border(1.dp, if (canTest) Color(0xFF383838) else Color(0xFF202020), RoundedCornerShape(2.dp))
+                    .clickable(enabled = canTest) { viewModel.testAllNodes() }
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                color = if (canTest) Color(0xFFBDBDBD) else Color(0xFF444444),
+                style = MaterialTheme.typography.labelMedium,
+            )
         }
     }
 }
 
 @Composable
-private fun NodeRow(
+private fun DashboardNodeRow(
     profile: VlessProfile,
     selected: Boolean,
+    running: Boolean,
+    latencyMs: Long?,
+    testing: Boolean,
     onSelect: () -> Unit,
+    onTest: () -> Unit,
     onConnect: () -> Unit,
-    onTest: suspend () -> Result<Long>,
 ) {
     var menuOpen by remember(profile.id) { mutableStateOf(false) }
-    var latency by remember(profile.id) { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(if (selected) Color(0xFF111111) else Color.Transparent)
             .clickable(onClick = onSelect)
-            .background(if (selected) Color(0xFF141414) else Color.Black)
-            .border(
-                width = 1.dp,
-                color = if (selected) Color(0xFF303030) else Color(0xFF171717),
-                shape = RoundedCornerShape(2.dp),
-            )
-            .padding(horizontal = 14.dp, vertical = 13.dp),
+            .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(14.dp).border(
-                1.dp,
-                if (selected) Color.White else Color(0xFF666666),
-                CircleShape,
-            ),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (selected) Box(Modifier.size(6.dp).background(Color.White, CircleShape))
-        }
-
-        Spacer(Modifier.size(12.dp))
-
+            Modifier
+                .width(3.dp)
+                .height(36.dp)
+                .background(if (selected) DotRed else Color(0xFF181818))
+        )
+        Spacer(Modifier.width(11.dp))
         Column(Modifier.weight(1f)) {
-            Text(profile.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    profile.name,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (running) {
+                    Spacer(Modifier.width(8.dp))
+                    Text("LIVE", color = DotRed, style = MaterialTheme.typography.labelMedium)
+                }
+            }
             Spacer(Modifier.height(3.dp))
             Text(
-                "${profile.host}:${profile.port} · ${profile.security.name.lowercase()} · ${profile.transport.name.lowercase()}",
-                color = Color(0xFF707070),
+                "${profile.security.name.lowercase()} · ${profile.transport.name.lowercase()} · ${profile.host}:${profile.port}",
+                color = Color(0xFF5F5F5F),
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            latency?.let { value ->
-                Spacer(Modifier.height(3.dp))
-                Text(value, color = Color(0xFF8A8A8A), style = MaterialTheme.typography.labelMedium)
-            }
         }
-
+        Spacer(Modifier.width(10.dp))
+        Text(
+            when {
+                testing -> "··"
+                latencyMs != null -> "${latencyMs} ms"
+                else -> "--"
+            },
+            color = when {
+                testing -> Color(0xFF777777)
+                latencyMs != null && latencyMs > 300 -> Color(0xFF777777)
+                latencyMs != null -> Color(0xFFB8B8B8)
+                else -> Color(0xFF3F3F3F)
+            },
+            style = MaterialTheme.typography.labelMedium,
+        )
         Box {
             Text(
-                text = "⋮",
-                modifier = Modifier.clickable { menuOpen = true }.padding(horizontal = 8.dp, vertical = 4.dp),
-                color = Color(0xFFB0B0B0),
+                "⋮",
+                modifier = Modifier.clickable { menuOpen = true }.padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                color = Color(0xFF777777),
                 style = MaterialTheme.typography.titleLarge,
             )
             DropdownMenu(
                 expanded = menuOpen,
                 onDismissRequest = { menuOpen = false },
-                containerColor = Color(0xFF171717),
+                containerColor = MaterialTheme.colorScheme.surface,
             ) {
+                DropdownMenuItem(
+                    text = { Text(if (running) "connected" else "connect") },
+                    onClick = {
+                        menuOpen = false
+                        if (!running) onConnect()
+                    },
+                    enabled = !running,
+                )
+                DropdownMenuItem(
+                    text = { Text("url test · Cloudflare") },
+                    onClick = {
+                        menuOpen = false
+                        onTest()
+                    },
+                )
                 DropdownMenuItem(
                     text = { Text("select") },
                     onClick = {
@@ -553,38 +517,27 @@ private fun NodeRow(
                         onSelect()
                     },
                 )
-                DropdownMenuItem(
-                    text = { Text("connect") },
-                    onClick = {
-                        menuOpen = false
-                        onConnect()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("url test · Cloudflare") },
-                    onClick = {
-                        menuOpen = false
-                        latency = "testing http://cp.cloudflare.com/ …"
-                        scope.launch {
-                            latency = onTest().fold(
-                                onSuccess = { "${it} ms · cp.cloudflare.com" },
-                                onFailure = { it.message ?: "url test failed" },
-                            )
-                        }
-                    },
-                )
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            "${profile.security.name.lowercase()} / ${profile.transport.name.lowercase()}",
-                            color = Color(0xFF707070),
-                        )
-                    },
-                    onClick = { menuOpen = false },
-                    enabled = false,
-                )
             }
         }
+    }
+}
+
+private fun connectionLabel(state: DotUiState): String = when {
+    state.requestingVpnPermission -> "permission"
+    state.vpnState == VpnConnectionState.CONNECTING -> "connecting"
+    state.vpnState == VpnConnectionState.CONNECTED -> "connected"
+    state.vpnState == VpnConnectionState.DISCONNECTING -> "disconnecting"
+    state.vpnState == VpnConnectionState.ERROR -> "error"
+    else -> "offline"
+}
+
+private fun formatBytes(bytes: Long): String {
+    val value = bytes.coerceAtLeast(0L).toDouble()
+    return when {
+        value >= 1024.0 * 1024.0 * 1024.0 -> String.format("%.2f GB", value / (1024.0 * 1024.0 * 1024.0))
+        value >= 1024.0 * 1024.0 -> String.format("%.1f MB", value / (1024.0 * 1024.0))
+        value >= 1024.0 -> String.format("%.0f KB", value / 1024.0)
+        else -> "${value.toLong()} B"
     }
 }
 
