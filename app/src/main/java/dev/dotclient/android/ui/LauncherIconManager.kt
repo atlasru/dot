@@ -21,7 +21,6 @@ object LauncherIconManager {
 
     fun apply(context: Context, icon: LauncherIcon) {
         val pm = context.packageManager
-        // Enable the target first so the launcher never observes a moment with no entry point.
         pm.setComponentEnabledSetting(
             ComponentName(context, icon.componentClass),
             PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
