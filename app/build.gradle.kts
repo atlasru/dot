@@ -16,7 +16,7 @@ if (!stableDebugKeystore.exists()) {
     )
 }
 
-val generatedNotificationResDir = layout.buildDirectory.dir("generated/dot-notification-icons/res")
+val generatedNotificationResDir = layout.buildDirectory.dir("generated/dot-notification-icons/res").get().asFile
 val generateNotificationIcons = tasks.register("generateNotificationIcons") {
     val redDotSource = file("src/main/res/drawable/ic_launcher_red_dot_foreground.png")
     val wordmarkSource = file("src/main/res/drawable/ic_launcher_wordmark_foreground.png")
@@ -24,7 +24,7 @@ val generateNotificationIcons = tasks.register("generateNotificationIcons") {
     outputs.dir(generatedNotificationResDir)
 
     doLast {
-        val drawableDir = generatedNotificationResDir.get().asFile.resolve("drawable")
+        val drawableDir = generatedNotificationResDir.resolve("drawable")
         drawableDir.mkdirs()
 
         fun deriveMask(sourceFile: java.io.File, outputFile: java.io.File) {
