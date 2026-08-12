@@ -1,6 +1,6 @@
 # dot. architecture
 
-## Data path
+## Runtime data path
 
 ```text
 subscription URL
@@ -9,19 +9,54 @@ subscription URL
   -> VlessUriParser
   -> VlessProfile[]
   -> selected profile
-  -> XrayConfigBuilder [next milestone]
-  -> TunnelEngine
   -> DotVpnService
-  -> Android TUN fd
-  -> libXray/Xray-core
+  -> Android VpnService.Builder
+  -> TUN file descriptor
+  -> libXray share-link conversion
+  -> dot. config normalization
+  -> runXrayFromJson
+  -> Xray-core
 ```
+
+## Application layers
+
+```text
+Compose UI
+  -> MainViewModel / persisted app state
+  -> subscription + node models
+  -> VPN runtime state
+  -> DotVpnService
+  -> libXray / Xray-core
+```
+
+The UI does not own the tunnel. `DotVpnService` owns the Android VPN lifecycle and updates `VpnRuntime`, which is observed by the Home screen, notification and Quick Settings tile.
+
+## VPN lifecycle
+
+```text
+offline
+  -> VpnService.prepare()
+  -> connecting
+  -> establish TUN
+  -> protect core sockets
+  -> start libXray
+  -> connected
+  -> disconnecting
+  -> stop Xray + close TUN
+  -> offline
+```
+
+## Configuration notes
+
+`dot.` currently uses libXray v26.7.28. Share links are converted by libXray and then normalized before being passed to Xray-core. This normalization removes values that the pinned libXray release serializes incorrectly for current Xray, including the outbound `sendThrough` display-name field and server-only REALITY fields.
+
+The Android-provided TUN fd is injected through root `env` as `xray.tun.fd`.
 
 ## Invariants
 
-- UI never parses Xray JSON.
-- Subscription response format is detected, not assumed.
-- VLESS URLs are normalized into our own model before core configuration.
-- Credentials are redacted before diagnostics.
-- `VpnService.Builder.establish()` must not run unless the packet engine is ready.
-- libXray is pinned; upgrades are explicit due to API instability.
-- A temporary ping/test Xray instance must not overlap a running instance in the same process; current libXray documents process-wide state that can be affected by overlapping instances.
+- subscription response format is detected rather than assumed
+- credentials must not be included in user-facing diagnostics
+- the VPN service owns TUN and Xray lifecycle
+- Xray outbound sockets are protected with `VpnService.protect()`
+- libXray is pinned and upgraded deliberately because its invocation API and generated configuration may change
+- UI connection state comes from the real VPN runtime, not a separate local boolean

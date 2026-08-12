@@ -1,0 +1,45 @@
+name: Bug report
+description: Report a reproducible problem in dot.
+title: "bug: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste private subscription URLs, UUIDs or unredacted credentials.
+  - type: input
+    id: version
+    attributes:
+      label: dot. version
+      placeholder: 0.0.14
+    validations:
+      required: true
+  - type: input
+    id: android
+    attributes:
+      label: Android version / device
+      placeholder: Android 16 / Nothing Phone 3
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the expected and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Tap ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Redacted error / logs
+      description: Remove subscription tokens and UUIDs before posting.
