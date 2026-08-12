@@ -2,6 +2,7 @@ package dev.dotclient.android.ui
 
 import android.app.Application
 import android.content.Intent
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -13,11 +14,16 @@ import dev.dotclient.android.ui.theme.DotThemeMode
 import dev.dotclient.android.vpn.DotVpnService
 import dev.dotclient.android.vpn.VpnConnectionState
 import dev.dotclient.android.vpn.VpnRuntime
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.util.concurrent.TimeUnit
 
 class MainViewModel(
     application: Application,
@@ -26,6 +32,12 @@ class MainViewModel(
     private val subscriptionStore = SubscriptionStore(application)
     private val uiPreferences = application.getSharedPreferences("dot_ui", Application.MODE_PRIVATE)
     private val nodeLatencyTester = NodeLatencyTester(application)
+    private val connectionTestClient = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .callTimeout(7, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .build()
 
     private val mutableState = MutableStateFlow(loadInitialState())
     val state: StateFlow<DotUiState> = mutableState.asStateFlow()
@@ -46,6 +58,9 @@ class MainViewModel(
                         sessionDownloadBytes = runtime.sessionDownloadBytes,
                         sessionUploadBytes = runtime.sessionUploadBytes,
                         runningNodeName = runtime.nodeName,
+                        connectionTestRunning = if (runtime.state == VpnConnectionState.CONNECTED) it.connectionTestRunning else false,
+                        connectionTestLatencyMs = if (runtime.state == VpnConnectionState.CONNECTED) it.connectionTestLatencyMs else null,
+                        connectionTestError = if (runtime.state == VpnConnectionState.CONNECTED) it.connectionTestError else null,
                     )
                 }
             }
@@ -222,6 +237,8 @@ class MainViewModel(
                 vpnPermissionGranted = true,
                 vpnState = VpnConnectionState.CONNECTING,
                 message = "starting VLESS tunnel…",
+                connectionTestLatencyMs = null,
+                connectionTestError = null,
             )
         }
 
@@ -238,6 +255,9 @@ class MainViewModel(
             it.copy(
                 vpnState = VpnConnectionState.DISCONNECTING,
                 message = "disconnecting…",
+                connectionTestRunning = false,
+                connectionTestLatencyMs = null,
+                connectionTestError = null,
             )
         }
         val application = getApplication<Application>()
@@ -288,11 +308,7 @@ class MainViewModel(
 
     fun testAllNodes() {
         val profiles = state.value.profiles
-        if (profiles.isEmpty()) return
-        if (state.value.vpnState != VpnConnectionState.DISCONNECTED && state.value.vpnState != VpnConnectionState.ERROR) {
-            mutableState.update { it.copy(message = "disconnect VPN before url test") }
-            return
-        }
+        if (profiles.isEmpty() || state.value.testingNodeIds.isNotEmpty()) return
         viewModelScope.launch {
             mutableState.update { it.copy(testingNodeIds = it.testingNodeIds + profiles.map { p -> p.id }) }
             for (profile in profiles) {
@@ -313,6 +329,51 @@ class MainViewModel(
         }
     }
 
+    fun testConnection() {
+        if (!state.value.vpnConnected || state.value.connectionTestRunning) return
+        viewModelScope.launch {
+            mutableState.update {
+                it.copy(
+                    connectionTestRunning = true,
+                    connectionTestLatencyMs = null,
+                    connectionTestError = null,
+                )
+            }
+
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val request = Request.Builder()
+                        .url(NodeLatencyTester.TEST_URL)
+                        .header("Cache-Control", "no-cache")
+                        .build()
+                    val startedAt = SystemClock.elapsedRealtime()
+                    connectionTestClient.newCall(request).execute().use { response ->
+                        if (response.code !in 200..399) error("HTTP ${response.code}")
+                    }
+                    SystemClock.elapsedRealtime() - startedAt
+                }
+            }
+
+            result.onSuccess { latency ->
+                mutableState.update {
+                    it.copy(
+                        connectionTestRunning = false,
+                        connectionTestLatencyMs = latency,
+                        connectionTestError = null,
+                    )
+                }
+            }.onFailure { error ->
+                mutableState.update {
+                    it.copy(
+                        connectionTestRunning = false,
+                        connectionTestLatencyMs = null,
+                        connectionTestError = error.message ?: "connection test failed",
+                    )
+                }
+            }
+        }
+    }
+
     fun switchProfile(id: String) {
         val group = state.value.selectedSubscription ?: return
         val profile = group.profiles.firstOrNull { it.id == id } ?: return
@@ -323,6 +384,9 @@ class MainViewModel(
             it.copy(
                 vpnState = VpnConnectionState.CONNECTING,
                 message = "switching to ${profile.name}…",
+                connectionTestRunning = false,
+                connectionTestLatencyMs = null,
+                connectionTestError = null,
             )
         }
         val application = getApplication<Application>()
