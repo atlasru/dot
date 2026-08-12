@@ -33,6 +33,33 @@ pub fn select_node(group_id: String, node_id: String, state: State<'_, SharedSta
 }
 
 #[tauri::command]
+pub async fn switch_node(group_id: String, node_id: String, state: State<'_, SharedState>) -> Result<EngineSnapshot, String> {
+    let node = state.store.node(&group_id, &node_id)?;
+    state.store.set_selection(&group_id, &node_id)?;
+
+    let current = read_snapshot(&state.snapshot);
+    if current.phase == EnginePhase::Offline || current.phase == EnginePhase::Error {
+        return Ok(current);
+    }
+
+    state.cancel.store(true, Ordering::SeqCst);
+    write_snapshot(&state.snapshot, EngineSnapshot {
+        phase: EnginePhase::Stopping,
+        node_name: current.node_name,
+        message: Some("switching node".into()),
+    });
+
+    let engine = Arc::clone(&state.engine);
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut engine = engine.lock().map_err(|_| "VPN engine lock poisoned".to_string())?;
+        engine.stop();
+        engine.start(&node)
+    })
+    .await
+    .map_err(|e| format!("VPN node switch task failed: {e}"))?
+}
+
+#[tauri::command]
 pub fn set_theme(theme: String, state: State<'_, SharedState>) -> Result<AppPreferences, String> {
     let theme = match theme.as_str() {
         "amoled" => AppTheme::Amoled,
