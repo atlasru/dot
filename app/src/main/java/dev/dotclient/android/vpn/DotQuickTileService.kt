@@ -1,6 +1,8 @@
 package dev.dotclient.android.vpn
 
 import android.app.PendingIntent
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
@@ -107,6 +109,15 @@ class DotQuickTileService : TileService() {
         } else {
             @Suppress("DEPRECATION")
             startActivityAndCollapse(intent)
+        }
+    }
+
+    companion object {
+        fun requestRefresh(context: Context) {
+            TileService.requestListeningState(
+                context,
+                ComponentName(context, DotQuickTileService::class.java),
+            )
         }
     }
 }
