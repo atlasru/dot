@@ -12,6 +12,8 @@ import android.os.ParcelFileDescriptor
 import android.os.Process
 import dev.dotclient.android.MainActivity
 import dev.dotclient.android.R
+import dev.dotclient.android.ui.LauncherIcon
+import dev.dotclient.android.ui.LauncherIconManager
 import libXray.DialerController
 import libXray.LibXray
 import org.json.JSONArray
@@ -42,7 +44,14 @@ class DotVpnService : VpnService() {
                     publishState(VpnConnectionState.ERROR, message = "missing VLESS profile")
                     stopSelf()
                 } else {
-                    startForeground(NOTIFICATION_ID, notification("connecting", nodeName))
+                    // Foreground startup must never depend on a user-selected icon. Android gives a
+                    // foreground service only a very small window to post a valid notification, so
+                    // always bootstrap with the long-tested shield vector and switch the glyph only
+                    // after Xray is actually connected.
+                    startForeground(
+                        NOTIFICATION_ID,
+                        notification("connecting", nodeName, preferSelectedIcon = false),
+                    )
                     worker.execute { connect(rawUri, nodeName) }
                 }
             }
@@ -113,7 +122,10 @@ class DotVpnService : VpnService() {
         var previousTx = baselineTx
         var previousAt = System.nanoTime()
         val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, notification("connected", nodeName, 0L, 0L))
+        manager.notify(
+            NOTIFICATION_ID,
+            notification("connected", nodeName, 0L, 0L, preferSelectedIcon = true),
+        )
 
         trafficFuture = trafficWorker.scheduleAtFixedRate({
             val now = System.nanoTime()
@@ -134,7 +146,10 @@ class DotVpnService : VpnService() {
                 sessionDownloadBytes = sessionDown,
                 sessionUploadBytes = sessionUp,
             )
-            manager.notify(NOTIFICATION_ID, notification("connected", nodeName, downRate, upRate))
+            manager.notify(
+                NOTIFICATION_ID,
+                notification("connected", nodeName, downRate, upRate, preferSelectedIcon = true),
+            )
         }, 1L, 1L, TimeUnit.SECONDS)
     }
 
@@ -233,6 +248,24 @@ class DotVpnService : VpnService() {
         nodeName: String?,
         downloadBytesPerSecond: Long = 0L,
         uploadBytesPerSecond: Long = 0L,
+        preferSelectedIcon: Boolean,
+    ): Notification {
+        val preferredIcon = if (preferSelectedIcon) notificationIconRes() else SAFE_NOTIFICATION_ICON
+        return runCatching {
+            buildNotification(status, nodeName, downloadBytesPerSecond, uploadBytesPerSecond, preferredIcon)
+        }.getOrElse {
+            // A cosmetic icon failure must never be able to take down the VPN service.
+            buildNotification(status, nodeName, downloadBytesPerSecond, uploadBytesPerSecond, SAFE_NOTIFICATION_ICON)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun buildNotification(
+        status: String,
+        nodeName: String?,
+        downloadBytesPerSecond: Long,
+        uploadBytesPerSecond: Long,
+        smallIconRes: Int,
     ): Notification {
         val launchIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
@@ -248,7 +281,7 @@ class DotVpnService : VpnService() {
         val title = if (status == "connected") nodeName ?: "dot. VPN" else "dot. · $status"
 
         return Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification_dot)
+            .setSmallIcon(smallIconRes)
             .setContentTitle(title)
             .setContentText(if (status == "connected") traffic else (nodeName ?: "VLESS"))
             .setSubText(if (status == "connected") "dot. · connected" else null)
@@ -258,6 +291,12 @@ class DotVpnService : VpnService() {
             .setSound(null)
             .addAction(0, "Disconnect", disconnectPending)
             .build()
+    }
+
+    private fun notificationIconRes(): Int = when (LauncherIconManager.current(this)) {
+        LauncherIcon.SHIELD -> R.drawable.ic_notification_dot
+        LauncherIcon.RED_DOT -> R.drawable.ic_notification_red_dot
+        LauncherIcon.WORDMARK -> R.drawable.ic_notification_wordmark
     }
 
     private fun formatRate(bytesPerSecond: Long): String {
@@ -284,6 +323,7 @@ class DotVpnService : VpnService() {
         private const val CHANNEL_ID = "dot_vpn"
         private const val NOTIFICATION_ID = 1001
         private const val MTU = 1500
+        private val SAFE_NOTIFICATION_ICON = R.drawable.ic_notification_dot
         private val SERVER_ONLY_REALITY_KEYS = listOf(
             "target", "dest", "type", "xver", "serverNames", "privateKey", "minClientVer", "maxClientVer",
             "maxTimeDiff", "shortIds", "mldsa65Seed", "limitFallbackUpload", "limitFallbackDownload",
