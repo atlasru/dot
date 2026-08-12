@@ -25,6 +25,7 @@ class MainViewModel(
     private val subscriptionClient = SubscriptionClient()
     private val subscriptionStore = SubscriptionStore(application)
     private val uiPreferences = application.getSharedPreferences("dot_ui", Application.MODE_PRIVATE)
+    private val nodeLatencyTester = NodeLatencyTester(application)
 
     private val mutableState = MutableStateFlow(loadInitialState())
     val state: StateFlow<DotUiState> = mutableState.asStateFlow()
@@ -259,6 +260,8 @@ class MainViewModel(
         mutableState.update { it.copy(themeMode = theme) }
         uiPreferences.edit().putString("theme", theme.name).apply()
     }
+
+    suspend fun testNode(rawUri: String): Result<Long> = nodeLatencyTester.test(rawUri)
 
     fun redactedSubscriptionUrl(url: String): String = SecretRedactor.url(url)
 
