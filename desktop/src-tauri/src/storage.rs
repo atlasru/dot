@@ -33,14 +33,19 @@ impl Store {
 
     pub fn upsert_group(&self, group: SubscriptionGroup) -> Result<GroupView, String> {
         let mut state = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
-        if let Some(existing) = state.groups.iter_mut().find(|g| g.id == group.id) {
+        let id = group.id.clone();
+        if let Some(existing) = state.groups.iter_mut().find(|g| g.id == id) {
             *existing = group;
         } else {
             state.groups.push(group);
         }
         self.save_locked(&state)?;
-        let group = state.groups.last().expect("group exists");
-        Ok(GroupView::from(group))
+        state
+            .groups
+            .iter()
+            .find(|g| g.id == id)
+            .map(GroupView::from)
+            .ok_or_else(|| "subscription group disappeared after save".to_string())
     }
 
     pub fn replace_group_nodes(&self, group_id: &str, nodes: Vec<VlessNode>, updated_at_ms: u64) -> Result<GroupView, String> {

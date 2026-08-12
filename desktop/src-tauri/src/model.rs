@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Security {
     None,
@@ -8,7 +8,7 @@ pub enum Security {
     Reality,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Transport {
     Raw,
@@ -55,8 +55,6 @@ pub struct SubscriptionGroup {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PersistedState {
     pub groups: Vec<SubscriptionGroup>,
-    pub selected_group_id: Option<String>,
-    pub selected_node_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -84,8 +82,8 @@ impl From<&VlessNode> for NodeView {
             name: value.name.clone(),
             host: value.host.clone(),
             port: value.port,
-            security: value.security.clone(),
-            transport: value.transport.clone(),
+            security: value.security,
+            transport: value.transport,
         }
     }
 }

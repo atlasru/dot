@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use percent_encoding::percent_decode_str;
 use url::Url;
 use uuid::Uuid;
 
@@ -54,8 +55,8 @@ pub fn parse_vless(raw: &str) -> Result<VlessNode, String> {
     let name = url
         .fragment()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| host.as_str())
-        .to_string();
+        .map(|value| percent_decode_str(value).decode_utf8_lossy().into_owned())
+        .unwrap_or_else(|| format!("{host}:{port}"));
 
     let stable_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, raw.as_bytes()).to_string();
     let alpn = query

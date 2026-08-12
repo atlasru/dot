@@ -1,0 +1,63 @@
+name: desktop
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-core:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Prepare Xray runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force src-tauri/runtime | Out-Null
+          $zip = Join-Path $env:RUNNER_TEMP 'xray.zip'
+          $out = Join-Path $env:RUNNER_TEMP 'xray-runtime'
+          Invoke-WebRequest -Uri 'https://github.com/XTLS/Xray-core/releases/download/v26.7.28/Xray-windows-64.zip' -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $out -Force
+          $xray = Get-ChildItem -Path $out -Recurse -Filter 'xray.exe' | Select-Object -First 1
+          $wintun = Get-ChildItem -Path $out -Recurse -Filter 'wintun.dll' | Select-Object -First 1
+          if (-not $xray -or -not $wintun) { throw 'Xray runtime archive is missing xray.exe or wintun.dll' }
+          Copy-Item $xray.FullName src-tauri/runtime/xray.exe -Force
+          Copy-Item $wintun.FullName src-tauri/runtime/wintun.dll -Force
+
+      - name: Generate Windows icons
+        run: npm run icons
+
+      - name: Rust unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Frontend build
+        run: npm run build
+
+      - name: Compile Tauri executable
+        run: npm run tauri -- build --debug --no-bundle
+
+      - name: Upload desktop executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: dot-desktop-alpha
+          path: desktop/src-tauri/target/debug/dot-desktop.exe
