@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.15
+
+- add per-node URL latency test through libXray using `http://cp.cloudflare.com/`
+- add selectable Android launcher icons: shield, red pixel dot and `dot.` wordmark
+- keep node URL tests disabled while the VPN core is active to avoid libXray process-state collisions
+
 All notable changes to `dot.` are tracked here.
 
 ## 0.0.14

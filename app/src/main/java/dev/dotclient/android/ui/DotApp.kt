@@ -44,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +59,7 @@ import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.model.VlessProfile
 import dev.dotclient.android.vpn.VpnConnectionState
 import dev.dotclient.android.ui.theme.DotThemeMode
+import kotlinx.coroutines.launch
 import kotlin.math.max
 
 private enum class Screen { HOME, NODES, SETTINGS, ABOUT }
@@ -470,6 +472,7 @@ private fun NodesScreen(
                             viewModel.selectProfile(profile.id)
                             onConnect()
                         },
+                        onTest = { viewModel.testNode(profile.rawUri) },
                     )
                 }
             }
@@ -483,8 +486,11 @@ private fun NodeRow(
     selected: Boolean,
     onSelect: () -> Unit,
     onConnect: () -> Unit,
+    onTest: suspend () -> Result<Long>,
 ) {
     var menuOpen by remember(profile.id) { mutableStateOf(false) }
+    var latency by remember(profile.id) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     Row(
         modifier = Modifier
@@ -522,6 +528,10 @@ private fun NodeRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            latency?.let { value ->
+                Spacer(Modifier.height(3.dp))
+                Text(value, color = Color(0xFF8A8A8A), style = MaterialTheme.typography.labelMedium)
+            }
         }
 
         Box {
@@ -548,6 +558,19 @@ private fun NodeRow(
                     onClick = {
                         menuOpen = false
                         onConnect()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("url test · Cloudflare") },
+                    onClick = {
+                        menuOpen = false
+                        latency = "testing http://cp.cloudflare.com/ …"
+                        scope.launch {
+                            latency = onTest().fold(
+                                onSuccess = { "${it} ms · cp.cloudflare.com" },
+                                onFailure = { it.message ?: "url test failed" },
+                            )
+                        }
                     },
                 )
                 DropdownMenuItem(
@@ -685,6 +708,8 @@ private fun SettingsScreen(
                 selected = state.themeMode,
                 onSelect = viewModel::setTheme,
             )
+            Spacer(Modifier.height(16.dp))
+            LauncherIconPicker()
 
             Spacer(Modifier.height(22.dp))
             Text("connection", style = MaterialTheme.typography.titleLarge)
@@ -1034,6 +1059,46 @@ private fun ThemePicker(selected: DotThemeMode, onSelect: (DotThemeMode) -> Unit
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
         }
+    }
+}
+
+@Composable
+private fun LauncherIconPicker() {
+    val context = LocalContext.current
+    var selected by remember { mutableStateOf(LauncherIconManager.current(context)) }
+
+    Column {
+        Text("app icon", color = Color(0xFF8A8A8A), style = MaterialTheme.typography.labelMedium)
+        Spacer(Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LauncherIcon.entries.forEach { icon ->
+                val active = icon == selected
+                Text(
+                    text = icon.label,
+                    modifier = Modifier
+                        .weight(1f)
+                        .border(
+                            1.dp,
+                            if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                            RoundedCornerShape(4.dp),
+                        )
+                        .background(
+                            if (active) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
+                            RoundedCornerShape(4.dp),
+                        )
+                        .clickable {
+                            LauncherIconManager.apply(context, icon)
+                            selected = icon
+                        }
+                        .padding(vertical = 11.dp),
+                    color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Text("launcher may refresh the icon with a short delay", color = Color(0xFF555555), style = MaterialTheme.typography.labelMedium)
     }
 }
 
