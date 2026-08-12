@@ -50,6 +50,7 @@ fn main() {
             commands::preferences,
             commands::traffic_status,
             commands::select_node,
+            commands::switch_node,
             commands::set_theme,
             commands::set_close_to_tray,
             commands::add_subscription,
