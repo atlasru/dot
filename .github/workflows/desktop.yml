@@ -27,6 +27,16 @@ jobs:
           node-version: '24'
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Reject unfinished product markers
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem src,src-tauri/src -Recurse -File
+          $hits = $files | Select-String -Pattern 'TODO|FIXME|todo!\(|unimplemented!\('
+          if ($hits) {
+            $hits | ForEach-Object { Write-Host $_ }
+            throw 'Desktop product sources contain unfinished implementation markers.'
+          }
+
       - name: Install frontend dependencies
         run: npm install
 
