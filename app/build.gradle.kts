@@ -1,6 +1,4 @@
 import java.util.Base64
-import java.awt.image.BufferedImage
-import javax.imageio.ImageIO
 
 plugins {
     id("com.android.application")
@@ -14,47 +12,6 @@ if (!stableDebugKeystore.exists()) {
     stableDebugKeystore.writeBytes(
         Base64.getDecoder().decode(stableDebugKeystoreBase64.readText().trim()),
     )
-}
-
-val generatedNotificationResDir = layout.buildDirectory.dir("generated/dot-notification-icons/res").get().asFile
-val generateNotificationIcons = tasks.register("generateNotificationIcons") {
-    val redDotSource = file("src/main/res/drawable/ic_launcher_red_dot_foreground.png")
-    val wordmarkSource = file("src/main/res/drawable/ic_launcher_wordmark_foreground.png")
-    inputs.files(redDotSource, wordmarkSource)
-    outputs.dir(generatedNotificationResDir)
-
-    doLast {
-        val drawableDir = generatedNotificationResDir.resolve("drawable")
-        drawableDir.mkdirs()
-
-        fun deriveMask(sourceFile: java.io.File, outputFile: java.io.File) {
-            val source = ImageIO.read(sourceFile)
-                ?: error("Unable to decode ${sourceFile.name}")
-            val output = BufferedImage(source.width, source.height, BufferedImage.TYPE_INT_ARGB)
-
-            for (y in 0 until source.height) {
-                for (x in 0 until source.width) {
-                    val argb = source.getRGB(x, y)
-                    val sourceAlpha = (argb ushr 24) and 0xff
-                    val r = (argb ushr 16) and 0xff
-                    val g = (argb ushr 8) and 0xff
-                    val b = argb and 0xff
-                    val signal = maxOf(r, g, b)
-                    val maskAlpha = if (sourceAlpha == 0 || signal <= 20) {
-                        0
-                    } else {
-                        (((signal - 20) * 255) / 235).coerceIn(0, 255) * sourceAlpha / 255
-                    }
-                    output.setRGB(x, y, (maskAlpha shl 24) or 0x00ffffff)
-                }
-            }
-
-            ImageIO.write(output, "png", outputFile)
-        }
-
-        deriveMask(redDotSource, drawableDir.resolve("ic_notification_red_dot.png"))
-        deriveMask(wordmarkSource, drawableDir.resolve("ic_notification_wordmark.png"))
-    }
 }
 
 android {
@@ -104,12 +61,6 @@ android {
             )
         }
     }
-
-    sourceSets.getByName("main").res.srcDir(generatedNotificationResDir)
-}
-
-tasks.named("preBuild").configure {
-    dependsOn(generateNotificationIcons)
 }
 
 dependencies {
