@@ -1,3 +1,5 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod commands;
 mod config;
 #[cfg(test)] mod config_smoke;
@@ -65,6 +67,18 @@ fn main() {
 
 fn discover_runtime_source(resource_dir: &std::path::Path) -> PathBuf {
     let bundled = resource_dir.join("runtime");
-    if bundled.join("xray.exe").exists() { return bundled; }
+    if runtime_complete(&bundled) { return bundled; }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let portable = parent.join("runtime");
+            if runtime_complete(&portable) { return portable; }
+        }
+    }
+
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime")
+}
+
+fn runtime_complete(path: &std::path::Path) -> bool {
+    path.join("xray.exe").exists() && path.join("wintun.dll").exists()
 }
