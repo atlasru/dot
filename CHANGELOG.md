@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.6
+
+- add LIST / MAP switch for the selected Android subscription while keeping LIST as the default view
+- add IP geolocation for subscription nodes with DNS resolution and a seven-day local cache
+- fall back to country detection from emoji flags, ISO country codes and common country names when IP geolocation fails
+- group every node in the same country into one map marker so duplicate-country nodes never overlap
+- show node count, active-country state, city hints, latency and direct connect/switch actions from the country panel
+- use a lightweight monochrome Compose world map that matches the existing dot. AMOLED/pixel visual language and avoids map SDK/tile dependencies
+
 ## 0.1.0
 
 - replace separate Home/Nodes flow with a single Happ-inspired main dashboard

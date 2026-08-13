@@ -22,8 +22,8 @@ android {
         applicationId = "dev.dotclient.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 105
-        versionName = "0.1.5"
+        versionCode = 107
+        versionName = "0.1.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

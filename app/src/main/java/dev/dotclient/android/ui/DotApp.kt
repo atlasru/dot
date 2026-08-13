@@ -64,6 +64,7 @@ import dev.dotclient.android.vpn.VpnConnectionState
 import kotlin.math.max
 
 private enum class Screen { MAIN, SETTINGS, ABOUT }
+private enum class NodeViewMode { LIST, MAP }
 private val DotRed = Color(0xFFFF2D2D)
 
 @Composable
@@ -141,6 +142,8 @@ private fun MainDashboard(
     onAddSubscription: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var nodeViewMode by remember(state.selectedSubscriptionId) { mutableStateOf(NodeViewMode.LIST) }
+
     Column(
         modifier = modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -200,6 +203,11 @@ private fun MainDashboard(
         Divider()
 
         val group = state.selectedSubscription
+        if (group != null && group.profiles.isNotEmpty()) {
+            Spacer(Modifier.height(7.dp))
+            NodeViewSwitcher(nodeViewMode) { nodeViewMode = it }
+        }
+
         when {
             group == null -> EmptyState("no subscriptions", "add a group to load nodes.", "ADD SUBSCRIPTION", onAddSubscription)
             group.profiles.isEmpty() -> EmptyState(
@@ -207,6 +215,12 @@ private fun MainDashboard(
                 if (state.loadingSubscriptionId == group.id) "updating subscription…" else "refresh the group or edit its URL.",
                 "OPEN SETTINGS",
                 onAddSubscription,
+            )
+            nodeViewMode == NodeViewMode.MAP -> NodeMapPanel(
+                state = state,
+                viewModel = viewModel,
+                onToggleVpn = onToggleVpn,
+                modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 7.dp, bottom = 8.dp),
             )
             else -> LazyColumn(
                 modifier = Modifier.fillMaxWidth().weight(1f),
@@ -246,6 +260,26 @@ private fun MainDashboard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+}
+
+@Composable
+private fun NodeViewSwitcher(selected: NodeViewMode, onSelect: (NodeViewMode) -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        NodeViewMode.entries.forEach { mode ->
+            val active = mode == selected
+            Text(
+                mode.name,
+                modifier = Modifier
+                    .border(1.dp, if (active) Color(0xFF505050) else Color(0xFF252525), RoundedCornerShape(2.dp))
+                    .background(if (active) Color(0xFF141414) else Color.Transparent)
+                    .clickable { onSelect(mode) }
+                    .padding(horizontal = 11.dp, vertical = 6.dp),
+                color = if (active) Color(0xFFD0D0D0) else Color(0xFF626262),
+                style = MaterialTheme.typography.labelMedium,
+            )
+            if (mode != NodeViewMode.entries.last()) Spacer(Modifier.width(5.dp))
         }
     }
 }
