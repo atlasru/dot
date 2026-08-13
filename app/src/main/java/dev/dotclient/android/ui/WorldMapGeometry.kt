@@ -2,6 +2,7 @@ package dev.dotclient.android.ui
 
 import android.content.Context
 import java.io.File
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -16,6 +17,7 @@ internal data class WorldGeoPoint(
 )
 
 internal data class WorldCountryShape(
+    val countryCode: String?,
     val rings: List<List<WorldGeoPoint>>,
 )
 
@@ -72,10 +74,19 @@ internal class WorldMapGeometryRepository(context: Context) {
         val countries = ArrayList<WorldCountryShape>(features.length())
 
         for (featureIndex in 0 until features.length()) {
-            val geometry = features
-                .optJSONObject(featureIndex)
-                ?.optJSONObject("geometry")
-                ?: continue
+            val feature = features.optJSONObject(featureIndex) ?: continue
+            val geometry = feature.optJSONObject("geometry") ?: continue
+            val properties = feature.optJSONObject("properties")
+            val countryCode = properties
+                ?.optString("iso_a2")
+                ?.trim()
+                ?.uppercase(Locale.ROOT)
+                ?.takeIf { it.length == 2 && it != "-99" }
+                ?: properties
+                    ?.optString("postal")
+                    ?.trim()
+                    ?.uppercase(Locale.ROOT)
+                    ?.takeIf { it.length == 2 }
 
             val rings = mutableListOf<List<WorldGeoPoint>>()
             when (geometry.optString("type")) {
@@ -88,7 +99,7 @@ internal class WorldMapGeometryRepository(context: Context) {
                 }
             }
 
-            if (rings.isNotEmpty()) countries += WorldCountryShape(rings)
+            if (rings.isNotEmpty()) countries += WorldCountryShape(countryCode, rings)
         }
         return countries
     }
