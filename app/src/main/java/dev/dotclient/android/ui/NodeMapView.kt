@@ -20,7 +20,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.ln
+import kotlin.math.tan
 
 data class NodeMapMarker(
     val countryCode: String,
@@ -173,20 +177,29 @@ private fun viewportPoint(
 
 private fun clampViewportOffset(offset: Offset, size: Size, zoom: Float): Offset {
     val maxX = size.width * zoom * 0.46f
-    val maxY = size.height * zoom * 0.42f
+    val maxY = size.height * zoom * 0.46f
     return Offset(
         x = offset.x.coerceIn(-maxX, maxX),
         y = offset.y.coerceIn(-maxY, maxY),
     )
 }
 
-private fun project(longitude: Double, latitude: Double, width: Float, height: Float): Offset = Offset(
-    x = (((longitude + 180.0) / 360.0) * width).toFloat(),
-    y = (((90.0 - latitude) / 180.0) * height).toFloat(),
-)
+private fun project(longitude: Double, latitude: Double, width: Float, height: Float): Offset {
+    val worldSize = width
+    val top = (height - worldSize) / 2f
+    val x = ((longitude + 180.0) / 360.0).coerceIn(0.0, 1.0)
+    val safeLatitude = latitude.coerceIn(-MERCATOR_LIMIT, MERCATOR_LIMIT)
+    val radians = Math.toRadians(safeLatitude)
+    val y = (1.0 - ln(tan(radians) + 1.0 / cos(radians)) / PI) / 2.0
+    return Offset(
+        x = (x * worldSize).toFloat(),
+        y = top + (y * worldSize).toFloat(),
+    )
+}
 
 private const val MIN_ZOOM = 1.2f
 private const val MAX_ZOOM = 5f
 private const val DEFAULT_ZOOM = 1.5f
 private const val DEFAULT_CENTER_LONGITUDE = 18.0
-private const val DEFAULT_CENTER_LATITUDE = 30.0
+private const val DEFAULT_CENTER_LATITUDE = 38.0
+private const val MERCATOR_LIMIT = 85.05112878
