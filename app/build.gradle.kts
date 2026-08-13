@@ -22,8 +22,8 @@ android {
         applicationId = "dev.dotclient.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 106
-        versionName = "0.1.6"
+        versionCode = 107
+        versionName = "0.1.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -76,6 +76,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling:1.11.4")
 
     implementation("com.squareup.okhttp3:okhttp:5.1.0")
+    implementation("org.maplibre.gl:android-sdk:13.4.1")
     implementation(files("libs/libXray.aar"))
 
     testImplementation("junit:junit:4.13.2")
