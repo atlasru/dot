@@ -3,9 +3,16 @@ package dev.dotclient.android.ui
 import android.graphics.Paint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -32,36 +39,85 @@ fun NodeMapView(
     modifier: Modifier = Modifier,
 ) {
     val tapRadius = with(LocalDensity.current) { 28.dp.toPx() }
+    var zoom by remember { mutableFloatStateOf(1f) }
+    var viewportOffset by remember { mutableStateOf(Offset.Zero) }
 
     Canvas(
-        modifier.pointerInput(markers) {
-            detectTapGestures { tap ->
-                markers
-                    .map { marker -> marker to project(marker.longitude, marker.latitude, size.width.toFloat(), size.height.toFloat()) }
-                    .minByOrNull { (_, point) -> hypot((tap.x - point.x).toDouble(), (tap.y - point.y).toDouble()) }
-                    ?.takeIf { (_, point) -> hypot((tap.x - point.x).toDouble(), (tap.y - point.y).toDouble()) <= tapRadius }
-                    ?.first
-                    ?.countryCode
-                    ?.let(onMarkerClick)
+        modifier
+            .pointerInput(Unit) {
+                detectTransformGestures { centroid, pan, gestureZoom, _ ->
+                    val oldZoom = zoom
+                    val newZoom = (oldZoom * gestureZoom).coerceIn(MIN_ZOOM, MAX_ZOOM)
+                    val ratio = newZoom / oldZoom
+                    val canvasCenter = Offset(size.width / 2f, size.height / 2f)
+
+                    val proposedOffset = viewportOffset + pan +
+                        (centroid - canvasCenter - viewportOffset) * (1f - ratio)
+
+                    zoom = newZoom
+                    viewportOffset = clampViewportOffset(
+                        proposedOffset,
+                        Size(size.width.toFloat(), size.height.toFloat()),
+                        newZoom,
+                    )
+                }
             }
-        },
+            .pointerInput(markers, zoom, viewportOffset) {
+                detectTapGestures(
+                    onDoubleTap = {
+                        zoom = 1f
+                        viewportOffset = Offset.Zero
+                    },
+                    onTap = { tap ->
+                        markers
+                            .map { marker ->
+                                marker to viewportPoint(
+                                    marker.longitude,
+                                    marker.latitude,
+                                    size.width.toFloat(),
+                                    size.height.toFloat(),
+                                    zoom,
+                                    viewportOffset,
+                                )
+                            }
+                            .minByOrNull { (_, point) ->
+                                hypot((tap.x - point.x).toDouble(), (tap.y - point.y).toDouble())
+                            }
+                            ?.takeIf { (_, point) ->
+                                hypot((tap.x - point.x).toDouble(), (tap.y - point.y).toDouble()) <= tapRadius
+                            }
+                            ?.first
+                            ?.countryCode
+                            ?.let(onMarkerClick)
+                    },
+                )
+            },
     ) {
         drawRect(Color(0xFF070707))
 
         val grid = Color(0xFF171717)
         for (longitude in -150..150 step 30) {
-            val x = project(longitude.toDouble(), 0.0, size.width, size.height).x
-            drawLine(grid, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+            val start = viewportPoint(longitude.toDouble(), -90.0, size.width, size.height, zoom, viewportOffset)
+            val end = viewportPoint(longitude.toDouble(), 90.0, size.width, size.height, zoom, viewportOffset)
+            drawLine(grid, start, end, strokeWidth = 1f)
         }
         for (latitude in -60..60 step 30) {
-            val y = project(0.0, latitude.toDouble(), size.width, size.height).y
-            drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+            val start = viewportPoint(-180.0, latitude.toDouble(), size.width, size.height, zoom, viewportOffset)
+            val end = viewportPoint(180.0, latitude.toDouble(), size.width, size.height, zoom, viewportOffset)
+            drawLine(grid, start, end, strokeWidth = 1f)
         }
 
         WORLD_SHAPES.forEach { polygon ->
             val path = Path()
             polygon.forEachIndexed { index, point ->
-                val projected = project(point.longitude, point.latitude, size.width, size.height)
+                val projected = viewportPoint(
+                    point.longitude,
+                    point.latitude,
+                    size.width,
+                    size.height,
+                    zoom,
+                    viewportOffset,
+                )
                 if (index == 0) path.moveTo(projected.x, projected.y) else path.lineTo(projected.x, projected.y)
             }
             path.close()
@@ -76,7 +132,14 @@ fun NodeMapView(
         }
 
         markers.forEach { marker ->
-            val center = project(marker.longitude, marker.latitude, size.width, size.height)
+            val center = viewportPoint(
+                marker.longitude,
+                marker.latitude,
+                size.width,
+                size.height,
+                zoom,
+                viewportOffset,
+            )
             val radius = if (marker.nodeCount > 1) 9.dp.toPx() else 6.dp.toPx()
             val fill = if (marker.active) Color(0xFFFF2D2D) else Color(0xFFE5E5E5)
             drawCircle(Color(0xFF050505), radius + 2.dp.toPx(), center)
@@ -97,10 +160,36 @@ fun NodeMapView(
     }
 }
 
+private fun viewportPoint(
+    longitude: Double,
+    latitude: Double,
+    width: Float,
+    height: Float,
+    zoom: Float,
+    viewportOffset: Offset,
+): Offset {
+    val base = project(longitude, latitude, width, height)
+    val center = Offset(width / 2f, height / 2f)
+    return center + (base - center) * zoom + viewportOffset
+}
+
+private fun clampViewportOffset(offset: Offset, size: Size, zoom: Float): Offset {
+    if (zoom <= 1f) return Offset.Zero
+    val maxX = size.width * (zoom - 1f) / 2f
+    val maxY = size.height * (zoom - 1f) / 2f
+    return Offset(
+        x = offset.x.coerceIn(-maxX, maxX),
+        y = offset.y.coerceIn(-maxY, maxY),
+    )
+}
+
 private fun project(longitude: Double, latitude: Double, width: Float, height: Float): Offset = Offset(
     x = (((longitude + 180.0) / 360.0) * width).toFloat(),
     y = (((90.0 - latitude) / 180.0) * height).toFloat(),
 )
+
+private const val MIN_ZOOM = 1f
+private const val MAX_ZOOM = 5f
 
 private val WORLD_SHAPES = listOf(
     listOf(
