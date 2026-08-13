@@ -1,14 +1,16 @@
 import React, { FormEvent, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { AppPreferences, AppTheme, EngineSnapshot, GroupView, SelectionView, TrafficSnapshot } from "./types";
+import type { AppPreferences, AppTheme, EngineSnapshot, GroupView, NodeView, SelectionView, TrafficSnapshot, UrlTestResult } from "./types";
 
-type Page = "home" | "nodes" | "settings";
+type View = "connection" | "settings";
+const VERSION = "0.1.0-alpha.3";
+const XRAY_VERSION = "v26.7.28";
 const OFFLINE: EngineSnapshot = { phase: "offline", node_name: null, message: null };
 const ZERO_TRAFFIC: TrafficSnapshot = { download_bytes_per_second: 0, upload_bytes_per_second: 0, session_download_bytes: 0, session_upload_bytes: 0, connected_seconds: 0 };
 const DEFAULT_PREFS: AppPreferences = { theme: "amoled", close_to_tray: true };
 
 export default function App() {
-  const [page, setPage] = useState<Page>("home");
+  const [view, setView] = useState<View>("connection");
   const [groups, setGroups] = useState<GroupView[]>([]);
   const [selection, setSelection] = useState<SelectionView>({ group_id: null, node_id: null });
   const [browseGroupId, setBrowseGroupId] = useState<string | null>(null);
@@ -19,6 +21,9 @@ export default function App() {
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [latencies, setLatencies] = useState<Record<string, number>>({});
+  const [testingNodeId, setTestingNodeId] = useState<string | null>(null);
+  const [urlTestError, setUrlTestError] = useState("");
 
   const activeGroup = useMemo(() => groups.find(g => g.id === selection.group_id) ?? groups[0], [groups, selection.group_id]);
   const activeNode = useMemo(() => activeGroup?.nodes.find(n => n.id === selection.node_id) ?? activeGroup?.nodes[0], [activeGroup, selection.node_id]);
@@ -26,32 +31,42 @@ export default function App() {
 
   async function reloadData() {
     const [nextGroups, nextSelection, nextPrefs] = await Promise.all([
-      invoke<GroupView[]>("list_groups"), invoke<SelectionView>("selection"), invoke<AppPreferences>("preferences"),
+      invoke<GroupView[]>("list_groups"),
+      invoke<SelectionView>("selection"),
+      invoke<AppPreferences>("preferences"),
     ]);
-    setGroups(nextGroups); setSelection(nextSelection); setPrefs(nextPrefs);
+    setGroups(nextGroups);
+    setSelection(nextSelection);
+    setPrefs(nextPrefs);
+    setBrowseGroupId(current => {
+      if (current && nextGroups.some(group => group.id === current)) return current;
+      return nextSelection.group_id ?? nextGroups[0]?.id ?? null;
+    });
   }
 
   useEffect(() => {
     reloadData().catch(e => setError(String(e)));
     const tick = () => Promise.all([
-      invoke<EngineSnapshot>("vpn_status").then(setVpn), invoke<TrafficSnapshot>("traffic_status").then(setTraffic),
+      invoke<EngineSnapshot>("vpn_status").then(setVpn),
+      invoke<TrafficSnapshot>("traffic_status").then(setTraffic),
     ]).catch(() => undefined);
     tick();
     const timer = window.setInterval(tick, 1000);
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setPage("home"); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setView("connection"); };
     window.addEventListener("keydown", escape);
     return () => { window.clearInterval(timer); window.removeEventListener("keydown", escape); };
   }, []);
 
   useEffect(() => { document.documentElement.dataset.theme = prefs.theme; }, [prefs.theme]);
-
-  function openNodes() { setBrowseGroupId(activeGroup?.id ?? groups[0]?.id ?? null); setPage("nodes"); }
+  useEffect(() => { setUrlTestError(""); }, [selection.node_id]);
 
   async function chooseNode(groupId: string, nodeId: string) {
-    if (busy) return;
-    setBusy(true); setError("");
+    if (busy || vpn.phase === "stopping") return;
+    setBusy(true);
+    setError("");
+    setUrlTestError("");
     try {
-      const switching = vpn.phase === "connected" || vpn.phase === "starting" || vpn.phase === "stopping";
+      const switching = vpn.phase === "connected" || vpn.phase === "starting";
       if (switching) {
         setVpn({ phase: "stopping", node_name: vpn.node_name, message: "switching node" });
         const nextVpn = await invoke<EngineSnapshot>("switch_node", { groupId, nodeId });
@@ -60,82 +75,312 @@ export default function App() {
       } else {
         setSelection(await invoke<SelectionView>("select_node", { groupId, nodeId }));
       }
-      setPage("home");
+      setBrowseGroupId(groupId);
+      setView("connection");
     } catch (e) {
       setError(String(e));
       invoke<EngineSnapshot>("vpn_status").then(setVpn).catch(() => undefined);
       await reloadData().catch(() => undefined);
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function toggleVpn() {
     if (vpn.phase === "stopping") return;
     setError("");
-    if (vpn.phase === "connected" || vpn.phase === "starting") { setVpn(await invoke<EngineSnapshot>("disconnect")); return; }
-    if (!activeGroup || !activeNode) { setError("select a node first"); return; }
+    setUrlTestError("");
+    if (vpn.phase === "connected" || vpn.phase === "starting") {
+      setVpn(await invoke<EngineSnapshot>("disconnect"));
+      return;
+    }
+    if (!activeGroup || !activeNode) {
+      setError("select a node first");
+      return;
+    }
     setVpn({ phase: "starting", node_name: activeNode.name, message: "starting" });
-    try { setVpn(await invoke<EngineSnapshot>("connect", { groupId: activeGroup.id, nodeId: activeNode.id })); }
-    catch (e) { setError(String(e)); invoke<EngineSnapshot>("vpn_status").then(setVpn).catch(() => undefined); }
+    try {
+      setVpn(await invoke<EngineSnapshot>("connect", { groupId: activeGroup.id, nodeId: activeNode.id }));
+    } catch (e) {
+      setError(String(e));
+      invoke<EngineSnapshot>("vpn_status").then(setVpn).catch(() => undefined);
+    }
   }
 
-  async function refresh(group = activeGroup) {
+  async function runUrlTest(group = activeGroup, node = activeNode) {
+    if (!group || !node || testingNodeId || vpn.phase === "starting" || vpn.phase === "stopping") return;
+    setTestingNodeId(node.id);
+    setUrlTestError("");
+    setError("");
+    try {
+      const result = await invoke<UrlTestResult>("url_test", { groupId: group.id, nodeId: node.id });
+      setLatencies(current => ({ ...current, [result.node_id]: result.latency_ms }));
+    } catch (e) {
+      const message = String(e);
+      setUrlTestError(message);
+      setError(message);
+    } finally {
+      setTestingNodeId(null);
+    }
+  }
+
+  async function refresh(group = browseGroup) {
     if (!group) return;
-    setBusy(true); setError("");
-    try { await invoke("refresh_subscription", { groupId: group.id }); await reloadData(); }
-    catch (e) { setError(String(e)); }
-    finally { setBusy(false); }
+    setBusy(true);
+    setError("");
+    try {
+      await invoke("refresh_subscription", { groupId: group.id });
+      setLatencies({});
+      await reloadData();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function addSubscription(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setError("");
-    try { await invoke("add_subscription", { name, url }); setUrl(""); await reloadData(); }
-    catch (e) { setError(String(e)); }
-    finally { setBusy(false); }
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await invoke("add_subscription", { name, url });
+      setUrl("");
+      await reloadData();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
-  async function changeTheme(theme: AppTheme) { try { setPrefs(await invoke<AppPreferences>("set_theme", { theme })); } catch (e) { setError(String(e)); } }
-  async function changeCloseToTray(enabled: boolean) { try { setPrefs(await invoke<AppPreferences>("set_close_to_tray", { enabled })); } catch (e) { setError(String(e)); } }
+  async function changeTheme(theme: AppTheme) {
+    try { setPrefs(await invoke<AppPreferences>("set_theme", { theme })); }
+    catch (e) { setError(String(e)); }
+  }
 
-  const button = vpn.phase === "stopping" ? "STOPPING" : (vpn.phase === "connected" || vpn.phase === "starting") ? "DISCONNECT" : "CONNECT";
+  async function changeCloseToTray(enabled: boolean) {
+    try { setPrefs(await invoke<AppPreferences>("set_close_to_tray", { enabled })); }
+    catch (e) { setError(String(e)); }
+  }
 
-  return <main className="shell">
-    {page === "home" && <>
-      <header className="top"><h1>dot.</h1><button className="icon" onClick={() => setPage("settings")} aria-label="settings">⚙</button></header>
-      <section className="hero">
-        <PixelShield active={vpn.phase === "connected"} pending={vpn.phase === "starting"} />
-        <strong className="status">{vpn.phase}</strong>
-        <small className="message">{vpn.message ?? "VLESS · Windows TUN"}</small>
-        <button className="node-card" onClick={openNodes}><span>{vpn.node_name ?? activeNode?.name ?? "select node"}</span><small>{activeGroup?.name ?? "no subscription"} · {activeNode ? `${activeNode.security} / ${activeNode.transport}` : "nodes"}</small><b>›</b></button>
-        <button className="connect" disabled={vpn.phase === "stopping" || (!activeNode && vpn.phase === "offline")} onClick={toggleVpn}>{button}</button>
-      </section>
-      <section className="traffic"><TrafficCell label="download" value={formatRate(traffic.download_bytes_per_second)} total={formatBytes(traffic.session_download_bytes)} /><TrafficCell label="upload" value={formatRate(traffic.upload_bytes_per_second)} total={formatBytes(traffic.session_upload_bytes)} /><TrafficCell label="session" value={formatTime(traffic.connected_seconds)} /></section>
-    </>}
+  return <main className="desktop-shell">
+    <Sidebar
+      groups={groups}
+      browseGroup={browseGroup}
+      activeGroup={activeGroup}
+      activeNode={activeNode}
+      vpn={vpn}
+      latencies={latencies}
+      testingNodeId={testingNodeId}
+      busy={busy}
+      view={view}
+      onBrowseGroup={setBrowseGroupId}
+      onChooseNode={chooseNode}
+      onRefresh={() => refresh()}
+      onSettings={() => setView(view === "settings" ? "connection" : "settings")}
+    />
 
-    {page === "nodes" && <>
-      <header className="top"><div><h1>nodes.</h1><small>{browseGroup?.nodes.length ?? 0} available</small></div><button className="icon" onClick={() => setPage("home")}>×</button></header>
-      <div className="group-tabs">{groups.map(g => <button key={g.id} className={g.id === browseGroup?.id ? "selected" : ""} onClick={() => setBrowseGroupId(g.id)}>{g.name}</button>)}</div>
-      <section className="nodes">{browseGroup?.nodes.map(node => <button disabled={busy} key={node.id} className={node.id === activeNode?.id && browseGroup.id === activeGroup?.id ? "node selected" : "node"} onClick={() => chooseNode(browseGroup.id, node.id)}><span>{node.name}</span><small>{node.security} · {node.transport}<br />{node.host}:{node.port}</small></button>)}</section>
-      {browseGroup && <button className="quiet" disabled={busy} onClick={() => refresh(browseGroup)}>refresh subscription</button>}
-    </>}
+    <section className="content-pane">
+      {view === "connection" ? <ConnectionPanel
+        group={activeGroup}
+        node={activeNode}
+        vpn={vpn}
+        traffic={traffic}
+        latency={activeNode ? latencies[activeNode.id] : undefined}
+        testing={!!activeNode && testingNodeId === activeNode.id}
+        testFailed={!!urlTestError}
+        onToggleVpn={toggleVpn}
+        onUrlTest={() => runUrlTest()}
+      /> : <SettingsPanel
+        groups={groups}
+        prefs={prefs}
+        busy={busy}
+        name={name}
+        url={url}
+        onName={setName}
+        onUrl={setUrl}
+        onTheme={changeTheme}
+        onCloseToTray={changeCloseToTray}
+        onRefresh={refresh}
+        onAddSubscription={addSubscription}
+        onBack={() => setView("connection")}
+      />}
+    </section>
 
-    {page === "settings" && <>
-      <header className="top"><h1>settings.</h1><button className="icon" onClick={() => setPage("home")}>×</button></header>
-      <SettingsSection title="appearance"><div className="theme-row">{(["amoled", "graphite", "matrix"] as AppTheme[]).map(theme => <button key={theme} className={prefs.theme === theme ? "choice selected" : "choice"} onClick={() => changeTheme(theme)}>{theme}</button>)}</div></SettingsSection>
-      <SettingsSection title="window"><Toggle label="close to tray" detail="keep VPN running when the window is closed" checked={prefs.close_to_tray} onChange={changeCloseToTray} /></SettingsSection>
-      <SettingsSection title="subscriptions">
-        {groups.map(g => <div className="subscription" key={g.id}><div><strong>{g.name}</strong><small>{g.nodes.length} nodes</small></div><button className="tiny" disabled={busy} onClick={() => refresh(g)}>↻</button></div>)}
-        <form onSubmit={addSubscription}><label>group<input value={name} onChange={e => setName(e.target.value)} placeholder="vpn1" /></label><label>subscription url<input value={url} onChange={e => setUrl(e.target.value)} type="url" placeholder="https://…" /></label><button className="quiet" disabled={busy || !name.trim() || !url.trim()} type="submit">add subscription</button></form>
-      </SettingsSection>
-      <SettingsSection title="about"><div className="about"><span>dot. Desktop</span><small>0.1.0-alpha.3</small><span>Xray Core</span><small>v26.7.28</small><span>protocol</span><small>VLESS / REALITY</small></div></SettingsSection>
-    </>}
-    {error && <div className="error" onClick={() => setError("")}>{error}</div>}
+    {error && <button className="error-toast" onClick={() => setError("")}>{error}</button>}
   </main>;
 }
 
-function PixelShield({ active, pending }: { active: boolean; pending: boolean }) { return <div className={`pixel-shield ${active ? "active" : ""} ${pending ? "pending" : ""}`} aria-hidden="true">{Array.from({ length: 25 }, (_, i) => <i key={i} />)}</div>; }
-function TrafficCell({ label, value, total }: { label: string; value: string; total?: string }) { return <div><small>{label}</small><strong>{value}</strong>{total && <em>{total}</em>}</div>; }
-function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) { return <section className="panel"><div className="panel-title">{title}.</div>{children}</section>; }
-function Toggle({ label, detail, checked, onChange }: { label: string; detail: string; checked: boolean; onChange: (v: boolean) => void }) { return <button className="toggle" onClick={() => onChange(!checked)}><div><strong>{label}</strong><small>{detail}</small></div><span className={checked ? "switch on" : "switch"}><i /></span></button>; }
-function formatRate(v: number) { return `${formatBytes(v)}/s`; }
-function formatBytes(v: number) { if (v >= 1024 ** 3) return `${(v / 1024 ** 3).toFixed(2)} GB`; if (v >= 1024 ** 2) return `${(v / 1024 ** 2).toFixed(1)} MB`; if (v >= 1024) return `${(v / 1024).toFixed(0)} KB`; return `${v} B`; }
-function formatTime(v: number) { const h = Math.floor(v / 3600); const m = Math.floor((v % 3600) / 60); const s = v % 60; return [h, m, s].map(x => String(x).padStart(2, "0")).join(":"); }
+function Sidebar({
+  groups, browseGroup, activeGroup, activeNode, vpn, latencies, testingNodeId, busy, view,
+  onBrowseGroup, onChooseNode, onRefresh, onSettings,
+}: {
+  groups: GroupView[];
+  browseGroup?: GroupView;
+  activeGroup?: GroupView;
+  activeNode?: NodeView;
+  vpn: EngineSnapshot;
+  latencies: Record<string, number>;
+  testingNodeId: string | null;
+  busy: boolean;
+  view: View;
+  onBrowseGroup: (id: string) => void;
+  onChooseNode: (groupId: string, nodeId: string) => void;
+  onRefresh: () => void;
+  onSettings: () => void;
+}) {
+  return <aside className="sidebar">
+    <div className="sidebar-head">
+      <Wordmark compact />
+      <span>{VERSION}</span>
+    </div>
+
+    <div className="group-picker">
+      <label>GROUP</label>
+      <div className="select-shell">
+        <select value={browseGroup?.id ?? ""} onChange={event => onBrowseGroup(event.target.value)} disabled={!groups.length}>
+          {!groups.length && <option value="">NO SUBSCRIPTIONS</option>}
+          {groups.map(group => <option key={group.id} value={group.id}>{group.name} · {group.nodes.length}</option>)}
+        </select>
+        <b>⌄</b>
+      </div>
+    </div>
+
+    <div className="sidebar-rule" />
+
+    <div className="node-list">
+      {!browseGroup && <div className="empty-list"><strong>NO NODES</strong><span>ADD A SUBSCRIPTION IN SETTINGS.</span></div>}
+      {browseGroup?.nodes.map(node => {
+        const selected = activeGroup?.id === browseGroup.id && activeNode?.id === node.id;
+        const running = vpn.phase === "connected" && vpn.node_name === node.name;
+        return <button
+          key={node.id}
+          className={`node-row ${selected ? "selected" : ""}`}
+          disabled={busy || vpn.phase === "stopping"}
+          onClick={() => onChooseNode(browseGroup.id, node.id)}
+        >
+          <i className="node-marker" />
+          <span className="node-copy">
+            <span className="node-title"><strong>{node.name}</strong>{running && <em>LIVE</em>}</span>
+            <small>{node.security} · {node.transport} · {node.host}:{node.port}</small>
+          </span>
+          <span className="node-latency">{testingNodeId === node.id ? "··" : latencies[node.id] ? `${latencies[node.id]} ms` : "—"}</span>
+        </button>;
+      })}
+    </div>
+
+    <div className="sidebar-footer">
+      <button className="sidebar-action" disabled={!browseGroup || busy} onClick={onRefresh}><span>↻</span><strong>REFRESH</strong></button>
+      <button className={`sidebar-action ${view === "settings" ? "active" : ""}`} onClick={onSettings}><span>⚙</span><strong>SETTINGS</strong></button>
+    </div>
+  </aside>;
+}
+
+function ConnectionPanel({ group, node, vpn, traffic, latency, testing, testFailed, onToggleVpn, onUrlTest }: {
+  group?: GroupView;
+  node?: NodeView;
+  vpn: EngineSnapshot;
+  traffic: TrafficSnapshot;
+  latency?: number;
+  testing: boolean;
+  testFailed: boolean;
+  onToggleVpn: () => void;
+  onUrlTest: () => void;
+}) {
+  const connected = vpn.phase === "connected";
+  const pending = vpn.phase === "starting" || vpn.phase === "stopping";
+  const button = vpn.phase === "stopping" ? "STOPPING" : connected || vpn.phase === "starting" ? "DISCONNECT" : "CONNECT";
+  const testResult = testing ? "TESTING…" : testFailed ? "FAILED" : latency ? `${latency} ms` : "READY";
+  const displayNode = vpn.node_name ?? node?.name ?? "SELECT A NODE";
+
+  return <div className="connection-view">
+    <div className="view-kicker">CONNECTION</div>
+    <div className="connection-center">
+      <Wordmark hero connected={connected} pending={pending} error={vpn.phase === "error"} />
+      <div className={`phase ${vpn.phase}`}>{vpn.phase.toUpperCase()}</div>
+      <div className="active-node-name">{displayNode}</div>
+      <div className="active-node-meta">{group?.name ?? "NO SUBSCRIPTION"}{node ? ` · ${node.security} · ${node.transport}` : ""}</div>
+
+      <div className="connection-actions">
+        <button className="connect-button" disabled={vpn.phase === "stopping" || (!node && vpn.phase === "offline")} onClick={onToggleVpn}>{button}</button>
+        <button className={`url-test-button ${testFailed ? "failed" : ""}`} disabled={!node || pending || testing} onClick={onUrlTest}>
+          <span>URL TEST</span><strong>{testResult}</strong>
+        </button>
+      </div>
+
+      <div className="traffic-grid">
+        <TrafficCell label="DOWNLOAD" value={`↓ ${formatRate(traffic.download_bytes_per_second)}`} total={formatBytes(traffic.session_download_bytes)} />
+        <TrafficCell label="UPLOAD" value={`↑ ${formatRate(traffic.upload_bytes_per_second)}`} total={formatBytes(traffic.session_upload_bytes)} />
+        <TrafficCell label="SESSION" value={formatTime(traffic.connected_seconds)} />
+      </div>
+
+      <div className="engine-message">{vpn.message ?? "VLESS · WINDOWS TUN"}</div>
+    </div>
+  </div>;
+}
+
+function SettingsPanel({ groups, prefs, busy, name, url, onName, onUrl, onTheme, onCloseToTray, onRefresh, onAddSubscription, onBack }: {
+  groups: GroupView[];
+  prefs: AppPreferences;
+  busy: boolean;
+  name: string;
+  url: string;
+  onName: (value: string) => void;
+  onUrl: (value: string) => void;
+  onTheme: (theme: AppTheme) => void;
+  onCloseToTray: (enabled: boolean) => void;
+  onRefresh: (group: GroupView) => void;
+  onAddSubscription: (event: FormEvent) => void;
+  onBack: () => void;
+}) {
+  return <div className="settings-view">
+    <div className="settings-head"><div><div className="view-kicker">SETTINGS</div><h2>settings.</h2></div><button className="close-view" onClick={onBack}>×</button></div>
+
+    <div className="settings-scroll">
+      <SettingsSection title="APPEARANCE">
+        <div className="theme-row">{(["amoled", "graphite", "matrix"] as AppTheme[]).map(theme => <button key={theme} className={prefs.theme === theme ? "choice selected" : "choice"} onClick={() => onTheme(theme)}>{theme.toUpperCase()}</button>)}</div>
+      </SettingsSection>
+
+      <SettingsSection title="WINDOW">
+        <Toggle label="CLOSE TO TRAY" detail="KEEP VPN RUNNING WHEN THE WINDOW IS CLOSED" checked={prefs.close_to_tray} onChange={onCloseToTray} />
+      </SettingsSection>
+
+      <SettingsSection title="SUBSCRIPTIONS">
+        <div className="subscription-list">
+          {groups.map(group => <div className="subscription" key={group.id}><div><strong>{group.name}</strong><small>{group.nodes.length} NODES</small></div><button className="tiny" disabled={busy} onClick={() => onRefresh(group)}>↻</button></div>)}
+        </div>
+        <form onSubmit={onAddSubscription}>
+          <label>GROUP<input value={name} onChange={event => onName(event.target.value)} placeholder="vpn1" /></label>
+          <label>SUBSCRIPTION URL<input value={url} onChange={event => onUrl(event.target.value)} type="url" placeholder="https://…" /></label>
+          <button className="quiet" disabled={busy || !name.trim() || !url.trim()} type="submit">ADD SUBSCRIPTION</button>
+        </form>
+      </SettingsSection>
+
+      <SettingsSection title="ABOUT">
+        <div className="about"><span>dot. Desktop</span><small>{VERSION}</small><span>Xray Core</span><small>{XRAY_VERSION}</small><span>protocol</span><small>VLESS / REALITY</small></div>
+      </SettingsSection>
+    </div>
+  </div>;
+}
+
+function Wordmark({ compact = false, hero = false, connected = false, pending = false, error = false }: { compact?: boolean; hero?: boolean; connected?: boolean; pending?: boolean; error?: boolean }) {
+  const state = error ? "error" : connected ? "connected" : pending ? "pending" : "";
+  return <div className={`wordmark ${compact ? "compact" : ""} ${hero ? "hero" : ""} ${state}`}>dot<span>.</span></div>;
+}
+
+function TrafficCell({ label, value, total }: { label: string; value: string; total?: string }) {
+  return <div className="traffic-cell"><small>{label}</small><strong>{value}</strong>{total && <em>{total}</em>}</div>;
+}
+
+function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return <section className="panel"><div className="panel-title">{title}</div>{children}</section>;
+}
+
+function Toggle({ label, detail, checked, onChange }: { label: string; detail: string; checked: boolean; onChange: (value: boolean) => void }) {
+  return <button className="toggle" onClick={() => onChange(!checked)}><div><strong>{label}</strong><small>{detail}</small></div><span className={checked ? "switch on" : "switch"}><i /></span></button>;
+}
+
+function formatRate(value: number) { return `${formatBytes(value)}/s`; }
+function formatBytes(value: number) { if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(2)} GB`; if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MB`; if (value >= 1024) return `${(value / 1024).toFixed(0)} KB`; return `${value} B`; }
+function formatTime(value: number) { const hours = Math.floor(value / 3600); const minutes = Math.floor((value % 3600) / 60); const seconds = value % 60; return [hours, minutes, seconds].map(part => String(part).padStart(2, "0")).join(":"); }

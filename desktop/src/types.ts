@@ -9,3 +9,4 @@ export interface EngineSnapshot { phase: EnginePhase; node_name: string | null; 
 export interface TrafficSnapshot { download_bytes_per_second: number; upload_bytes_per_second: number; session_download_bytes: number; session_upload_bytes: number; connected_seconds: number; }
 export interface AppPreferences { theme: AppTheme; close_to_tray: boolean; }
 export interface SelectionView { group_id: string | null; node_id: string | null; }
+export interface UrlTestResult { node_id: string; latency_ms: number; active_tunnel: boolean; }

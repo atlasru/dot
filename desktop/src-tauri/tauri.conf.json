@@ -13,10 +13,10 @@
     "windows": [{
       "label": "main",
       "title": "dot.",
-      "width": 460,
+      "width": 1100,
       "height": 720,
-      "minWidth": 400,
-      "minHeight": 600,
+      "minWidth": 860,
+      "minHeight": 560,
       "resizable": true,
       "fullscreen": false
     }],

@@ -128,3 +128,10 @@ pub struct SelectionView {
     pub group_id: Option<String>,
     pub node_id: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UrlTestResult {
+    pub node_id: String,
+    pub latency_ms: u64,
+    pub active_tunnel: bool,
+}
