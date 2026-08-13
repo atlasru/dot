@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.7
+
+- replace the original rough continent sketch with real low-resolution country GeoJSON geometry
+- render country borders and use a Mercator projection for a more realistic world map
+- increase the default map zoom and center the initial view more closely on Europe
+- keep pinch zoom, pan and double-tap reset while preserving stable marker size
+- add a darker ProtonVPN-inspired map backdrop with subtle grid lines and varied country fills
+- highlight countries containing subscription nodes and tint the active-node country red
+- add country codes to map geometry so node countries can be styled independently
+- keep the custom Compose map renderer lightweight and remove the unused MapLibre dependency
+
 ## 0.1.6
 
 - add LIST / MAP switch for the selected Android subscription while keeping LIST as the default view
