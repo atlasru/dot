@@ -101,7 +101,7 @@ fun NodeMapView(
                 )
             },
     ) {
-        drawWorldCountries(countries) { point ->
+        val pointFor: (WorldGeoPoint) -> Offset = { point ->
             viewportPoint(
                 point.longitude,
                 point.latitude,
@@ -112,19 +112,13 @@ fun NodeMapView(
             )
         }
 
-        if (countries.isEmpty()) {
-            val grid = Color(0xFF121517)
-            for (longitude in -120..120 step 40) {
-                val start = viewportPoint(longitude.toDouble(), -80.0, size.width, size.height, zoom, viewportOffset)
-                val end = viewportPoint(longitude.toDouble(), 80.0, size.width, size.height, zoom, viewportOffset)
-                drawLine(grid, start, end, strokeWidth = 1f)
-            }
-            for (latitude in -60..60 step 30) {
-                val start = viewportPoint(-180.0, latitude.toDouble(), size.width, size.height, zoom, viewportOffset)
-                val end = viewportPoint(180.0, latitude.toDouble(), size.width, size.height, zoom, viewportOffset)
-                drawLine(grid, start, end, strokeWidth = 1f)
-            }
-        }
+        drawWorldBackdrop(pointFor)
+        drawWorldCountries(
+            countries = countries,
+            nodeCountryCodes = markers.map(NodeMapMarker::countryCode).toSet(),
+            activeCountryCode = markers.firstOrNull(NodeMapMarker::active)?.countryCode,
+            pointFor = pointFor,
+        )
 
         val countPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textAlign = Paint.Align.CENTER
@@ -143,6 +137,8 @@ fun NodeMapView(
             )
             val radius = if (marker.nodeCount > 1) 9.dp.toPx() else 6.dp.toPx()
             val fill = if (marker.active) Color(0xFFFF2D2D) else Color(0xFFE8E8E8)
+
+            drawCircle(Color(0x99000000), radius + 4.dp.toPx(), center)
             drawCircle(Color(0xFF030405), radius + 2.dp.toPx(), center)
             drawCircle(fill, radius, center)
 
@@ -197,9 +193,9 @@ private fun project(longitude: Double, latitude: Double, width: Float, height: F
     )
 }
 
-private const val MIN_ZOOM = 1.2f
-private const val MAX_ZOOM = 5f
-private const val DEFAULT_ZOOM = 1.5f
+private const val MIN_ZOOM = 1.15f
+private const val MAX_ZOOM = 6f
+private const val DEFAULT_ZOOM = 1.82f
 private const val DEFAULT_CENTER_LONGITUDE = 18.0
-private const val DEFAULT_CENTER_LATITUDE = 38.0
+private const val DEFAULT_CENTER_LATITUDE = 43.0
 private const val MERCATOR_LIMIT = 85.05112878
