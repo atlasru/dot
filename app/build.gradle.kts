@@ -76,7 +76,6 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling:1.11.4")
 
     implementation("com.squareup.okhttp3:okhttp:5.1.0")
-    implementation("org.maplibre.gl:android-sdk:13.4.1")
     implementation(files("libs/libXray.aar"))
 
     testImplementation("junit:junit:4.13.2")
