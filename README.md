@@ -2,7 +2,7 @@
 
 Minimal VLESS client for Android with an AMOLED-first, Nothing-inspired interface.
 
-Current version: **0.0.14**
+Current Android version: **0.1.7**
 
 ## Features
 
@@ -11,15 +11,34 @@ Current version: **0.0.14**
 - plaintext and Base64 subscription decoding
 - multiple subscription groups
 - node selection and persistence
+- LIST / MAP views for nodes, with LIST as the default
+- interactive world map with real country geometry, borders, Mercator projection, pinch zoom and pan
+- DNS + IP geolocation for subscription nodes with local caching
+- fallback country detection from node flags, ISO codes and country names when IP geolocation fails
+- country-level node grouping so multiple nodes do not overlap on the map
+- node latency / connection tests through libXray URL testing
+- direct node selection and switching while connected
 - Android VpnService + TUN integration
 - libXray / Xray-core backend
 - realtime upload/download traffic
-- foreground VPN notification with node name and traffic
+- foreground VPN notification with active node and traffic
 - Quick Settings connect/disconnect tile
 - long-press Quick Settings tile opens dot.
 - AMOLED, Graphite and Matrix themes
-- adaptive launcher icon
+- selectable launcher icon variants
 - no accounts, ads, analytics or telemetry
+
+## Node map
+
+The map is a lightweight custom Compose renderer rather than a full map SDK. It downloads low-resolution country GeoJSON, caches it locally, renders real borders with a dark ProtonVPN-inspired presentation and keeps node markers interactive while zooming and panning.
+
+Node location resolution follows a fallback chain:
+
+1. resolve the node hostname to a public IP
+2. perform IP geolocation
+3. if that fails, infer the country from the node name using an emoji flag, ISO code or common country name
+
+Only the resolved node IP is sent to the geolocation provider; subscription URLs, UUIDs and VLESS credentials are not included.
 
 ## Design
 
