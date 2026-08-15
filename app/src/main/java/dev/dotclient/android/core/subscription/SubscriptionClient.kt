@@ -2,11 +2,11 @@ package dev.dotclient.android.core.subscription
 
 import dev.dotclient.android.BuildConfig
 import dev.dotclient.android.core.parser.SubscriptionDecoder
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.concurrent.TimeUnit
 
 class SubscriptionClient(
     private val client: OkHttpClient = OkHttpClient.Builder()
@@ -29,7 +29,7 @@ class SubscriptionClient(
                 .build()
 
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) error("Subscription server returned HTTP ${response.code}")
+                if (!response.isSuccessful) throw SubscriptionHttpException(response.code)
                 val body = response.body.string()
                 SubscriptionDecoder.decode(body)
             }
