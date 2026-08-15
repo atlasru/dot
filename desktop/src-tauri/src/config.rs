@@ -3,6 +3,84 @@ use serde_json::{json, Map, Value};
 use crate::model::{Security, Transport, VlessNode};
 
 pub fn build_xray_config(node: &VlessNode) -> Result<Value, String> {
+    let proxy = build_proxy_outbound(node)?;
+
+    Ok(json!({
+        "log": { "loglevel": "warning" },
+        "inbounds": [
+            {
+                "tag": "dot-tun",
+                "protocol": "tun",
+                "settings": {
+                    "name": "dot0",
+                    "desc": "dot.",
+                    "mtu": 1500,
+                    "gateway": ["10.77.0.1/30"],
+                    "dns": ["1.1.1.1", "8.8.8.8"],
+                    "autoSystemRoutingTable": ["0.0.0.0/0"],
+                    "autoOutboundsInterface": "auto"
+                },
+                "sniffing": {
+                    "enabled": true,
+                    "destOverride": ["http", "tls", "quic"]
+                }
+            }
+        ],
+        "outbounds": [
+            proxy,
+            {
+                "tag": "direct",
+                "protocol": "freedom"
+            }
+        ],
+        "routing": {
+            "domainStrategy": "AsIs",
+            "rules": [
+                {
+                    "type": "field",
+                    "inboundTag": ["dot-tun"],
+                    "outboundTag": "proxy"
+                }
+            ]
+        }
+    }))
+}
+
+pub fn build_url_test_config(node: &VlessNode, port: u16) -> Result<Value, String> {
+    let proxy = build_proxy_outbound(node)?;
+
+    Ok(json!({
+        "log": { "loglevel": "warning" },
+        "inbounds": [
+            {
+                "tag": "dot-url-test",
+                "listen": "127.0.0.1",
+                "port": port,
+                "protocol": "http",
+                "settings": { "timeout": 5 }
+            }
+        ],
+        "outbounds": [
+            proxy,
+            {
+                "tag": "direct",
+                "protocol": "freedom"
+            }
+        ],
+        "routing": {
+            "domainStrategy": "AsIs",
+            "rules": [
+                {
+                    "type": "field",
+                    "inboundTag": ["dot-url-test"],
+                    "outboundTag": "proxy"
+                }
+            ]
+        }
+    }))
+}
+
+fn build_proxy_outbound(node: &VlessNode) -> Result<Value, String> {
     validate_node(node)?;
 
     let mut settings = Map::new();
@@ -91,48 +169,10 @@ pub fn build_xray_config(node: &VlessNode) -> Result<Value, String> {
     }
 
     Ok(json!({
-        "log": { "loglevel": "warning" },
-        "inbounds": [
-            {
-                "tag": "dot-tun",
-                "protocol": "tun",
-                "settings": {
-                    "name": "dot0",
-                    "desc": "dot.",
-                    "mtu": 1500,
-                    "gateway": ["10.77.0.1/30"],
-                    "dns": ["1.1.1.1", "8.8.8.8"],
-                    "autoSystemRoutingTable": ["0.0.0.0/0"],
-                    "autoOutboundsInterface": "auto"
-                },
-                "sniffing": {
-                    "enabled": true,
-                    "destOverride": ["http", "tls", "quic"]
-                }
-            }
-        ],
-        "outbounds": [
-            {
-                "tag": "proxy",
-                "protocol": "vless",
-                "settings": Value::Object(settings),
-                "streamSettings": Value::Object(stream)
-            },
-            {
-                "tag": "direct",
-                "protocol": "freedom"
-            }
-        ],
-        "routing": {
-            "domainStrategy": "AsIs",
-            "rules": [
-                {
-                    "type": "field",
-                    "inboundTag": ["dot-tun"],
-                    "outboundTag": "proxy"
-                }
-            ]
-        }
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": Value::Object(settings),
+        "streamSettings": Value::Object(stream)
     }))
 }
 
@@ -171,13 +211,25 @@ mod tests {
     use super::*;
     use crate::vless::parse_vless;
 
+    fn reality_node() -> VlessNode {
+        parse_vless("vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=reality&sni=example.org&fp=chrome&pbk=password&sid=0123456789abcdef&type=tcp&flow=xtls-rprx-vision#node").unwrap()
+    }
+
     #[test]
     fn emits_current_reality_client_fields() {
-        let node = parse_vless("vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=reality&sni=example.org&fp=chrome&pbk=password&sid=0123456789abcdef&type=tcp&flow=xtls-rprx-vision#node").unwrap();
-        let config = build_xray_config(&node).unwrap();
+        let config = build_xray_config(&reality_node()).unwrap();
         assert_eq!(config["outbounds"][0]["streamSettings"]["method"], "raw");
         assert_eq!(config["outbounds"][0]["streamSettings"]["realitySettings"]["serverName"], "example.org");
         assert_eq!(config["outbounds"][0]["streamSettings"]["realitySettings"]["password"], "password");
         assert_eq!(config["inbounds"][0]["settings"]["autoOutboundsInterface"], "auto");
+    }
+
+    #[test]
+    fn emits_isolated_http_proxy_for_url_tests() {
+        let config = build_url_test_config(&reality_node(), 18080).unwrap();
+        assert_eq!(config["inbounds"][0]["protocol"], "http");
+        assert_eq!(config["inbounds"][0]["listen"], "127.0.0.1");
+        assert_eq!(config["inbounds"][0]["port"], 18080);
+        assert_eq!(config["routing"]["rules"][0]["outboundTag"], "proxy");
     }
 }
