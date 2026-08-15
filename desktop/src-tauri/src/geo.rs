@@ -30,13 +30,15 @@ fn resolve(host: &str) -> Result<GeoPoint, String> {
         .build()
         .map_err(|e| format!("failed to initialize GeoIP client: {e}"))?;
 
-    let value: Value = client
+    let text = client
         .get(format!("https://ipwho.is/{ip}"))
         .send()
         .map_err(|e| format!("GeoIP request failed: {e}"))?
         .error_for_status()
         .map_err(|e| format!("GeoIP HTTP error: {e}"))?
-        .json()
+        .text()
+        .map_err(|e| format!("failed to read GeoIP response: {e}"))?;
+    let value: Value = serde_json::from_str(&text)
         .map_err(|e| format!("invalid GeoIP response: {e}"))?;
 
     if value.get("success").and_then(Value::as_bool) == Some(false) {
@@ -59,11 +61,12 @@ fn resolve_ip(host: &str) -> Result<IpAddr, String> {
     if let Ok(ip) = host.parse::<IpAddr>() {
         return Ok(ip);
     }
-    (host, 443)
+    let addresses: Vec<IpAddr> = (host, 443)
         .to_socket_addrs()
         .map_err(|e| format!("DNS lookup failed for {host}: {e}"))?
         .map(|addr| addr.ip())
-        .find(IpAddr::is_ipv4)
-        .or_else(|| (host, 443).to_socket_addrs().ok()?.next().map(|addr| addr.ip()))
+        .collect();
+    addresses.iter().copied().find(IpAddr::is_ipv4)
+        .or_else(|| addresses.first().copied())
         .ok_or_else(|| format!("DNS lookup returned no addresses for {host}"))
 }
