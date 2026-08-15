@@ -4,6 +4,7 @@ mod commands;
 mod config;
 #[cfg(test)] mod config_smoke;
 mod engine;
+mod geo;
 #[cfg(windows)] mod job;
 mod model;
 mod session;
@@ -63,6 +64,7 @@ fn main() {
             commands::disconnect,
             commands::vpn_status,
             commands::url_test,
+            geo::node_geo,
         ])
         .run(tauri::generate_context!())
         .expect("error while running dot. Desktop");
