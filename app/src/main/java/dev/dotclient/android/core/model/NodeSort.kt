@@ -15,24 +15,27 @@ object NodeSorter {
     ): List<VlessProfile> = when (mode) {
         NodeSortMode.ORIGIN -> profiles
         NodeSortMode.NAME -> profiles.sortedWith(naturalProfileComparator)
-        NodeSortMode.DELAY -> profiles.sortedWith { left, right ->
-            val leftLatency = latenciesMs[left.id]
-            val rightLatency = latenciesMs[right.id]
-            val leftRank = when {
-                leftLatency != null -> 0
-                left.id in failedIds -> 1
-                else -> 2
-            }
-            val rightRank = when {
-                rightLatency != null -> 0
-                right.id in failedIds -> 1
-                else -> 2
-            }
+        NodeSortMode.DELAY -> {
+            val hasResults = profiles.any { it.id in latenciesMs || it.id in failedIds }
+            if (!hasResults) profiles else profiles.sortedWith { left, right ->
+                val leftLatency = latenciesMs[left.id]
+                val rightLatency = latenciesMs[right.id]
+                val leftRank = when {
+                    leftLatency != null -> 0
+                    left.id in failedIds -> 1
+                    else -> 2
+                }
+                val rightRank = when {
+                    rightLatency != null -> 0
+                    right.id in failedIds -> 1
+                    else -> 2
+                }
 
-            when {
-                leftRank != rightRank -> leftRank.compareTo(rightRank)
-                leftLatency != null && rightLatency != null && leftLatency != rightLatency -> leftLatency.compareTo(rightLatency)
-                else -> naturalCompare(left.name, right.name)
+                when {
+                    leftRank != rightRank -> leftRank.compareTo(rightRank)
+                    leftLatency != null && rightLatency != null && leftLatency != rightLatency -> leftLatency.compareTo(rightLatency)
+                    else -> naturalCompare(left.name, right.name)
+                }
             }
         }
     }

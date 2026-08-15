@@ -103,7 +103,7 @@ fun NodeMapPanel(
                     name = entries.first().second.countryName,
                     latitude = anchors.map { it.second.latitude }.average(),
                     longitude = anchors.map { it.second.longitude }.average(),
-                    profiles = entries.map { it.first }.sortedBy(VlessProfile::name),
+                    profiles = entries.map { it.first },
                     cities = exactEntries.mapNotNull { it.second.city }.distinct().sorted(),
                     fallbackOnly = exactEntries.isEmpty(),
                 )
@@ -176,6 +176,9 @@ private fun CountrySheet(
     viewModel: MainViewModel,
     onToggleVpn: () -> Unit,
 ) {
+    val clusterIds = cluster.profiles.mapTo(hashSetOf()) { it.id }
+    val orderedProfiles = state.sortedProfiles.filter { it.id in clusterIds }
+
     Column(
         Modifier
             .fillMaxWidth()
@@ -203,8 +206,9 @@ private fun CountrySheet(
 
         Spacer(Modifier.height(7.dp))
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 170.dp)) {
-            items(cluster.profiles, key = VlessProfile::id) { profile ->
+            items(orderedProfiles, key = VlessProfile::id) { profile ->
                 val running = state.vpnConnected && profile.name == state.runningNodeName
+                val failed = profile.id in state.nodeLatencyFailedIds
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -236,10 +240,11 @@ private fun CountrySheet(
                         when {
                             profile.id in state.testingNodeIds -> "··"
                             latency != null -> "$latency ms"
+                            failed -> "FAIL"
                             running -> "LIVE"
                             else -> "CONNECT"
                         },
-                        color = if (running) NodeMapRed else Color(0xFF777777),
+                        color = if (running || failed) NodeMapRed else Color(0xFF777777),
                         style = MaterialTheme.typography.labelMedium,
                     )
                 }

@@ -40,7 +40,14 @@ data class DotUiState(
         get() = selectedSubscription?.sortMode ?: NodeSortMode.ORIGIN
 
     val sortedProfiles: List<VlessProfile>
-        get() = NodeSorter.sort(profiles, selectedSortMode, nodeLatenciesMs, nodeLatencyFailedIds)
+        get() = if (
+            selectedSortMode == NodeSortMode.DELAY &&
+            pendingDelaySortSubscriptionId == selectedSubscriptionId
+        ) {
+            profiles
+        } else {
+            NodeSorter.sort(profiles, selectedSortMode, nodeLatenciesMs, nodeLatencyFailedIds)
+        }
 
     val selectedProfileId: String?
         get() = selectedSubscription?.selectedProfileId
