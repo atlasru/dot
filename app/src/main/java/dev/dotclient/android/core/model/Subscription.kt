@@ -9,4 +9,5 @@ data class Subscription(
     val profiles: List<VlessProfile> = emptyList(),
     val selectedProfileId: String? = null,
     val lastUpdatedEpochMs: Long? = null,
+    val sortMode: NodeSortMode = NodeSortMode.ORIGIN,
 )
