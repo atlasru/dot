@@ -2,7 +2,7 @@ name: desktop
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, agent/desktop-0.2.0-alpha1-map-urltest ]
     paths:
       - 'desktop/**'
       - '.github/workflows/desktop.yml'
