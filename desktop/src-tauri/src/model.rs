@@ -100,6 +100,35 @@ impl From<&SubscriptionGroup> for GroupView {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeChangeView {
+    pub id: String,
+    pub name: String,
+}
+impl From<&VlessNode> for NodeChangeView {
+    fn from(v: &VlessNode) -> Self { Self { id: v.id.clone(), name: v.name.clone() } }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeEditView {
+    pub id: String,
+    pub name: String,
+    pub changed_fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SubscriptionRefreshResult {
+    pub success: bool,
+    pub subscription_name: String,
+    pub group: Option<GroupView>,
+    pub total_nodes: usize,
+    pub added: Vec<NodeChangeView>,
+    pub edited: Vec<NodeEditView>,
+    pub deleted: Vec<NodeChangeView>,
+    pub user_message: Option<String>,
+    pub raw_error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum EnginePhase { Offline, Starting, Connected, Stopping, Error }
