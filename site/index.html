@@ -91,7 +91,12 @@
       <div class="preview-grid">
         <div class="mock mock-phone reveal">
           <div class="mock-top"><span>dot.</span><span>•••</span></div>
-          <div class="orb"><span></span></div>
+          <div class="orb">
+            <svg class="orb-grid" viewBox="0 0 11 11" aria-hidden="true">
+              <path class="orb-lit" d="M3 0h1v1h-1z M4 0h1v1h-1z M5 0h1v1h-1z M6 0h1v1h-1z M7 0h1v1h-1z M2 1h1v1h-1z M3 1h1v1h-1z M7 1h1v1h-1z M8 1h1v1h-1z M1 2h1v1h-1z M2 2h1v1h-1z M8 2h1v1h-1z M9 2h1v1h-1z M0 3h1v1h-1z M1 3h1v1h-1z M4 3h1v1h-1z M6 3h1v1h-1z M9 3h1v1h-1z M10 3h1v1h-1z M0 4h1v1h-1z M3 4h1v1h-1z M5 4h1v1h-1z M7 4h1v1h-1z M10 4h1v1h-1z M0 5h1v1h-1z M4 5h1v1h-1z M6 5h1v1h-1z M10 5h1v1h-1z M0 6h1v1h-1z M3 6h1v1h-1z M5 6h1v1h-1z M7 6h1v1h-1z M10 6h1v1h-1z M0 7h1v1h-1z M1 7h1v1h-1z M4 7h1v1h-1z M6 7h1v1h-1z M9 7h1v1h-1z M10 7h1v1h-1z M1 8h1v1h-1z M2 8h1v1h-1z M8 8h1v1h-1z M9 8h1v1h-1z M2 9h1v1h-1z M3 9h1v1h-1z M7 9h1v1h-1z M8 9h1v1h-1z M3 10h1v1h-1z M4 10h1v1h-1z M5 10h1v1h-1z M6 10h1v1h-1z M7 10h1v1h-1z"/>
+              <rect class="orb-center" x="5" y="5" width="1" height="1"/>
+            </svg>
+          </div>
           <div class="mock-state">CONNECTED</div>
           <div class="mock-node active"><span>DE / Frankfurt #2</span><span>41 ms</span></div>
           <div class="mock-node"><span>FI / Helsinki</span><span>63 ms</span></div>
@@ -125,20 +130,6 @@
         <article class="feature-line reveal"><span class="feature-index">02</span><div><h3>NODES</h3><p>URL testing · delay sorting · natural name sorting · provider order</p></div></article>
         <article class="feature-line reveal"><span class="feature-index">03</span><div><h3>SUBSCRIPTIONS</h3><p>Multiple groups · safe refresh · structured changes · failure rollback</p></div></article>
         <article class="feature-line reveal"><span class="feature-index">04</span><div><h3>MAP</h3><p>IP geolocation · country fallback · node clustering · pan and zoom</p></div></article>
-      </div>
-    </section>
-
-    <section class="split shell section">
-      <div class="terminal reveal">
-        <div class="panel-head"><span>SUBSCRIPTION UPDATED</span><span>OK</span></div>
-        <div class="terminal-lines"><p><b>+</b> 3 ADDED</p><p><b>~</b> 1 EDITED</p><p><b>−</b> 2 DELETED</p></div>
-        <div class="terminal-action">VIEW DETAILS</div>
-      </div>
-      <div class="split-copy reveal" data-delay="80">
-        <p class="eyebrow">SAFE REFRESH</p>
-        <h2>Changes before replacement.</h2>
-        <p>Subscription refreshes are compared with the working node list first. If downloading or parsing fails, the previous nodes stay intact.</p>
-        <p class="subtle">Sensitive VLESS credentials are redacted from normal diagnostics and raw error output.</p>
       </div>
     </section>
 
