@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.dotclient.android.BuildConfig
+import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.model.VlessProfile
 import dev.dotclient.android.ui.theme.DotThemeMode
@@ -130,6 +131,10 @@ fun DotApp(viewModel: MainViewModel) {
                 modifier = Modifier.padding(padding),
             )
         }
+    }
+
+    state.subscriptionUpdateResult?.let { result ->
+        SubscriptionUpdateResultDialog(result, viewModel::dismissSubscriptionUpdateResult)
     }
 }
 
@@ -205,7 +210,12 @@ private fun MainDashboard(
         val group = state.selectedSubscription
         if (group != null && group.profiles.isNotEmpty()) {
             Spacer(Modifier.height(7.dp))
-            NodeViewSwitcher(nodeViewMode) { nodeViewMode = it }
+            NodeViewSwitcher(
+                state = state,
+                selected = nodeViewMode,
+                onViewSelect = { nodeViewMode = it },
+                onSortSelect = viewModel::setNodeSortMode,
+            )
         }
 
         when {
@@ -227,13 +237,14 @@ private fun MainDashboard(
                 contentPadding = PaddingValues(top = 6.dp, bottom = 18.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                items(group.profiles, key = { it.id }) { profile ->
+                items(state.sortedProfiles, key = { it.id }) { profile ->
                     DashboardNodeRow(
                         profile = profile,
                         selected = profile.id == group.selectedProfileId,
                         running = state.vpnConnected && profile.name == state.runningNodeName,
                         latencyMs = state.nodeLatenciesMs[profile.id],
                         testing = profile.id in state.testingNodeIds,
+                        failed = profile.id in state.nodeLatencyFailedIds,
                         onSelect = {
                             if (state.vpnConnected && profile.name != state.runningNodeName) viewModel.switchProfile(profile.id)
                             else viewModel.selectProfile(profile.id)
@@ -265,21 +276,59 @@ private fun MainDashboard(
 }
 
 @Composable
-private fun NodeViewSwitcher(selected: NodeViewMode, onSelect: (NodeViewMode) -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        NodeViewMode.entries.forEach { mode ->
-            val active = mode == selected
+private fun NodeViewSwitcher(
+    state: DotUiState,
+    selected: NodeViewMode,
+    onViewSelect: (NodeViewMode) -> Unit,
+    onSortSelect: (NodeSortMode) -> Unit,
+) {
+    var sortMenuOpen by remember(state.selectedSubscriptionId) { mutableStateOf(false) }
+    val delayTesting = state.pendingDelaySortSubscriptionId == state.selectedSubscriptionId
+
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box {
             Text(
-                mode.name,
+                if (delayTesting) "SORT: TESTING" else "SORT: ${state.selectedSortMode.name}",
                 modifier = Modifier
-                    .border(1.dp, if (active) Color(0xFF505050) else Color(0xFF252525), RoundedCornerShape(2.dp))
-                    .background(if (active) Color(0xFF141414) else Color.Transparent)
-                    .clickable { onSelect(mode) }
-                    .padding(horizontal = 11.dp, vertical = 6.dp),
-                color = if (active) Color(0xFFD0D0D0) else Color(0xFF626262),
+                    .border(1.dp, Color(0xFF252525), RoundedCornerShape(2.dp))
+                    .background(Color.Transparent)
+                    .clickable(enabled = !delayTesting) { sortMenuOpen = true }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                color = if (delayTesting) Color(0xFF777777) else Color(0xFF626262),
                 style = MaterialTheme.typography.labelMedium,
             )
-            if (mode != NodeViewMode.entries.last()) Spacer(Modifier.width(5.dp))
+            DropdownMenu(sortMenuOpen, { sortMenuOpen = false }, containerColor = MaterialTheme.colorScheme.surface) {
+                NodeSortMode.entries.forEach { mode ->
+                    DropdownMenuItem(
+                        text = { Text(mode.name) },
+                        onClick = {
+                            sortMenuOpen = false
+                            onSortSelect(mode)
+                        },
+                    )
+                }
+            }
+        }
+
+        Row {
+            NodeViewMode.entries.forEach { mode ->
+                val active = mode == selected
+                Text(
+                    mode.name,
+                    modifier = Modifier
+                        .border(1.dp, if (active) Color(0xFF505050) else Color(0xFF252525), RoundedCornerShape(2.dp))
+                        .background(if (active) Color(0xFF141414) else Color.Transparent)
+                        .clickable { onViewSelect(mode) }
+                        .padding(horizontal = 11.dp, vertical = 6.dp),
+                    color = if (active) Color(0xFFD0D0D0) else Color(0xFF626262),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                if (mode != NodeViewMode.entries.last()) Spacer(Modifier.width(5.dp))
+            }
         }
     }
 }
@@ -362,6 +411,7 @@ private fun GroupToolbar(state: DotUiState, viewModel: MainViewModel, onAddSubsc
     var menuOpen by remember { mutableStateOf(false) }
     val group = state.selectedSubscription
     val canTest = group != null && group.profiles.isNotEmpty() && state.testingNodeIds.isEmpty()
+    val canRefresh = group != null && state.loadingSubscriptionId == null && state.testingNodeIds.isEmpty()
 
     Row(
         Modifier.fillMaxWidth(),
@@ -402,7 +452,7 @@ private fun GroupToolbar(state: DotUiState, viewModel: MainViewModel, onAddSubsc
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 if (state.loadingSubscriptionId == group?.id) "··" else "↻",
-                Modifier.clickable(enabled = group != null && state.loadingSubscriptionId == null) {
+                Modifier.clickable(enabled = canRefresh) {
                     group?.let { viewModel.refreshSubscription(it.id) }
                 }.padding(horizontal = 10.dp, vertical = 8.dp),
                 color = Color(0xFFAAAAAA),
@@ -428,6 +478,7 @@ private fun DashboardNodeRow(
     running: Boolean,
     latencyMs: Long?,
     testing: Boolean,
+    failed: Boolean,
     onSelect: () -> Unit,
     onTest: () -> Unit,
     onConnect: () -> Unit,
@@ -456,8 +507,14 @@ private fun DashboardNodeRow(
         }
         Spacer(Modifier.width(10.dp))
         Text(
-            when { testing -> "··"; latencyMs != null -> "${latencyMs} ms"; else -> "--" },
-            color = when { testing -> Color(0xFF777777); latencyMs != null && latencyMs > 300 -> Color(0xFF777777); latencyMs != null -> Color(0xFFB8B8B8); else -> Color(0xFF3F3F3F) },
+            when { testing -> "··"; latencyMs != null -> "${latencyMs} ms"; failed -> "FAIL"; else -> "--" },
+            color = when {
+                failed -> DotRed
+                testing -> Color(0xFF777777)
+                latencyMs != null && latencyMs > 300 -> Color(0xFF777777)
+                latencyMs != null -> Color(0xFFB8B8B8)
+                else -> Color(0xFF3F3F3F)
+            },
             style = MaterialTheme.typography.labelMedium,
         )
         Box {

@@ -1,6 +1,7 @@
 package dev.dotclient.android.core.subscription
 
 import android.content.Context
+import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.parser.VlessUriParser
 import org.json.JSONArray
@@ -37,6 +38,9 @@ class SubscriptionStore(context: Context) {
                         .firstOrNull { it.rawUri == selectedRawUri }
                         ?.id
                         ?: profiles.firstOrNull()?.id
+                    val sortMode = runCatching {
+                        NodeSortMode.valueOf(item.optString("sortMode", NodeSortMode.ORIGIN.name))
+                    }.getOrDefault(NodeSortMode.ORIGIN)
                     add(
                         Subscription(
                             id = id,
@@ -45,6 +49,7 @@ class SubscriptionStore(context: Context) {
                             profiles = profiles,
                             selectedProfileId = selectedProfileId,
                             lastUpdatedEpochMs = item.optLong("lastUpdatedEpochMs").takeIf { it > 0L },
+                            sortMode = sortMode,
                         )
                     )
                 }
@@ -76,6 +81,7 @@ class SubscriptionStore(context: Context) {
                     .put("profiles", profiles)
                     .put("selectedProfileUri", selectedRawUri)
                     .put("lastUpdatedEpochMs", subscription.lastUpdatedEpochMs ?: 0L)
+                    .put("sortMode", subscription.sortMode.name)
             )
         }
 

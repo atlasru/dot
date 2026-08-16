@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.8
+
+- add structured subscription refresh results with added, edited, deleted and no-change states
+- add expandable refresh details while keeping sensitive VLESS credentials out of the normal result UI
+- classify subscription download/HTTP/DNS/timeout/TLS/content errors and provide a redacted `VIEW RAW ERROR` path
+- keep the previous working node list when a subscription refresh fails or returns no supported nodes
+- add stable logical node matching so selected nodes and compatible latency results survive subscription refreshes
+- add per-subscription `ORIGIN`, `DELAY` and natural `NAME` sorting without changing the provider's stored node order
+- run the existing group URL test before activating `DELAY` sorting when latency data is unavailable
+- keep the node list stable while the initial delay-sort test is running, then order successful nodes by latency with failed/untested nodes last
+- apply the selected sort mode to node lists opened from map country markers and expose failed URL-test state in list/map rows
+
 ## 0.1.7
 
 - replace the original rough continent sketch with real low-resolution country GeoJSON geometry
@@ -118,4 +130,3 @@ All notable changes to `dot.` are tracked here.
 
 - initial Android/Compose foundation
 - subscription fetching and decoding
-- VLESS parsing and node selection

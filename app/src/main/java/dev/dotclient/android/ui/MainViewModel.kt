@@ -5,10 +5,16 @@ import android.content.Intent
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.Subscription
+import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.core.parser.SubscriptionDecoder
 import dev.dotclient.android.core.subscription.SecretRedactor
 import dev.dotclient.android.core.subscription.SubscriptionClient
+import dev.dotclient.android.core.subscription.SubscriptionContentException
+import dev.dotclient.android.core.subscription.SubscriptionDiffer
 import dev.dotclient.android.core.subscription.SubscriptionStore
+import dev.dotclient.android.core.subscription.SubscriptionUpdateErrorFormatter
 import dev.dotclient.android.ui.theme.DotThemeMode
 import dev.dotclient.android.vpn.DotVpnService
 import dev.dotclient.android.vpn.VpnConnectionState
@@ -53,6 +59,10 @@ class MainViewModel(
                 }
             }
         }
+
+        state.value.selectedSubscription
+            ?.takeIf { it.sortMode == NodeSortMode.DELAY && it.profiles.isNotEmpty() }
+            ?.let { ensureDelaySortData(it.id) }
     }
 
     private fun loadInitialState(): DotUiState {
@@ -82,6 +92,7 @@ class MainViewModel(
                     subscriptions = it.subscriptions + subscription,
                     selectedSubscriptionId = subscription.id,
                     message = null,
+                    subscriptionUpdateResult = null,
                 )
             }
             persist()
@@ -96,8 +107,6 @@ class MainViewModel(
                         subscription.copy(
                             name = cleanName,
                             url = cleanUrl,
-                            profiles = if (subscription.url == cleanUrl) subscription.profiles else emptyList(),
-                            selectedProfileId = if (subscription.url == cleanUrl) subscription.selectedProfileId else null,
                         )
                     } else {
                         subscription
@@ -105,6 +114,7 @@ class MainViewModel(
                 },
                 selectedSubscriptionId = existingId,
                 message = null,
+                subscriptionUpdateResult = null,
             )
         }
         persist()
@@ -114,52 +124,114 @@ class MainViewModel(
     fun refreshSubscription(id: String) {
         val subscription = state.value.subscriptions.firstOrNull { it.id == id } ?: return
         if (state.value.loadingSubscriptionId != null) return
+        if (subscription.profiles.any { it.id in state.value.testingNodeIds }) {
+            mutableState.update { it.copy(message = "wait for URL test to finish") }
+            return
+        }
 
         viewModelScope.launch {
-            mutableState.update { it.copy(loadingSubscriptionId = id, message = null) }
+            mutableState.update {
+                it.copy(
+                    loadingSubscriptionId = id,
+                    message = null,
+                    subscriptionUpdateResult = null,
+                )
+            }
 
-            subscriptionClient.fetch(subscription.url)
-                .onSuccess { decoded ->
-                    mutableState.update { old ->
-                        val updated = old.subscriptions.map { group ->
-                            if (group.id != id) return@map group
+            val decoded = subscriptionClient.fetch(subscription.url).getOrElse { error ->
+                showSubscriptionUpdateError(subscription, error)
+                return@launch
+            }
 
-                            val oldSelectedRaw = group.profiles
-                                .firstOrNull { it.id == group.selectedProfileId }
-                                ?.rawUri
-                            val selectedId = decoded.profiles
-                                .firstOrNull { it.rawUri == oldSelectedRaw }
-                                ?.id
-                                ?: decoded.profiles.firstOrNull()?.id
-
-                            group.copy(
-                                profiles = decoded.profiles,
-                                selectedProfileId = selectedId,
-                                lastUpdatedEpochMs = System.currentTimeMillis(),
-                            )
-                        }
-                        old.copy(
-                            subscriptions = updated,
-                            selectedSubscriptionId = id,
-                            loadingSubscriptionId = null,
-                            message = "${decoded.profiles.size} node(s) · ${decoded.format.name.lowercase()}",
-                        )
-                    }
-                    persist()
+            if (decoded.profiles.isEmpty()) {
+                val message = when (decoded.format) {
+                    SubscriptionDecoder.DecodeResult.Format.EMPTY -> "The subscription is empty."
+                    SubscriptionDecoder.DecodeResult.Format.UNSUPPORTED -> "The server responded, but dot. could not parse the subscription."
+                    else -> "The subscription contains no supported VLESS nodes."
                 }
-                .onFailure { error ->
-                    mutableState.update {
-                        it.copy(
-                            loadingSubscriptionId = null,
-                            message = error.message ?: "subscription request failed",
-                        )
-                    }
+                showSubscriptionUpdateError(subscription, SubscriptionContentException(message))
+                return@launch
+            }
+
+            val latestGroup = state.value.subscriptions.firstOrNull { it.id == id } ?: return@launch
+            val diff = SubscriptionDiffer.calculate(latestGroup.profiles, decoded.profiles)
+            val oldSelected = latestGroup.profiles.firstOrNull { it.id == latestGroup.selectedProfileId }
+            val selectedId = oldSelected?.let { selected ->
+                decoded.profiles.firstOrNull { it.rawUri == selected.rawUri }?.id
+                    ?: diff.replacementFor(selected.id)?.id
+            } ?: decoded.profiles.firstOrNull()?.id
+
+            mutableState.update { old ->
+                val oldProfileIds = latestGroup.profiles.mapTo(hashSetOf()) { it.id }
+                val transferredLatencies = old.nodeLatenciesMs
+                    .filterKeys { it !in oldProfileIds }
+                    .toMutableMap()
+                val transferredFailures = old.nodeLatencyFailedIds
+                    .filterNotTo(mutableSetOf()) { it in oldProfileIds }
+
+                diff.unchanged.forEach { match ->
+                    old.nodeLatenciesMs[match.before.id]?.let { transferredLatencies[match.after.id] = it }
+                    if (match.before.id in old.nodeLatencyFailedIds) transferredFailures += match.after.id
                 }
+                diff.edited.forEach { edit ->
+                    old.nodeLatenciesMs[edit.before.id]?.let { transferredLatencies[edit.after.id] = it }
+                    if (edit.before.id in old.nodeLatencyFailedIds) transferredFailures += edit.after.id
+                }
+
+                val updated = old.subscriptions.map { group ->
+                    if (group.id != id) return@map group
+                    group.copy(
+                        profiles = decoded.profiles,
+                        selectedProfileId = selectedId,
+                        lastUpdatedEpochMs = System.currentTimeMillis(),
+                    )
+                }
+
+                old.copy(
+                    subscriptions = updated,
+                    selectedSubscriptionId = id,
+                    loadingSubscriptionId = null,
+                    nodeLatenciesMs = transferredLatencies,
+                    nodeLatencyFailedIds = transferredFailures,
+                    testingNodeIds = old.testingNodeIds - oldProfileIds,
+                    message = null,
+                    subscriptionUpdateResult = SubscriptionUpdateResult.Success(
+                        subscriptionName = latestGroup.name,
+                        totalNodes = decoded.profiles.size,
+                        diff = diff,
+                    ),
+                )
+            }
+            persist()
         }
+    }
+
+    private fun showSubscriptionUpdateError(subscription: Subscription, error: Throwable) {
+        val formatted = SubscriptionUpdateErrorFormatter.format(error, subscription.url)
+        mutableState.update {
+            it.copy(
+                loadingSubscriptionId = null,
+                message = null,
+                subscriptionUpdateResult = SubscriptionUpdateResult.Error(
+                    subscriptionName = subscription.name,
+                    userMessage = formatted.userMessage,
+                    rawError = formatted.rawError,
+                ),
+            )
+        }
+    }
+
+    fun dismissSubscriptionUpdateResult() {
+        mutableState.update { it.copy(subscriptionUpdateResult = null) }
     }
 
     fun deleteSubscription(id: String) {
         mutableState.update { old ->
+            val removedProfileIds = old.subscriptions
+                .firstOrNull { it.id == id }
+                ?.profiles
+                .orEmpty()
+                .mapTo(hashSetOf()) { it.id }
             val remaining = old.subscriptions.filterNot { it.id == id }
             old.copy(
                 subscriptions = remaining,
@@ -168,7 +240,12 @@ class MainViewModel(
                 } else {
                     old.selectedSubscriptionId
                 },
+                nodeLatenciesMs = old.nodeLatenciesMs.filterKeys { it !in removedProfileIds },
+                nodeLatencyFailedIds = old.nodeLatencyFailedIds - removedProfileIds,
+                testingNodeIds = old.testingNodeIds - removedProfileIds,
+                pendingDelaySortSubscriptionId = old.pendingDelaySortSubscriptionId.takeUnless { it == id },
                 message = null,
+                subscriptionUpdateResult = null,
             )
         }
         persist()
@@ -178,6 +255,7 @@ class MainViewModel(
         if (state.value.subscriptions.none { it.id == id }) return
         mutableState.update { it.copy(selectedSubscriptionId = id, message = null) }
         persist()
+        ensureDelaySortData(id)
     }
 
     fun selectProfile(id: String) {
@@ -195,6 +273,46 @@ class MainViewModel(
             )
         }
         persist()
+    }
+
+    fun setNodeSortMode(mode: NodeSortMode) {
+        val group = state.value.selectedSubscription ?: return
+        if (group.profiles.isEmpty()) return
+
+        if (mode == NodeSortMode.DELAY) {
+            val tested = group.profiles.all { profile ->
+                profile.id in state.value.nodeLatenciesMs || profile.id in state.value.nodeLatencyFailedIds
+            }
+            if (!tested) {
+                if (state.value.testingNodeIds.isNotEmpty()) return
+                viewModelScope.launch { runAllNodeTests(group.id, activateDelaySort = true) }
+                return
+            }
+        }
+
+        updateSubscriptionSortMode(group.id, mode)
+    }
+
+    private fun updateSubscriptionSortMode(subscriptionId: String, mode: NodeSortMode) {
+        mutableState.update { old ->
+            old.copy(
+                subscriptions = old.subscriptions.map { group ->
+                    if (group.id == subscriptionId) group.copy(sortMode = mode) else group
+                },
+                pendingDelaySortSubscriptionId = old.pendingDelaySortSubscriptionId.takeUnless { it == subscriptionId },
+            )
+        }
+        persist()
+    }
+
+    private fun ensureDelaySortData(subscriptionId: String) {
+        val group = state.value.subscriptions.firstOrNull { it.id == subscriptionId } ?: return
+        if (group.sortMode != NodeSortMode.DELAY || group.profiles.isEmpty()) return
+        val tested = group.profiles.all { profile ->
+            profile.id in state.value.nodeLatenciesMs || profile.id in state.value.nodeLatencyFailedIds
+        }
+        if (tested || state.value.testingNodeIds.isNotEmpty()) return
+        viewModelScope.launch { runAllNodeTests(subscriptionId, activateDelaySort = false) }
     }
 
     fun requestVpnPermission(): Boolean {
@@ -270,15 +388,21 @@ class MainViewModel(
         uiPreferences.edit().putString("theme", theme.name).apply()
     }
 
-    fun testNode(profile: dev.dotclient.android.core.model.VlessProfile) {
+    fun testNode(profile: VlessProfile) {
         if (state.value.testingNodeIds.contains(profile.id)) return
         viewModelScope.launch {
-            mutableState.update { it.copy(testingNodeIds = it.testingNodeIds + profile.id) }
+            mutableState.update {
+                it.copy(
+                    testingNodeIds = it.testingNodeIds + profile.id,
+                    nodeLatencyFailedIds = it.nodeLatencyFailedIds - profile.id,
+                )
+            }
             nodeLatencyTester.test(profile.rawUri)
                 .onSuccess { latency ->
                     mutableState.update { current ->
                         current.copy(
                             nodeLatenciesMs = current.nodeLatenciesMs + (profile.id to latency),
+                            nodeLatencyFailedIds = current.nodeLatencyFailedIds - profile.id,
                             testingNodeIds = current.testingNodeIds - profile.id,
                         )
                     }
@@ -286,6 +410,8 @@ class MainViewModel(
                 .onFailure { error ->
                     mutableState.update { current ->
                         current.copy(
+                            nodeLatenciesMs = current.nodeLatenciesMs - profile.id,
+                            nodeLatencyFailedIds = current.nodeLatencyFailedIds + profile.id,
                             testingNodeIds = current.testingNodeIds - profile.id,
                             message = error.message ?: "url test failed",
                         )
@@ -295,26 +421,64 @@ class MainViewModel(
     }
 
     fun testAllNodes() {
-        val profiles = state.value.profiles
+        val group = state.value.selectedSubscription ?: return
+        if (group.profiles.isEmpty() || state.value.testingNodeIds.isNotEmpty()) return
+        viewModelScope.launch { runAllNodeTests(group.id, activateDelaySort = false) }
+    }
+
+    private suspend fun runAllNodeTests(subscriptionId: String, activateDelaySort: Boolean) {
+        val group = state.value.subscriptions.firstOrNull { it.id == subscriptionId } ?: return
+        val profiles = group.profiles
         if (profiles.isEmpty() || state.value.testingNodeIds.isNotEmpty()) return
-        viewModelScope.launch {
-            mutableState.update { it.copy(testingNodeIds = it.testingNodeIds + profiles.map { p -> p.id }) }
-            for (profile in profiles) {
-                nodeLatencyTester.test(profile.rawUri)
-                    .onSuccess { latency ->
-                        mutableState.update { current ->
-                            current.copy(
-                                nodeLatenciesMs = current.nodeLatenciesMs + (profile.id to latency),
-                                testingNodeIds = current.testingNodeIds - profile.id,
-                            )
-                        }
-                    }
-                    .onFailure {
-                        mutableState.update { current -> current.copy(testingNodeIds = current.testingNodeIds - profile.id) }
-                    }
-            }
-            mutableState.update { it.copy(message = "URL test complete · cp.cloudflare.com") }
+        val profileIds = profiles.mapTo(hashSetOf()) { it.id }
+        val delaySortPending = activateDelaySort || group.sortMode == NodeSortMode.DELAY
+
+        mutableState.update {
+            it.copy(
+                testingNodeIds = it.testingNodeIds + profileIds,
+                nodeLatenciesMs = it.nodeLatenciesMs.filterKeys { id -> id !in profileIds },
+                nodeLatencyFailedIds = it.nodeLatencyFailedIds - profileIds,
+                pendingDelaySortSubscriptionId = if (delaySortPending) subscriptionId else it.pendingDelaySortSubscriptionId,
+                message = null,
+            )
         }
+
+        profiles.forEach { profile ->
+            nodeLatencyTester.test(profile.rawUri)
+                .onSuccess { latency ->
+                    mutableState.update { current ->
+                        current.copy(
+                            nodeLatenciesMs = current.nodeLatenciesMs + (profile.id to latency),
+                            nodeLatencyFailedIds = current.nodeLatencyFailedIds - profile.id,
+                            testingNodeIds = current.testingNodeIds - profile.id,
+                        )
+                    }
+                }
+                .onFailure {
+                    mutableState.update { current ->
+                        current.copy(
+                            nodeLatenciesMs = current.nodeLatenciesMs - profile.id,
+                            nodeLatencyFailedIds = current.nodeLatencyFailedIds + profile.id,
+                            testingNodeIds = current.testingNodeIds - profile.id,
+                        )
+                    }
+                }
+        }
+
+        mutableState.update { current ->
+            current.copy(
+                subscriptions = if (activateDelaySort) {
+                    current.subscriptions.map { item ->
+                        if (item.id == subscriptionId) item.copy(sortMode = NodeSortMode.DELAY) else item
+                    }
+                } else {
+                    current.subscriptions
+                },
+                pendingDelaySortSubscriptionId = current.pendingDelaySortSubscriptionId.takeUnless { it == subscriptionId },
+                message = "URL test complete · cp.cloudflare.com",
+            )
+        }
+        if (activateDelaySort) persist()
     }
 
     fun testConnection() {
@@ -349,6 +513,7 @@ class MainViewModel(
                             connectionTestLatencyMs = latency,
                             connectionTestError = null,
                             nodeLatenciesMs = it.nodeLatenciesMs + (runningProfile.id to latency),
+                            nodeLatencyFailedIds = it.nodeLatencyFailedIds - runningProfile.id,
                         )
                     }
                 }
