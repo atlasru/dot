@@ -13,6 +13,7 @@ export interface SelectionView { group_id: string | null; node_id: string | null
 export interface UrlTestResult { node_id: string; latency_ms: number; active_tunnel: boolean; }
 export interface NodeChangeView { id: string; name: string; }
 export interface NodeEditView { id: string; name: string; changed_fields: string[]; }
+export interface NodeIdReplacement { before_id: string; after_id: string; }
 export interface SubscriptionRefreshResult {
   success: boolean;
   subscription_name: string;
@@ -21,6 +22,7 @@ export interface SubscriptionRefreshResult {
   added: NodeChangeView[];
   edited: NodeEditView[];
   deleted: NodeChangeView[];
+  id_replacements: NodeIdReplacement[];
   user_message: string | null;
   raw_error: string | null;
 }
