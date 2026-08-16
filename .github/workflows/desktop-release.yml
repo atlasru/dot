@@ -35,17 +35,22 @@ jobs:
           "tag=v$version" >> $env:GITHUB_OUTPUT
           Write-Host "Desktop release: v$version"
 
-      - name: Skip if release already exists
+      - name: Inspect existing release
         id: existing
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
-          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY *> $null
+          $json = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:TAG" 2>$null
           if ($LASTEXITCODE -eq 0) {
+            $release = $json | ConvertFrom-Json
+            $asset = $release.assets | Where-Object { $_.name -like 'dot-desktop-*-windows-x64.zip' } | Select-Object -First 1
             "exists=true" >> $env:GITHUB_OUTPUT
-            Write-Host "Release $env:TAG already exists; nothing to publish."
+            if ($asset) {
+              "archive=$($asset.name)" >> $env:GITHUB_OUTPUT
+              "sha256=$($asset.digest -replace '^sha256:', '')" >> $env:GITHUB_OUTPUT
+            }
           } else {
             "exists=false" >> $env:GITHUB_OUTPUT
             $global:LASTEXITCODE = 0
@@ -117,15 +122,13 @@ jobs:
           $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           "archive=$archive" >> $env:GITHUB_OUTPUT
           "sha256=$hash" >> $env:GITHUB_OUTPUT
-          Write-Host "$archive SHA256 $hash"
 
       - name: Write release notes
-        if: steps.existing.outputs.exists != 'true'
         shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          SHA256: ${{ steps.package.outputs.sha256 }}
-          ARCHIVE: ${{ steps.package.outputs.archive }}
+          ARCHIVE: ${{ steps.package.outputs.archive || steps.existing.outputs.archive }}
+          SHA256: ${{ steps.package.outputs.sha256 || steps.existing.outputs.sha256 }}
         run: |
           @"
           # dot. Desktop v$env:VERSION
@@ -149,25 +152,29 @@ jobs:
 
           - Windows x64 portable build
           - Xray-core v26.7.28
-          - Wintun bundled in `runtime/`
+          - Wintun bundled in runtime/
           - No installer required
 
           ## Integrity
 
-          `$env:ARCHIVE`
+          **$env:ARCHIVE**
 
-          SHA-256: `$env:SHA256`
+          SHA-256: **$env:SHA256**
 
           > Alpha release. The Windows executable is currently unsigned.
           "@ | Set-Content -Path release-notes.md -Encoding utf8
 
-      - name: Publish GitHub prerelease
-        if: steps.existing.outputs.exists != 'true'
+      - name: Publish or update GitHub prerelease
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
           ARCHIVE: ${{ steps.package.outputs.archive }}
+          EXISTS: ${{ steps.existing.outputs.exists }}
         run: |
-          gh release create $env:TAG $env:ARCHIVE --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "dot. Desktop v$env:VERSION" --notes-file release-notes.md --prerelease
+          if ($env:EXISTS -eq 'true') {
+            gh release edit $env:TAG --repo $env:GITHUB_REPOSITORY --title "dot. Desktop v$env:VERSION" --notes-file release-notes.md --prerelease
+          } else {
+            gh release create $env:TAG $env:ARCHIVE --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "dot. Desktop v$env:VERSION" --notes-file release-notes.md --prerelease
+          }
