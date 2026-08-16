@@ -76,7 +76,7 @@ pub async fn refresh_subscription(group_id: String, state: State<'_, SharedState
     let nodes = match fetched {
         Ok(nodes) => nodes,
         Err(raw) => return Ok(SubscriptionRefreshResult {
-            success: false, subscription_name: old_group.name, group: Some(GroupView::from(&old_group)), total_nodes: old_group.nodes.len(),
+            success: false, subscription_name: old_group.name.clone(), group: Some(GroupView::from(&old_group)), total_nodes: old_group.nodes.len(),
             added: Vec::new(), edited: Vec::new(), deleted: Vec::new(), id_replacements: Vec::new(),
             user_message: Some(user_message_for_error(&raw)), raw_error: Some(redact_error(&raw)),
         }),
