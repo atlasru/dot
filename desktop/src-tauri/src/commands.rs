@@ -4,9 +4,9 @@ use uuid::Uuid;
 
 use crate::{
     engine::VpnEngine,
-    model::{AppPreferences, AppTheme, EnginePhase, EngineSnapshot, GroupView, SelectionView, SubscriptionGroup, TrafficSnapshot, UrlTestResult},
+    model::{AppPreferences, AppTheme, EnginePhase, EngineSnapshot, GroupView, NodeChangeView, SelectionView, SubscriptionGroup, SubscriptionRefreshResult, TrafficSnapshot, UrlTestResult},
     storage::Store,
-    subscription::SubscriptionClient,
+    subscription::{diff_nodes, redact_error, replacement_for, user_message_for_error, SubscriptionClient},
     url_test,
 };
 
@@ -39,44 +39,26 @@ pub fn select_node(group_id: String, node_id: String, state: State<'_, SharedSta
 pub async fn switch_node(group_id: String, node_id: String, state: State<'_, SharedState>) -> Result<EngineSnapshot, String> {
     let node = state.store.node(&group_id, &node_id)?;
     state.store.set_selection(&group_id, &node_id)?;
-
     let current = read_snapshot(&state.snapshot);
-    if current.phase == EnginePhase::Offline || current.phase == EnginePhase::Error {
-        return Ok(current);
-    }
-
+    if current.phase == EnginePhase::Offline || current.phase == EnginePhase::Error { return Ok(current); }
     state.cancel.store(true, Ordering::SeqCst);
-    write_snapshot(&state.snapshot, EngineSnapshot {
-        phase: EnginePhase::Stopping,
-        node_name: current.node_name,
-        message: Some("switching node".into()),
-    });
-
+    write_snapshot(&state.snapshot, EngineSnapshot { phase: EnginePhase::Stopping, node_name: current.node_name, message: Some("switching node".into()) });
     let engine = Arc::clone(&state.engine);
     tauri::async_runtime::spawn_blocking(move || {
         let mut engine = engine.lock().map_err(|_| "VPN engine lock poisoned".to_string())?;
         engine.stop();
         engine.start(&node)
-    })
-    .await
-    .map_err(|e| format!("VPN node switch task failed: {e}"))?
+    }).await.map_err(|e| format!("VPN node switch task failed: {e}"))?
 }
 
 #[tauri::command]
 pub fn set_theme(theme: String, state: State<'_, SharedState>) -> Result<AppPreferences, String> {
-    let theme = match theme.as_str() {
-        "amoled" => AppTheme::Amoled,
-        "graphite" => AppTheme::Graphite,
-        "matrix" => AppTheme::Matrix,
-        _ => return Err("unknown theme".into()),
-    };
+    let theme = match theme.as_str() { "amoled" => AppTheme::Amoled, "graphite" => AppTheme::Graphite, "matrix" => AppTheme::Matrix, _ => return Err("unknown theme".into()) };
     state.store.set_theme(theme)
 }
 
 #[tauri::command]
-pub fn set_close_to_tray(enabled: bool, state: State<'_, SharedState>) -> Result<AppPreferences, String> {
-    state.store.set_close_to_tray(enabled)
-}
+pub fn set_close_to_tray(enabled: bool, state: State<'_, SharedState>) -> Result<AppPreferences, String> { state.store.set_close_to_tray(enabled) }
 
 #[tauri::command]
 pub async fn add_subscription(name: String, url: String, state: State<'_, SharedState>) -> Result<GroupView, String> {
@@ -94,10 +76,45 @@ pub async fn add_subscription(name: String, url: String, state: State<'_, Shared
 }
 
 #[tauri::command]
-pub async fn refresh_subscription(group_id: String, state: State<'_, SharedState>) -> Result<GroupView, String> {
-    let url = state.store.group_url(&group_id)?;
-    let nodes = tauri::async_runtime::spawn_blocking(move || SubscriptionClient::new()?.fetch(&url)).await.map_err(|e| format!("subscription task failed: {e}"))??;
-    state.store.replace_group_nodes(&group_id, nodes, now_ms())
+pub async fn refresh_subscription(group_id: String, state: State<'_, SharedState>) -> Result<SubscriptionRefreshResult, String> {
+    let old_group = state.store.group(&group_id)?;
+    let selected = state.store.selection();
+    let selected_old_id = if selected.group_id.as_deref() == Some(group_id.as_str()) { selected.node_id } else { None };
+    let url = old_group.url.clone();
+    let fetched = tauri::async_runtime::spawn_blocking(move || SubscriptionClient::new()?.fetch(&url)).await
+        .map_err(|e| format!("subscription task failed: {e}"))?;
+
+    let nodes = match fetched {
+        Ok(nodes) => nodes,
+        Err(raw) => {
+            return Ok(SubscriptionRefreshResult {
+                success: false,
+                subscription_name: old_group.name,
+                group: Some(GroupView::from(&old_group)),
+                total_nodes: old_group.nodes.len(),
+                added: Vec::new(), edited: Vec::new(), deleted: Vec::new(),
+                user_message: Some(user_message_for_error(&raw)),
+                raw_error: Some(redact_error(&raw)),
+            });
+        }
+    };
+
+    let diff = diff_nodes(&old_group.nodes, &nodes);
+    let replacement = selected_old_id.as_deref().and_then(|id| replacement_for(&diff, id));
+    let added = diff.added.clone();
+    let edited = diff.edited.clone();
+    let deleted = diff.deleted.clone();
+    let group = state.store.replace_group_nodes_preserving_selection(&group_id, nodes, now_ms(), replacement)?;
+
+    Ok(SubscriptionRefreshResult {
+        success: true,
+        subscription_name: group.name.clone(),
+        total_nodes: group.nodes.len(),
+        group: Some(group),
+        added, edited, deleted,
+        user_message: None,
+        raw_error: None,
+    })
 }
 
 #[tauri::command]
@@ -125,28 +142,17 @@ pub fn vpn_status(state: State<'_, SharedState>) -> EngineSnapshot {
 pub async fn url_test(group_id: String, node_id: String, state: State<'_, SharedState>) -> Result<UrlTestResult, String> {
     let node = state.store.node(&group_id, &node_id)?;
     let current = read_snapshot(&state.snapshot);
-    if matches!(current.phase, EnginePhase::Starting | EnginePhase::Stopping) {
-        return Err("wait for the VPN state change to finish before URL testing".into());
-    }
-
+    if matches!(current.phase, EnginePhase::Starting | EnginePhase::Stopping) { return Err("wait for the VPN state change to finish before URL testing".into()); }
     let active_tunnel = current.phase == EnginePhase::Connected && current.node_name.as_deref() == Some(node.name.as_str());
-    if current.phase == EnginePhase::Connected && !active_tunnel {
-        return Err("switch to this node before URL testing while VPN is connected".into());
-    }
-
+    if current.phase == EnginePhase::Connected && !active_tunnel { return Err("disconnect before testing other nodes".into()); }
     let tested_node_id = node.id.clone();
     let latency_ms = if active_tunnel {
-        tauri::async_runtime::spawn_blocking(url_test::test_active_connection)
-            .await
-            .map_err(|e| format!("active URL test task failed: {e}"))??
+        tauri::async_runtime::spawn_blocking(url_test::test_active_connection).await.map_err(|e| format!("active URL test task failed: {e}"))??
     } else {
         let runtime_source = state.runtime_source.clone();
         let work_dir = state.url_test_dir.clone();
-        tauri::async_runtime::spawn_blocking(move || url_test::test_node(&runtime_source, &work_dir, &node))
-            .await
-            .map_err(|e| format!("node URL test task failed: {e}"))??
+        tauri::async_runtime::spawn_blocking(move || url_test::test_node(&runtime_source, &work_dir, &node)).await.map_err(|e| format!("node URL test task failed: {e}"))??
     };
-
     Ok(UrlTestResult { node_id: tested_node_id, latency_ms, active_tunnel })
 }
 
