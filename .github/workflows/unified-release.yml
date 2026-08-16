@@ -1,0 +1,174 @@
+name: unified-release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/unified-release.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: v0.1.8
+      ANDROID_VERSION: 0.1.8
+      DESKTOP_VERSION: 0.2.2-alpha.1
+      DESKTOP_SOURCE_TAG: v0.2.2-alpha.1
+      ANDROID_APK: dot-android-0.1.8.apk
+      DESKTOP_ZIP: dot-desktop-0.2.2-alpha.1-windows-x64.zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Fetch libXray
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p app/libs
+          curl -fL --retry 3 \
+            https://github.com/XTLS/libXray/releases/download/v26.7.28/libxray-android.zip \
+            -o /tmp/libxray-android.zip
+          unzip -j /tmp/libxray-android.zip '*libXray.aar' -d app/libs
+          test -s app/libs/libXray.aar
+
+      - name: Verify Android version
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'versionName = "0.1.8"' app/build.gradle.kts
+          grep -F 'versionCode = 108' app/build.gradle.kts
+
+      - name: Android unit tests
+        run: gradle testDebugUnitTest
+
+      - name: Build Android APK
+        run: gradle assembleDebug
+
+      - name: Prepare release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp app/build/outputs/apk/debug/app-debug.apk "release-assets/$ANDROID_APK"
+          gh release download "$DESKTOP_SOURCE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$DESKTOP_ZIP" \
+            --dir release-assets
+          test -s "release-assets/$ANDROID_APK"
+          test -s "release-assets/$DESKTOP_ZIP"
+
+      - name: Calculate SHA-256
+        id: hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          android_sha="$(sha256sum "release-assets/$ANDROID_APK" | awk '{print $1}')"
+          desktop_sha="$(sha256sum "release-assets/$DESKTOP_ZIP" | awk '{print $1}')"
+          echo "android_sha=$android_sha" >> "$GITHUB_OUTPUT"
+          echo "desktop_sha=$desktop_sha" >> "$GITHUB_OUTPUT"
+          echo "$ANDROID_APK  $android_sha"
+          echo "$DESKTOP_ZIP  $desktop_sha"
+
+      - name: Write unified release notes
+        shell: bash
+        env:
+          ANDROID_SHA: ${{ steps.hashes.outputs.android_sha }}
+          DESKTOP_SHA: ${{ steps.hashes.outputs.desktop_sha }}
+        run: |
+          cat > release-notes.md <<EOF
+          # dot. v0.1.8
+
+          Unified release with the latest Android build and the current Windows Desktop alpha.
+
+          ## Android 0.1.8
+
+          - Subscription refresh result dialog with ADDED / EDITED / DELETED / NO CHANGES
+          - Detailed subscription change view
+          - Friendly refresh errors with redacted VIEW RAW ERROR
+          - Existing nodes are preserved when a refresh fails
+          - Stable logical node matching across subscription refreshes
+          - Selected node and compatible latency results survive matching refreshes
+          - Per-subscription sorting by ORIGIN / DELAY / NAME
+          - DELAY sorting automatically runs URL tests when latency data is missing
+          - Natural NAME sorting and stable order while delay tests run
+          - FAIL state for unsuccessful node URL tests
+          - The same sorting is applied inside MAP country node lists
+
+          ## Desktop 0.2.2-alpha.1
+
+          - Android-style custom world map with Mercator projection, country geometry, grid and pan/zoom
+          - Country-cluster node markers and active-country highlighting
+          - Improved node geolocation with public-IP lookup, name fallback and cache
+          - Per-subscription ORIGIN / DELAY / NAME sorting
+          - Group-wide URL TEST with latency and FAIL states
+          - Subscription refresh summaries and detailed error handling
+          - Logical node matching across refreshes
+          - Windows x64 portable build with Xray-core v26.7.28 and Wintun bundled
+
+          > Desktop is still an alpha build and the Windows executable is currently unsigned.
+
+          ## Downloads
+
+          ### Android
+          \`$ANDROID_APK\`
+
+          SHA-256: \`$ANDROID_SHA\`
+
+          ### Windows x64
+          \`$DESKTOP_ZIP\`
+
+          SHA-256: \`$DESKTOP_SHA\`
+
+          ## Notes
+
+          Android requires Android 8.0+.
+
+          The Windows build is portable and does not require installation.
+
+          No accounts, ads, analytics or telemetry.
+          EOF
+
+      - name: Create or update unified GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "release-assets/$ANDROID_APK" \
+              "release-assets/$DESKTOP_ZIP" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "dot. v0.1.8" \
+              --notes-file release-notes.md
+          else
+            gh release create "$RELEASE_TAG" \
+              "release-assets/$ANDROID_APK" \
+              "release-assets/$DESKTOP_ZIP" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "dot. v0.1.8" \
+              --notes-file release-notes.md
+          fi
