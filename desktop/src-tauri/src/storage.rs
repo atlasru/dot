@@ -15,8 +15,10 @@ impl Store {
         Ok(Self { path, inner: Mutex::new(state) })
     }
 
-    pub fn groups(&self) -> Vec<GroupView> {
-        self.inner.lock().expect("store poisoned").groups.iter().map(GroupView::from).collect()
+    pub fn groups(&self) -> Vec<GroupView> { self.inner.lock().expect("store poisoned").groups.iter().map(GroupView::from).collect() }
+
+    pub fn group(&self, group_id: &str) -> Result<SubscriptionGroup, String> {
+        self.inner.lock().map_err(|_| "store lock poisoned".to_string())?.groups.iter().find(|g| g.id == group_id).cloned().ok_or_else(|| "subscription group not found".into())
     }
 
     pub fn selection(&self) -> SelectionView {
@@ -66,20 +68,21 @@ impl Store {
         s.groups.iter().find(|g| g.id == id).map(GroupView::from).ok_or_else(|| "subscription group disappeared after save".into())
     }
 
-    pub fn replace_group_nodes(&self, group_id: &str, nodes: Vec<VlessNode>, updated_at_ms: u64) -> Result<GroupView, String> {
+    pub fn replace_group_nodes_preserving_selection(&self, group_id: &str, nodes: Vec<VlessNode>, updated_at_ms: u64, replacement_node_id: Option<String>) -> Result<GroupView, String> {
         let mut s = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
         let index = s.groups.iter().position(|g| g.id == group_id).ok_or("subscription group not found")?;
         s.groups[index].nodes = nodes;
         s.groups[index].updated_at_ms = updated_at_ms;
+        if s.selected_group_id.as_deref() == Some(group_id) {
+            if let Some(node_id) = replacement_node_id { s.selected_node_id = Some(node_id); }
+        }
         normalize_selection(&mut s);
         let view = GroupView::from(&s.groups[index]);
         self.save_locked(&s)?;
         Ok(view)
     }
 
-    pub fn group_url(&self, group_id: &str) -> Result<String, String> {
-        self.inner.lock().map_err(|_| "store lock poisoned".to_string())?.groups.iter().find(|g| g.id == group_id).map(|g| g.url.clone()).ok_or_else(|| "subscription group not found".into())
-    }
+    pub fn group_url(&self, group_id: &str) -> Result<String, String> { Ok(self.group(group_id)?.url) }
 
     pub fn node(&self, group_id: &str, node_id: &str) -> Result<VlessNode, String> {
         let s = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;

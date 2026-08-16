@@ -49,70 +49,61 @@ impl Default for AppTheme { fn default() -> Self { Self::Amoled } }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppPreferences {
-    #[serde(default)]
-    pub theme: AppTheme,
-    #[serde(default = "default_true")]
-    pub close_to_tray: bool,
+    #[serde(default)] pub theme: AppTheme,
+    #[serde(default = "default_true")] pub close_to_tray: bool,
 }
-impl Default for AppPreferences {
-    fn default() -> Self { Self { theme: AppTheme::Amoled, close_to_tray: true } }
-}
+impl Default for AppPreferences { fn default() -> Self { Self { theme: AppTheme::Amoled, close_to_tray: true } } }
 fn default_true() -> bool { true }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PersistedState {
-    #[serde(default)]
-    pub groups: Vec<SubscriptionGroup>,
-    #[serde(default)]
-    pub selected_group_id: Option<String>,
-    #[serde(default)]
-    pub selected_node_id: Option<String>,
-    #[serde(default)]
-    pub preferences: AppPreferences,
+    #[serde(default)] pub groups: Vec<SubscriptionGroup>,
+    #[serde(default)] pub selected_group_id: Option<String>,
+    #[serde(default)] pub selected_node_id: Option<String>,
+    #[serde(default)] pub preferences: AppPreferences,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct NodeView {
-    pub id: String,
-    pub name: String,
-    pub host: String,
-    pub port: u16,
-    pub security: Security,
-    pub transport: Transport,
-}
-
+pub struct NodeView { pub id: String, pub name: String, pub host: String, pub port: u16, pub security: Security, pub transport: Transport }
 #[derive(Debug, Clone, Serialize)]
-pub struct GroupView {
-    pub id: String,
-    pub name: String,
-    pub updated_at_ms: u64,
-    pub nodes: Vec<NodeView>,
-}
-
+pub struct GroupView { pub id: String, pub name: String, pub updated_at_ms: u64, pub nodes: Vec<NodeView> }
 impl From<&VlessNode> for NodeView {
-    fn from(v: &VlessNode) -> Self {
-        Self { id: v.id.clone(), name: v.name.clone(), host: v.host.clone(), port: v.port, security: v.security, transport: v.transport }
-    }
+    fn from(v: &VlessNode) -> Self { Self { id: v.id.clone(), name: v.name.clone(), host: v.host.clone(), port: v.port, security: v.security, transport: v.transport } }
 }
 impl From<&SubscriptionGroup> for GroupView {
-    fn from(v: &SubscriptionGroup) -> Self {
-        Self { id: v.id.clone(), name: v.name.clone(), updated_at_ms: v.updated_at_ms, nodes: v.nodes.iter().map(NodeView::from).collect() }
-    }
+    fn from(v: &SubscriptionGroup) -> Self { Self { id: v.id.clone(), name: v.name.clone(), updated_at_ms: v.updated_at_ms, nodes: v.nodes.iter().map(NodeView::from).collect() } }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeChangeView { pub id: String, pub name: String }
+impl From<&VlessNode> for NodeChangeView { fn from(v: &VlessNode) -> Self { Self { id: v.id.clone(), name: v.name.clone() } } }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeEditView { pub id: String, pub name: String, pub changed_fields: Vec<String> }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeIdReplacement { pub before_id: String, pub after_id: String }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SubscriptionRefreshResult {
+    pub success: bool,
+    pub subscription_name: String,
+    pub group: Option<GroupView>,
+    pub total_nodes: usize,
+    pub added: Vec<NodeChangeView>,
+    pub edited: Vec<NodeEditView>,
+    pub deleted: Vec<NodeChangeView>,
+    pub id_replacements: Vec<NodeIdReplacement>,
+    pub user_message: Option<String>,
+    pub raw_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum EnginePhase { Offline, Starting, Connected, Stopping, Error }
-
 #[derive(Debug, Clone, Serialize)]
-pub struct EngineSnapshot {
-    pub phase: EnginePhase,
-    pub node_name: Option<String>,
-    pub message: Option<String>,
-}
-impl Default for EngineSnapshot {
-    fn default() -> Self { Self { phase: EnginePhase::Offline, node_name: None, message: None } }
-}
+pub struct EngineSnapshot { pub phase: EnginePhase, pub node_name: Option<String>, pub message: Option<String> }
+impl Default for EngineSnapshot { fn default() -> Self { Self { phase: EnginePhase::Offline, node_name: None, message: None } } }
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct TrafficSnapshot {
@@ -124,14 +115,7 @@ pub struct TrafficSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct SelectionView {
-    pub group_id: Option<String>,
-    pub node_id: Option<String>,
-}
+pub struct SelectionView { pub group_id: Option<String>, pub node_id: Option<String> }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct UrlTestResult {
-    pub node_id: String,
-    pub latency_ms: u64,
-    pub active_tunnel: bool,
-}
+pub struct UrlTestResult { pub node_id: String, pub latency_ms: u64, pub active_tunnel: bool }
