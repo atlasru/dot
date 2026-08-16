@@ -1,0 +1,180 @@
+name: desktop-release
+
+on:
+  push:
+    branches: [ desktop/v0.2.1-alpha.1 ]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-release.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Resolve release version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if (-not $version) { throw 'desktop/package.json has no version' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Desktop release: v$version"
+
+      - name: Inspect existing release
+        id: existing
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $json = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:TAG" 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $release = $json | ConvertFrom-Json
+            $asset = $release.assets | Where-Object { $_.name -like 'dot-desktop-*-windows-x64.zip' } | Select-Object -First 1
+            "exists=true" >> $env:GITHUB_OUTPUT
+            if ($asset) {
+              "archive=$($asset.name)" >> $env:GITHUB_OUTPUT
+              "sha256=$($asset.digest -replace '^sha256:', '')" >> $env:GITHUB_OUTPUT
+            }
+          } else {
+            "exists=false" >> $env:GITHUB_OUTPUT
+            $global:LASTEXITCODE = 0
+          }
+
+      - name: Reject unfinished product markers
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem src,src-tauri/src -Recurse -File
+          $hits = $files | Select-String -Pattern 'TODO|FIXME|todo!\(|unimplemented!\('
+          if ($hits) {
+            $hits | ForEach-Object { Write-Host $_ }
+            throw 'Desktop product sources contain unfinished implementation markers.'
+          }
+
+      - name: Install frontend dependencies
+        if: steps.existing.outputs.exists != 'true'
+        run: npm install
+
+      - name: Prepare Xray runtime
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force src-tauri/runtime | Out-Null
+          $zip = Join-Path $env:RUNNER_TEMP 'xray.zip'
+          $out = Join-Path $env:RUNNER_TEMP 'xray-runtime'
+          Invoke-WebRequest -Uri 'https://github.com/XTLS/Xray-core/releases/download/v26.7.28/Xray-windows-64.zip' -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $out -Force
+          $xray = Get-ChildItem -Path $out -Recurse -Filter 'xray.exe' | Select-Object -First 1
+          $wintun = Get-ChildItem -Path $out -Recurse -Filter 'wintun.dll' | Select-Object -First 1
+          if (-not $xray -or -not $wintun) { throw 'Xray runtime archive is missing xray.exe or wintun.dll' }
+          Copy-Item $xray.FullName src-tauri/runtime/xray.exe -Force
+          Copy-Item $wintun.FullName src-tauri/runtime/wintun.dll -Force
+
+      - name: Generate Windows icons
+        if: steps.existing.outputs.exists != 'true'
+        run: npm run icons
+
+      - name: Rust unit and Xray compatibility tests
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          DOT_XRAY_EXE: ${{ github.workspace }}\desktop\src-tauri\runtime\xray.exe
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Frontend build
+        if: steps.existing.outputs.exists != 'true'
+        run: npm run build
+
+      - name: Compile Tauri executable
+        if: steps.existing.outputs.exists != 'true'
+        run: npm run tauri -- build --debug --no-bundle
+
+      - name: Assemble release archive
+        if: steps.existing.outputs.exists != 'true'
+        id: package
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $portable = 'release-portable'
+          Remove-Item $portable -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force "$portable/runtime" | Out-Null
+          Copy-Item 'src-tauri/target/debug/dot-desktop.exe' "$portable/dot-desktop.exe" -Force
+          Copy-Item 'src-tauri/runtime/xray.exe' "$portable/runtime/xray.exe" -Force
+          Copy-Item 'src-tauri/runtime/wintun.dll' "$portable/runtime/wintun.dll" -Force
+          $archive = "dot-desktop-$env:VERSION-windows-x64.zip"
+          Compress-Archive -Path "$portable/*" -DestinationPath $archive -Force
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "archive=$archive" >> $env:GITHUB_OUTPUT
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Write release notes
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ARCHIVE: ${{ steps.package.outputs.archive || steps.existing.outputs.archive }}
+          SHA256: ${{ steps.package.outputs.sha256 || steps.existing.outputs.sha256 }}
+        run: |
+          @"
+          # dot. Desktop v$env:VERSION
+
+          Desktop alpha focused on Android feature parity while keeping the tested desktop dashboard layout.
+
+          ## What's new
+
+          - Android-style custom world map with Mercator projection, country geometry, grid, pan/zoom and reset
+          - Country-cluster node markers, active-country highlight and country node panel
+          - Improved node geolocation with public-IP lookup, name fallback and cache
+          - Per-subscription sorting by ORIGIN / DELAY / NAME
+          - Group-wide URL TEST with latency and FAIL states
+          - Stable ordering while DELAY tests are running
+          - Subscription refresh summary with ADDED / EDITED / DELETED / NO CHANGES
+          - Detailed refresh result view and VIEW RAW ERROR for failures
+          - Logical node matching across subscription refreshes, preserving compatible selection and latency data
+          - Existing nodes are preserved when a refresh fails
+
+          ## Runtime
+
+          - Windows x64 portable build
+          - Xray-core v26.7.28
+          - Wintun bundled in runtime/
+          - No installer required
+
+          ## Integrity
+
+          **$env:ARCHIVE**
+
+          SHA-256: **$env:SHA256**
+
+          > Alpha release. The Windows executable is currently unsigned.
+          "@ | Set-Content -Path release-notes.md -Encoding utf8
+
+      - name: Publish or update GitHub prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          EXISTS: ${{ steps.existing.outputs.exists }}
+        run: |
+          if ($env:EXISTS -eq 'true') {
+            gh release edit $env:TAG --repo $env:GITHUB_REPOSITORY --title "dot. Desktop v$env:VERSION" --notes-file release-notes.md --prerelease
+          } else {
+            gh release create $env:TAG $env:ARCHIVE --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "dot. Desktop v$env:VERSION" --notes-file release-notes.md --prerelease
+          }
