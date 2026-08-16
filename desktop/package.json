@@ -1,7 +1,7 @@
 {
   "name": "dot-desktop",
   "private": true,
-  "version": "0.2.0-alpha.1",
+  "version": "0.2.1-alpha.1",
   "type": "module",
   "engines": { "node": ">=20.19" },
   "scripts": {
