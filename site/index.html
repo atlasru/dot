@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#050505">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="dot. — a minimal VLESS client for Android and Windows.">
+  <title>dot. — minimal VLESS client</title>
+  <link rel="preconnect" href="https://api.github.com">
+  <link rel="preconnect" href="https://ipwho.is">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div class="page-grid" aria-hidden="true"></div>
+  <header class="topbar shell">
+    <a class="brand" href="#top" aria-label="dot. home"><span class="brand-dot">●</span><span>dot.</span></a>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="#download">download</a>
+      <a href="#features">features</a>
+      <a href="https://github.com/atlasru/dot" rel="noreferrer">source</a>
+    </nav>
+    <span class="status-led" aria-hidden="true"></span>
+  </header>
+
+  <main id="top">
+    <section class="hero shell section">
+      <div class="hero-copy reveal">
+        <p class="eyebrow">VLESS / REALITY / TLS</p>
+        <h1>your route.<br><span>your choice.</span></h1>
+        <p class="hero-lead" id="heroLead">Minimal VLESS client for Android &amp; Windows.</p>
+        <div class="hero-actions">
+          <a class="button button-primary" id="primaryDownload" href="https://github.com/atlasru/dot/releases/latest">view releases</a>
+          <a class="button" href="https://github.com/atlasru/dot">github</a>
+        </div>
+        <p class="platform-note" id="platformNote">Detecting your platform…</p>
+      </div>
+
+      <div class="network-card reveal" data-delay="80">
+        <div class="panel-head">
+          <span>NETWORK STATUS</span>
+          <button class="text-button" id="refreshNetwork" type="button">refresh</button>
+        </div>
+        <div class="network-state" id="networkState">CHECKING…</div>
+        <dl class="network-grid">
+          <div><dt>IP</dt><dd id="networkIp">•••.•••.•••.•••</dd></div>
+          <div><dt>LOCATION</dt><dd id="networkLocation">checking</dd></div>
+          <div><dt>NETWORK</dt><dd id="networkProvider">checking</dd></div>
+          <div><dt>STATUS</dt><dd><span class="inline-dot"></span> PUBLIC</dd></div>
+        </dl>
+        <div class="network-footer">
+          <button class="text-button" id="revealIp" type="button" disabled>reveal ip</button>
+          <span>visible to this page</span>
+        </div>
+        <p class="privacy-copy">The lookup runs in your browser and is not stored by dot. Network data is requested from a third-party IP lookup service.</p>
+      </div>
+    </section>
+
+    <section class="download shell section" id="download">
+      <div class="section-heading reveal">
+        <p class="eyebrow">DOWNLOAD</p>
+        <h2>Pick a build.</h2>
+      </div>
+      <div class="download-grid">
+        <article class="download-card reveal">
+          <div class="download-title"><span>ANDROID</span><span class="badge">STABLE</span></div>
+          <p class="version" id="androidVersion">v0.1.8</p>
+          <p>Kotlin · Jetpack Compose · Android VpnService · libXray</p>
+          <div class="download-meta"><span>Android 8.0+</span><span id="androidSize">APK</span></div>
+          <a class="button button-primary full" id="androidDownload" href="https://github.com/atlasru/dot/releases/latest">download apk</a>
+          <details class="verify"><summary>verify download</summary><code id="androidHash">SHA-256 available in the latest release</code></details>
+        </article>
+        <article class="download-card reveal" data-delay="80">
+          <div class="download-title"><span>WINDOWS</span><span class="badge badge-alpha">ALPHA</span></div>
+          <p class="version" id="desktopVersion">v0.2.2-alpha.1</p>
+          <p>Rust · Xray-core · Wintun</p>
+          <div class="download-meta"><span>Windows x64 · portable</span><span id="desktopSize">ZIP</span></div>
+          <a class="button button-primary full" id="desktopDownload" href="https://github.com/atlasru/dot/releases/latest">download zip</a>
+          <details class="verify"><summary>verify download</summary><code id="desktopHash">SHA-256 available in the latest release</code></details>
+          <p class="warning">Current Windows builds are unsigned.</p>
+        </article>
+      </div>
+      <a class="quiet-link reveal" id="allReleases" href="https://github.com/atlasru/dot/releases/latest">all releases →</a>
+    </section>
+
+    <section class="preview shell section" aria-labelledby="previewTitle">
+      <div class="section-heading reveal">
+        <p class="eyebrow">INTERFACE</p>
+        <h2 id="previewTitle">Built around the connection.</h2>
+      </div>
+      <div class="preview-grid">
+        <div class="mock mock-phone reveal">
+          <div class="mock-top"><span>dot.</span><span>•••</span></div>
+          <div class="orb">
+            <svg class="orb-grid" viewBox="0 0 11 11" aria-hidden="true">
+              <path class="orb-lit" d="M3 0h1v1h-1z M4 0h1v1h-1z M5 0h1v1h-1z M6 0h1v1h-1z M7 0h1v1h-1z M2 1h1v1h-1z M3 1h1v1h-1z M7 1h1v1h-1z M8 1h1v1h-1z M1 2h1v1h-1z M2 2h1v1h-1z M8 2h1v1h-1z M9 2h1v1h-1z M0 3h1v1h-1z M1 3h1v1h-1z M4 3h1v1h-1z M6 3h1v1h-1z M9 3h1v1h-1z M10 3h1v1h-1z M0 4h1v1h-1z M3 4h1v1h-1z M5 4h1v1h-1z M7 4h1v1h-1z M10 4h1v1h-1z M0 5h1v1h-1z M4 5h1v1h-1z M6 5h1v1h-1z M10 5h1v1h-1z M0 6h1v1h-1z M3 6h1v1h-1z M5 6h1v1h-1z M7 6h1v1h-1z M10 6h1v1h-1z M0 7h1v1h-1z M1 7h1v1h-1z M4 7h1v1h-1z M6 7h1v1h-1z M9 7h1v1h-1z M10 7h1v1h-1z M1 8h1v1h-1z M2 8h1v1h-1z M8 8h1v1h-1z M9 8h1v1h-1z M2 9h1v1h-1z M3 9h1v1h-1z M7 9h1v1h-1z M8 9h1v1h-1z M3 10h1v1h-1z M4 10h1v1h-1z M5 10h1v1h-1z M6 10h1v1h-1z M7 10h1v1h-1z"/>
+              <rect class="orb-center" x="5" y="5" width="1" height="1"/>
+            </svg>
+          </div>
+          <div class="mock-state">CONNECTED</div>
+          <div class="mock-node active"><span>DE / Frankfurt #2</span><span>41 ms</span></div>
+          <div class="mock-node"><span>FI / Helsinki</span><span>63 ms</span></div>
+          <div class="mock-node"><span>JP / Tokyo #3</span><span>181 ms</span></div>
+        </div>
+        <div class="mock mock-map reveal" data-delay="70">
+          <div class="mock-top"><span>MAP</span><span>− &nbsp; +</span></div>
+          <div class="fake-map" aria-hidden="true">
+            <span class="map-line line-a"></span><span class="map-line line-b"></span><span class="map-line line-c"></span>
+            <span class="map-node node-eu">4</span><span class="map-node node-us">2</span><span class="map-node node-jp">3</span>
+          </div>
+          <div class="map-caption">COUNTRY CLUSTERS · PAN / ZOOM</div>
+        </div>
+        <div class="mock mock-desktop reveal" data-delay="110">
+          <div class="mock-top"><span>dot. desktop</span><span>WINDOWS</span></div>
+          <div class="desktop-layout">
+            <div class="desktop-side"><span class="side-item current">HOME</span><span class="side-item">MAP</span><span class="side-item">SETTINGS</span></div>
+            <div class="desktop-main"><p class="mini-label">ACTIVE NODE</p><strong>Germany / Frankfurt #2</strong><p>41 ms · VLESS REALITY</p><div class="traffic"><span>↓ 12.4 MB</span><span>↑ 2.1 MB</span></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="features shell section" id="features">
+      <div class="section-heading reveal">
+        <p class="eyebrow">FEATURES</p>
+        <h2>Small surface.<br>Useful internals.</h2>
+      </div>
+      <div class="feature-lines">
+        <article class="feature-line reveal"><span class="feature-index">01</span><div><h3>CONNECTION</h3><p>VLESS · REALITY / TLS · Xray-core · live node switching</p></div></article>
+        <article class="feature-line reveal"><span class="feature-index">02</span><div><h3>NODES</h3><p>URL testing · delay sorting · natural name sorting · provider order</p></div></article>
+        <article class="feature-line reveal"><span class="feature-index">03</span><div><h3>SUBSCRIPTIONS</h3><p>Multiple groups · safe refresh · structured changes · failure rollback</p></div></article>
+        <article class="feature-line reveal"><span class="feature-index">04</span><div><h3>MAP</h3><p>IP geolocation · country fallback · node clustering · pan and zoom</p></div></article>
+      </div>
+    </section>
+
+    <section class="split shell section reverse">
+      <div class="node-test reveal">
+        <div class="panel-head"><span>SORT: DELAY</span><span>URL TEST</span></div>
+        <div class="test-row"><span>GERMANY #1</span><span class="latency good">42 ms</span></div>
+        <div class="test-row"><span>FINLAND #2</span><span class="latency good">61 ms</span></div>
+        <div class="test-row"><span>JAPAN #1</span><span class="latency">184 ms</span></div>
+        <div class="test-row"><span>US WEST</span><span class="latency fail">FAIL</span></div>
+      </div>
+      <div class="split-copy reveal" data-delay="80">
+        <p class="eyebrow">NODE TESTING</p>
+        <h2>Sort by what matters.</h2>
+        <p>Keep provider order, sort naturally by name, or run URL tests and put successful low-latency nodes first.</p>
+        <p class="subtle">Missing latency data triggers the existing group test before delay sorting is applied.</p>
+      </div>
+    </section>
+
+    <section class="privacy shell section" id="privacy">
+      <div class="privacy-banner reveal">
+        <p>NO ACCOUNTS</p><p>NO ADS</p><p>NO ANALYTICS</p><p>NO TELEMETRY</p>
+      </div>
+      <div class="privacy-grid reveal">
+        <div><p class="eyebrow">PRIVACY</p><h2>A client, not a provider.</h2></div>
+        <div><p>dot. does not operate VPN servers. You bring your own VLESS subscription.</p><p>Subscription URLs may contain credentials. Treat them like passwords.</p><a class="quiet-link" href="privacy.html">privacy details →</a></div>
+      </div>
+    </section>
+
+    <section class="stack shell section">
+      <div class="section-heading reveal"><p class="eyebrow">OPEN SOURCE</p><h2>Two clients.<br>One project.</h2></div>
+      <div class="stack-grid">
+        <div class="stack-card reveal"><span>ANDROID</span><strong>Kotlin</strong><p>Jetpack Compose<br>Android VpnService<br>libXray / Xray-core<br>OkHttp</p></div>
+        <div class="stack-card reveal" data-delay="70"><span>DESKTOP</span><strong>Rust</strong><p>Xray-core<br>Wintun<br>Windows x64 portable build</p></div>
+      </div>
+      <div class="stack-actions reveal"><a class="button" href="https://github.com/atlasru/dot">source</a><a class="button" href="https://github.com/atlasru/dot/blob/main/ARCHITECTURE.md">architecture</a></div>
+    </section>
+
+    <section class="faq shell section">
+      <div class="section-heading reveal"><p class="eyebrow">FAQ</p><h2>Short answers.</h2></div>
+      <div class="faq-list reveal">
+        <details><summary>What is dot.?</summary><p>An open-source VLESS client for Android and Windows built around subscriptions, node testing, map view and a minimal interface.</p></details>
+        <details><summary>Does dot. provide VPN servers?</summary><p>No. dot. is a client. You need your own compatible VLESS subscription.</p></details>
+        <details><summary>Which transports are supported?</summary><p>The current Android release focuses on VLESS with REALITY and TLS through Xray-core.</p></details>
+        <details><summary>Why is the Windows build unsigned?</summary><p>The desktop client is still an alpha build and the current Windows executable has not been code-signed yet.</p></details>
+        <details><summary>Does the website track visitors?</summary><p>No analytics or advertising scripts are included. The network-status card optionally requests your public IP metadata from a third-party lookup service in your browser.</p></details>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer shell">
+    <a class="brand" href="#top"><span class="brand-dot">●</span><span>dot.</span></a>
+    <div class="footer-links"><a href="https://github.com/atlasru/dot">GitHub</a><a href="https://github.com/atlasru/dot/releases/latest">Releases</a><a href="privacy.html">Privacy</a><a href="https://atlas.is-a.dev">atlas.is-a.dev</a></div>
+    <span class="footer-mark">●</span>
+  </footer>
+
+  <script src="assets/main.js" defer></script>
+</body>
+</html>
