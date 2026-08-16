@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#050505">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Privacy details for the dot. website and client.">
+  <title>dot. — privacy</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div class="page-grid" aria-hidden="true"></div>
+  <header class="topbar shell">
+    <a class="brand" href="./"><span class="brand-dot">●</span><span>dot.</span></a>
+    <nav class="nav"><a href="./">home</a><a href="https://github.com/atlasru/dot">source</a></nav>
+    <span class="status-led" aria-hidden="true"></span>
+  </header>
+  <main>
+    <section class="section shell privacy-page">
+      <p class="eyebrow">PRIVACY</p>
+      <h1>Nothing to profile.</h1>
+      <div class="policy-grid">
+        <section><span>01</span><div><h2>Website</h2><p>The dot. website does not include analytics, advertising pixels, account systems or telemetry scripts.</p></div></section>
+        <section><span>02</span><div><h2>Network status</h2><p>The network-status card requests public IP metadata from <code>ipwho.is</code> directly from your browser. That request is made to the third-party service, not to a dot. backend. dot. does not operate a server that receives or stores the lookup result.</p><p>You can leave the site without using the card, and a failed lookup does not affect any other part of the website.</p></div></section>
+        <section><span>03</span><div><h2>GitHub releases</h2><p>The website requests the public GitHub Releases API to discover the current Android and Windows download assets, versions, file sizes and SHA-256 digests. Download buttons point to GitHub release assets.</p></div></section>
+        <section><span>04</span><div><h2>Client</h2><p>dot. is a VPN client, not a VPN provider. It does not provide accounts or operate VPN servers. You bring your own compatible VLESS subscription.</p></div></section>
+        <section><span>05</span><div><h2>Subscription credentials</h2><p>Subscription URLs and VLESS links can contain credentials such as tokens and user IDs. Treat those values like passwords. User-facing refresh diagnostics redact sensitive VLESS information before raw errors reach the UI.</p></div></section>
+        <section><span>06</span><div><h2>Node geolocation</h2><p>The client can resolve node IP addresses for map placement. Subscription URLs, UUIDs and VLESS credentials are not included in geolocation requests.</p></div></section>
+      </div>
+      <div class="policy-actions"><a class="button button-primary" href="./">back to dot.</a><a class="button" href="https://github.com/atlasru/dot/blob/main/README.md#privacy">project privacy</a></div>
+    </section>
+  </main>
+  <footer class="footer shell"><a class="brand" href="./"><span class="brand-dot">●</span><span>dot.</span></a><div class="footer-links"><a href="https://github.com/atlasru/dot">GitHub</a><a href="https://github.com/atlasru/dot/releases/latest">Releases</a><a href="https://atlas.is-a.dev">atlas.is-a.dev</a></div><span class="footer-mark">●</span></footer>
+</body>
+</html>
