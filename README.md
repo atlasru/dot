@@ -2,7 +2,7 @@
 
 Minimal VLESS client for Android with an AMOLED-first, Nothing-inspired interface.
 
-Current Android version: **0.1.8**
+Current Android version: **0.2.0**
 
 ## Features
 
@@ -22,6 +22,7 @@ Current Android version: **0.1.8**
 - country-level node grouping so multiple nodes do not overlap on the map
 - node latency / connection tests through libXray URL testing
 - direct node selection and switching while connected
+- per-app split tunneling with all-apps, exclude-selected and only-selected modes
 - Android VpnService + TUN integration
 - libXray / Xray-core backend
 - realtime upload/download traffic
@@ -31,6 +32,30 @@ Current Android version: **0.1.8**
 - AMOLED, Graphite and Matrix themes
 - selectable launcher icon variants
 - no accounts, ads, analytics or telemetry
+
+## Mobile interface
+
+Android uses a small three-destination layout:
+
+- **Home** is connection-first: the pixel orb, connection state, active node, traffic and connection test stay in one place
+- **Nodes** contains subscription switching, refresh/test actions, sorting, LIST/MAP views and per-node controls
+- **Settings** contains subscriptions, split tunneling, appearance and app information
+
+The redesign changes information hierarchy without removing the existing node map, latency tests, sorting, subscription management, theme selection or launcher-icon controls.
+
+## Split tunneling
+
+Split tunneling is applied at the Android `VpnService.Builder` layer before the TUN interface is established. The Xray profile itself remains unchanged.
+
+Three routing modes are available:
+
+- **ALL APPS** routes the device through the VPN as before
+- **EXCLUDE SELECTED** keeps the VPN as the default but lets selected apps use the normal network
+- **ONLY SELECTED APPS** places only the selected apps inside the VPN
+
+Only launchable applications are shown in the selector, so dot. does not request Android's broad `QUERY_ALL_PACKAGES` permission. Rules are stored by package name and survive app upgrades. Missing/uninstalled packages are ignored in exclude mode; include-only mode refuses to establish a tunnel if none of the selected packages are currently installed, avoiding an unsafe fallback to all-app routing.
+
+Changing split-tunnel rules while connected does not mutate the live TUN interface. The UI offers an explicit reconnect action to apply the new app routing.
 
 ## Subscription updates
 
@@ -94,6 +119,8 @@ app/build/outputs/apk/debug/app-debug.apk
 ## Privacy
 
 Treat subscription URLs containing user IDs or tokens as credentials. Do not publish real subscription links, UUIDs or unredacted runtime logs.
+
+Split tunneling stores only Android package names selected by the user. dot. does not need broad installed-package visibility and does not send the app selection anywhere.
 
 ## Stack
 
