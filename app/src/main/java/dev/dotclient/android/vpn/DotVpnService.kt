@@ -12,6 +12,7 @@ import android.os.ParcelFileDescriptor
 import android.os.Process
 import dev.dotclient.android.MainActivity
 import dev.dotclient.android.R
+import dev.dotclient.android.core.splittunnel.SplitTunnelStore
 import dev.dotclient.android.ui.LauncherIcon
 import dev.dotclient.android.ui.LauncherIconManager
 import libXray.DialerController
@@ -25,6 +26,7 @@ import java.util.concurrent.TimeUnit
 class DotVpnService : VpnService() {
     private val worker = Executors.newSingleThreadExecutor()
     private val trafficWorker = Executors.newSingleThreadScheduledExecutor()
+    private val splitTunnelStore by lazy { SplitTunnelStore(this) }
     private var trafficFuture: ScheduledFuture<*>? = null
     private var tun: ParcelFileDescriptor? = null
     private var runningNodeName: String? = null
@@ -78,6 +80,7 @@ class DotVpnService : VpnService() {
             publishState(VpnConnectionState.CONNECTING, nodeName, "starting libXray…")
 
             try {
+                val splitTunnelConfig = splitTunnelStore.load()
                 val vpnInterface = Builder()
                     .setSession("dot.")
                     .setMtu(MTU)
@@ -85,6 +88,7 @@ class DotVpnService : VpnService() {
                     .addRoute("0.0.0.0", 0)
                     .addDnsServer("1.1.1.1")
                     .setBlocking(true)
+                    .applySplitTunnel(splitTunnelConfig)
                     .establish()
                     ?: error("Android failed to establish TUN")
 
