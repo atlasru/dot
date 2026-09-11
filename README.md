@@ -2,7 +2,7 @@
 
 Minimal VLESS client for Android with an AMOLED-first, Nothing-inspired interface.
 
-Current Android version: **0.2.0**
+Current Android version: **0.2.1**
 
 ## Features
 
@@ -40,6 +40,8 @@ Android uses a small three-destination layout:
 - **Home** is connection-first: the pixel orb, connection state, active node, traffic and connection test stay in one place
 - **Nodes** contains subscription switching, refresh/test actions, sorting, LIST/MAP views and per-node controls
 - **Settings** contains subscriptions, split tunneling, appearance and app information
+
+The primary destinations use a floating pill navigation bar above the Android system navigation/gesture area. The selected destination is highlighted as an inner pill with the dot. red accent, while navigation automatically respects the system navigation inset.
 
 The redesign changes information hierarchy without removing the existing node map, latency tests, sorting, subscription management, theme selection or launcher-icon controls.
 
