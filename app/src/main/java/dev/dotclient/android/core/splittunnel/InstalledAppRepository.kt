@@ -27,7 +27,7 @@ class InstalledAppRepository(
                 )
             }
             .distinctBy { it.packageName }
-            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.label })
+            .sortedBy { it.label.lowercase() }
             .toList()
     }
 }
