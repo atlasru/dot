@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.1
+
+- replace the full-width Android bottom bar with a raised floating pill navigation inspired by the Happ interaction pattern
+- respect Android gesture/button navigation insets so the primary destinations sit above the system navigation area
+- highlight the active destination with an animated inner pill and dot. red accent while keeping large tap targets
+- remove the duplicate Settings gear from Home and Nodes now that Settings has a persistent primary navigation destination
+- keep node/map and settings content comfortably clear of the raised navigation control
+
+## 0.2.0
+
+- add per-app Android split tunneling with `ALL APPS`, `EXCLUDE SELECTED` and `ONLY SELECTED APPS` routing modes
+- persist split-tunnel rules independently from subscription groups and apply them at `VpnService.Builder` before TUN establishment
+- enumerate launchable apps without requesting Android's broad `QUERY_ALL_PACKAGES` permission
+- reject include-only tunnel startup when none of the selected packages are installed instead of silently falling back to all-app routing
+- add a dedicated split-tunneling app selector with search, clear action and explicit reconnect flow for live VPN sessions
+- redesign Android navigation into focused `HOME`, `NODES` and `SETTINGS` destinations without removing existing functionality
+- keep Home centered on the pixel orb, connection state, active node, traffic and connection test
+- move subscription switching, refresh, group tests, sorting and LIST/MAP controls into Nodes
+- preserve subscription editing, themes, launcher icons, About, node map, URL tests and direct node switching
+
 ## 0.1.8
 
 - add structured subscription refresh results with added, edited, deleted and no-change states
@@ -27,7 +47,7 @@
 
 - add LIST / MAP switch for the selected Android subscription while keeping LIST as the default view
 - add IP geolocation for subscription nodes with DNS resolution and a seven-day local cache
-- fall back to country detection from emoji flags, ISO country codes and common country names when IP geolocation fails
+- fall back to country detection from node flags, ISO country codes and common country names when IP geolocation fails
 - group every node in the same country into one map marker so duplicate-country nodes never overlap
 - show node count, active-country state, city hints, latency and direct connect/switch actions from the country panel
 - use a lightweight monochrome Compose world map that matches the existing dot. AMOLED/pixel visual language and avoids map SDK/tile dependencies
