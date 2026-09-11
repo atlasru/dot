@@ -23,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,10 +53,14 @@ fun SplitTunnelScreen(
     val apps = remember(context.applicationContext) {
         InstalledAppRepository(context.applicationContext).loadLaunchableApps()
     }
-    val configAtOpen = remember { config }
+    var appliedConfig by remember { mutableStateOf(config) }
     var query by remember { mutableStateOf("") }
 
     BackHandler(onBack = onBack)
+
+    LaunchedEffect(vpnConnected) {
+        if (vpnConnected) appliedConfig = config
+    }
 
     val filteredApps = remember(apps, query) {
         val needle = query.trim()
@@ -65,7 +70,7 @@ fun SplitTunnelScreen(
                 it.packageName.contains(needle, ignoreCase = true)
         }
     }
-    val changedWhileConnected = vpnConnected && config != configAtOpen
+    val changedWhileConnected = vpnConnected && config != appliedConfig
 
     Column(modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
