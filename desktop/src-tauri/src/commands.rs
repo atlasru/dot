@@ -4,7 +4,11 @@ use uuid::Uuid;
 
 use crate::{
     engine::VpnEngine,
-    model::{AppPreferences, AppTheme, EnginePhase, EngineSnapshot, GroupView, SelectionView, SubscriptionGroup, TrafficSnapshot, UrlTestResult},
+    model::{
+        AppPreferences, AppTheme, EnginePhase, EngineSnapshot, GroupUrlTestResult, GroupView,
+        NodeSortMode, SelectionView, SubscriptionGroup, SubscriptionRefreshResult, TrafficSnapshot,
+        UrlTestResult,
+    },
     storage::Store,
     subscription::SubscriptionClient,
     url_test,
@@ -79,6 +83,17 @@ pub fn set_close_to_tray(enabled: bool, state: State<'_, SharedState>) -> Result
 }
 
 #[tauri::command]
+pub fn set_node_sort(group_id: String, mode: String, state: State<'_, SharedState>) -> Result<GroupView, String> {
+    let mode = match mode.as_str() {
+        "origin" => NodeSortMode::Origin,
+        "delay" => NodeSortMode::Delay,
+        "name" => NodeSortMode::Name,
+        _ => return Err("unknown node sort mode".into()),
+    };
+    state.store.set_sort_mode(&group_id, mode)
+}
+
+#[tauri::command]
 pub async fn add_subscription(name: String, url: String, state: State<'_, SharedState>) -> Result<GroupView, String> {
     let url = url.trim().to_string();
     if !(url.starts_with("https://") || url.starts_with("http://")) { return Err("subscription URL must use HTTP or HTTPS".into()); }
@@ -94,10 +109,10 @@ pub async fn add_subscription(name: String, url: String, state: State<'_, Shared
 }
 
 #[tauri::command]
-pub async fn refresh_subscription(group_id: String, state: State<'_, SharedState>) -> Result<GroupView, String> {
+pub async fn refresh_subscription(group_id: String, state: State<'_, SharedState>) -> Result<SubscriptionRefreshResult, String> {
     let url = state.store.group_url(&group_id)?;
     let nodes = tauri::async_runtime::spawn_blocking(move || SubscriptionClient::new()?.fetch(&url)).await.map_err(|e| format!("subscription task failed: {e}"))??;
-    state.store.replace_group_nodes(&group_id, nodes, now_ms())
+    state.store.apply_refresh(&group_id, nodes, now_ms())
 }
 
 #[tauri::command]
@@ -135,19 +150,90 @@ pub async fn url_test(group_id: String, node_id: String, state: State<'_, Shared
     }
 
     let tested_node_id = node.id.clone();
-    let latency_ms = if active_tunnel {
+    let result = if active_tunnel {
         tauri::async_runtime::spawn_blocking(url_test::test_active_connection)
             .await
-            .map_err(|e| format!("active URL test task failed: {e}"))??
+            .map_err(|e| format!("active URL test task failed: {e}"))?
     } else {
         let runtime_source = state.runtime_source.clone();
         let work_dir = state.url_test_dir.clone();
         tauri::async_runtime::spawn_blocking(move || url_test::test_node(&runtime_source, &work_dir, &node))
             .await
-            .map_err(|e| format!("node URL test task failed: {e}"))??
+            .map_err(|e| format!("node URL test task failed: {e}"))?
     };
 
-    Ok(UrlTestResult { node_id: tested_node_id, latency_ms, active_tunnel })
+    match result {
+        Ok(latency_ms) => {
+            state.store.record_latency(&tested_node_id, Some(latency_ms), false, now_ms())?;
+            Ok(UrlTestResult { node_id: tested_node_id, latency_ms, active_tunnel })
+        }
+        Err(error) => {
+            state.store.record_latency(&tested_node_id, None, true, now_ms())?;
+            Err(error)
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn url_test_group(group_id: String, state: State<'_, SharedState>) -> Result<GroupUrlTestResult, String> {
+    let current = read_snapshot(&state.snapshot);
+    if matches!(current.phase, EnginePhase::Starting | EnginePhase::Stopping) {
+        return Err("wait for the VPN state change to finish before testing the group".into());
+    }
+    if current.phase == EnginePhase::Connected {
+        return Err("disconnect before testing all nodes in a subscription".into());
+    }
+
+    let nodes = state.store.group_nodes(&group_id)?;
+    if nodes.is_empty() { return Err("subscription contains no nodes".into()); }
+    let runtime_source = state.runtime_source.clone();
+    let work_dir = state.url_test_dir.clone();
+
+    let outcomes = tauri::async_runtime::spawn_blocking(move || {
+        let mut outcomes = Vec::with_capacity(nodes.len());
+        for batch in nodes.chunks(6) {
+            let handles: Vec<_> = batch.iter().cloned().map(|node| {
+                let runtime_source = runtime_source.clone();
+                let work_dir = work_dir.clone();
+                std::thread::spawn(move || {
+                    let node_id = node.id.clone();
+                    let result = url_test::test_node(&runtime_source, &work_dir, &node);
+                    (node_id, result)
+                })
+            }).collect();
+            for handle in handles {
+                match handle.join() {
+                    Ok(outcome) => outcomes.push(outcome),
+                    Err(_) => outcomes.push((String::new(), Err("URL test worker panicked".into()))),
+                }
+            }
+        }
+        outcomes
+    }).await.map_err(|e| format!("group URL test task failed: {e}"))?;
+
+    let mut results = Vec::new();
+    let mut failed_node_ids = Vec::new();
+    for (node_id, outcome) in outcomes {
+        if node_id.is_empty() { continue; }
+        match outcome {
+            Ok(latency_ms) => {
+                state.store.record_latency(&node_id, Some(latency_ms), false, now_ms())?;
+                results.push(UrlTestResult { node_id, latency_ms, active_tunnel: false });
+            }
+            Err(_) => {
+                state.store.record_latency(&node_id, None, true, now_ms())?;
+                failed_node_ids.push(node_id);
+            }
+        }
+    }
+
+    Ok(GroupUrlTestResult {
+        group_id,
+        succeeded: results.len(),
+        failed: failed_node_ids.len(),
+        results,
+        failed_node_ids,
+    })
 }
 
 pub fn request_disconnect(state: &SharedState) -> EngineSnapshot {
