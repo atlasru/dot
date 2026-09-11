@@ -10,6 +10,7 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -186,27 +188,57 @@ fun DotApp(viewModel: MainViewModel) {
 
 @Composable
 private fun BottomNavigation(selected: Screen, onSelect: (Screen) -> Unit) {
-    Row(
+    Box(
         Modifier.fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
-            .border(1.dp, Color(0xFF1D1D1D))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+            .navigationBarsPadding()
+            .padding(start = 22.dp, end = 22.dp, top = 6.dp, bottom = 14.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        NavItem("HOME", selected == Screen.HOME) { onSelect(Screen.HOME) }
-        NavItem("NODES", selected == Screen.NODES) { onSelect(Screen.NODES) }
-        NavItem("SETTINGS", selected == Screen.SETTINGS) { onSelect(Screen.SETTINGS) }
+        Row(
+            Modifier.fillMaxWidth()
+                .background(Color(0xFF0D0D0D), RoundedCornerShape(30.dp))
+                .border(1.dp, Color(0xFF292929), RoundedCornerShape(30.dp))
+                .padding(5.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NavItem("HOME", selected == Screen.HOME, Modifier.weight(1f)) { onSelect(Screen.HOME) }
+            NavItem("NODES", selected == Screen.NODES, Modifier.weight(1f)) { onSelect(Screen.NODES) }
+            NavItem("SETTINGS", selected == Screen.SETTINGS, Modifier.weight(1f)) { onSelect(Screen.SETTINGS) }
+        }
     }
 }
 
 @Composable
-private fun NavItem(label: String, active: Boolean, onClick: () -> Unit) {
-    Text(
-        label,
-        Modifier.clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 7.dp),
-        color = if (active) Color.White else Color(0xFF5A5A5A),
-        style = MaterialTheme.typography.labelMedium,
+private fun NavItem(label: String, active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val background by animateColorAsState(
+        targetValue = if (active) Color(0xFF202020) else Color.Transparent,
+        label = "dot-nav-background",
     )
+    val border by animateColorAsState(
+        targetValue = if (active) Color(0xFF3B3B3B) else Color.Transparent,
+        label = "dot-nav-border",
+    )
+    val textColor by animateColorAsState(
+        targetValue = if (active) Color.White else Color(0xFF666666),
+        label = "dot-nav-text",
+    )
+
+    Box(
+        modifier.background(background, RoundedCornerShape(24.dp))
+            .border(1.dp, border, RoundedCornerShape(24.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+            if (active) {
+                Box(Modifier.size(5.dp).background(DotRed, CircleShape))
+                Spacer(Modifier.width(7.dp))
+            }
+            Text(label, color = textColor, style = MaterialTheme.typography.labelMedium)
+        }
+    }
 }
 
 @Composable
@@ -225,7 +257,7 @@ private fun HomeScreen(
         modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        DotHeader("dot.", BuildConfig.VERSION_NAME.removeSuffix("-debug"), onOpenSettings)
+        DotHeader("dot.", BuildConfig.VERSION_NAME.removeSuffix("-debug"))
         Spacer(Modifier.height(24.dp))
 
         PixelOrb(state, onToggleVpn)
@@ -348,7 +380,7 @@ private fun NodesScreen(
     val group = state.selectedSubscription
 
     Column(modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 14.dp)) {
-        DotHeader("nodes.", BuildConfig.VERSION_NAME.removeSuffix("-debug"), onOpenSettings)
+        DotHeader("nodes.", BuildConfig.VERSION_NAME.removeSuffix("-debug"))
         Spacer(Modifier.height(14.dp))
 
         GroupToolbar(state, viewModel)
@@ -389,7 +421,7 @@ private fun NodesScreen(
 
             else -> LazyColumn(
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                contentPadding = PaddingValues(top = 7.dp, bottom = 18.dp),
+                contentPadding = PaddingValues(top = 7.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 items(state.sortedProfiles, key = { it.id }) { profile ->
@@ -514,7 +546,7 @@ private fun NodeViewSwitcher(
                 Modifier.border(1.dp, Color(0xFF252525), RoundedCornerShape(2.dp))
                     .clickable(enabled = !delayTesting) { sortMenuOpen = true }
                     .padding(horizontal = 10.dp, vertical = 6.dp),
-                color = if (delayTesting) Color(0xFF777777) else Color(0xFF777777),
+                color = Color(0xFF777777),
                 style = MaterialTheme.typography.labelMedium,
             )
             DropdownMenu(sortMenuOpen, { sortMenuOpen = false }, containerColor = MaterialTheme.colorScheme.surface) {
@@ -674,7 +706,7 @@ private fun SettingsScreen(
 
     LazyColumn(
         modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp),
-        contentPadding = PaddingValues(bottom = 22.dp),
+        contentPadding = PaddingValues(bottom = 28.dp),
     ) {
         item {
             Text("settings.", style = MaterialTheme.typography.headlineLarge)
@@ -1004,15 +1036,11 @@ private fun EmptyState(title: String, hint: String, action: String, onAction: ()
 }
 
 @Composable
-private fun DotHeader(title: String, trailing: String? = null, onSettings: () -> Unit) {
+private fun DotHeader(title: String, trailing: String? = null) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = MaterialTheme.typography.headlineLarge)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            trailing?.let {
-                Text("v$it", style = MaterialTheme.typography.labelMedium, color = Color(0xFF5E5E5E))
-                Spacer(Modifier.size(12.dp))
-            }
-            Text("⚙", Modifier.clickable(onClick = onSettings).padding(6.dp), style = MaterialTheme.typography.titleLarge)
+        trailing?.let {
+            Text("v$it", style = MaterialTheme.typography.labelMedium, color = Color(0xFF5E5E5E))
         }
     }
 }
