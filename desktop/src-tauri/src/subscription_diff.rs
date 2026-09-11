@@ -167,4 +167,18 @@ mod tests {
         assert_eq!(diff.added.len(), 1);
         assert!(diff.edited.is_empty());
     }
+
+    #[test]
+    fn duplicate_identity_matches_exact_uri_before_edit_pairing() {
+        let exact = node("vless://same@node.example:443?security=tls&type=tcp#tcp");
+        let old_other = node("vless://same@node.example:443?security=tls&type=ws#ws");
+        let fresh_exact = exact.clone();
+        let fresh_other = node("vless://same@node.example:443?security=tls&type=ws#ws-renamed");
+
+        let diff = calculate(&[exact.clone(), old_other.clone()], &[fresh_other.clone(), fresh_exact.clone()]);
+
+        assert_eq!(diff.replacement_for(&exact.id).map(|node| node.raw_uri.as_str()), Some(fresh_exact.raw_uri.as_str()));
+        assert_eq!(diff.replacement_for(&old_other.id).map(|node| node.raw_uri.as_str()), Some(fresh_other.raw_uri.as_str()));
+        assert_eq!(diff.edited.len(), 1);
+    }
 }
