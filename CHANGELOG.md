@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- replace the full-width Android bottom bar with a raised floating pill navigation inspired by the Happ interaction pattern
+- respect Android gesture/button navigation insets so the primary destinations sit above the system navigation area
+- highlight the active destination with an animated inner pill and dot. red accent while keeping large tap targets
+- remove the duplicate Settings gear from Home and Nodes now that Settings has a persistent primary navigation destination
+- keep node/map and settings content comfortably clear of the raised navigation control
+
 ## 0.2.0
 
 - add per-app Android split tunneling with `ALL APPS`, `EXCLUDE SELECTED` and `ONLY SELECTED APPS` routing modes
