@@ -13,9 +13,9 @@ impl SubscriptionClient {
         let http = Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(20))
-            .user_agent("dot-desktop/0.1.0-alpha.1")
+            .user_agent("dot-desktop/0.1.1")
             .build()
-            .map_err(|e| format!("failed to initialize HTTP client: {e}"))?;
+            .map_err(|_| "failed to initialize subscription HTTP client".to_string())?;
         Ok(Self { http })
     }
 
@@ -25,17 +25,34 @@ impl SubscriptionClient {
             .get(url)
             .header("Accept", "*/*")
             .send()
-            .map_err(|e| format!("subscription request failed: {e}"))?;
+            .map_err(format_request_error)?;
 
         let status = response.status();
         if !status.is_success() {
-            return Err(format!("subscription server returned HTTP {}", status.as_u16()));
+            return Err(match status.as_u16() {
+                401 | 403 => "the subscription server rejected the request".into(),
+                404 => "the subscription was not found".into(),
+                code @ 500..=599 => format!("the subscription server returned an error (HTTP {code})"),
+                code => format!("the subscription server returned HTTP {code}"),
+            });
         }
 
         let body = response
             .text()
-            .map_err(|e| format!("failed to read subscription response: {e}"))?;
+            .map_err(|_| "failed to read the subscription response".to_string())?;
         decode_subscription(&body)
+    }
+}
+
+fn format_request_error(error: reqwest::Error) -> String {
+    if error.is_timeout() {
+        "the subscription server did not respond in time".into()
+    } else if error.is_connect() {
+        "could not connect to the subscription server".into()
+    } else if error.is_redirect() {
+        "the subscription server returned an invalid redirect".into()
+    } else {
+        "subscription request failed".into()
     }
 }
 
@@ -110,5 +127,13 @@ mod tests {
     fn accepts_base64() {
         let encoded = STANDARD.encode(LINK.as_bytes());
         assert_eq!(decode_subscription(&encoded).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn parse_errors_do_not_echo_vless_credentials() {
+        let secret = "vless://secret-user@example.com:443?security=reality&type=ws#bad";
+        let error = decode_subscription(secret).unwrap_err();
+        assert!(!error.contains("secret-user"));
+        assert!(!error.contains("vless://"));
     }
 }
