@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0
+
+- add persistent AUTO node mode that selects the fastest successful URL-tested node in the active subscription
+- automatically run the existing group URL test when AUTO needs fresh latency data
+- disable AUTO when the user manually selects a node so manual routing always wins explicitly
+- add network-aware VPN states for waiting-for-network and reconnecting
+- reconnect the current VLESS profile after Wi-Fi/mobile-data changes with capped backoff at 1s, 2s, 5s, 10s and 30s
+- keep the foreground notification and Quick Settings tile active while the tunnel is waiting or reconnecting
+- classify VPN startup failures into DNS, timeout, connection-refused, TLS, REALITY, TUN, config, Xray and unknown categories
+- expose AUTO status, reconnect attempt and the latest failure category in the Android UI
+- add unit tests for AUTO selection and VPN failure classification
+
 ## 0.2.1
 
 - replace the full-width Android bottom bar with a raised floating pill navigation inspired by the Happ interaction pattern
