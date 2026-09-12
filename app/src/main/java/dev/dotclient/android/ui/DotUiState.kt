@@ -6,6 +6,7 @@ import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.model.VlessProfile
 import dev.dotclient.android.ui.theme.DotThemeMode
 import dev.dotclient.android.vpn.VpnConnectionState
+import dev.dotclient.android.vpn.VpnFailureCategory
 
 data class DotUiState(
     val subscriptions: List<Subscription> = emptyList(),
@@ -15,6 +16,10 @@ data class DotUiState(
     val vpnPermissionGranted: Boolean = false,
     val vpnState: VpnConnectionState = VpnConnectionState.DISCONNECTED,
     val message: String? = null,
+    val vpnFailureCategory: VpnFailureCategory? = null,
+    val vpnFailureDetail: String? = null,
+    val reconnectAttempt: Int = 0,
+    val autoNodeEnabled: Boolean = false,
     val themeMode: DotThemeMode = DotThemeMode.AMOLED,
     val downloadBytesPerSecond: Long = 0L,
     val uploadBytesPerSecond: Long = 0L,
@@ -59,7 +64,10 @@ data class DotUiState(
         get() = loadingSubscriptionId != null
 
     val vpnBusy: Boolean
-        get() = vpnState == VpnConnectionState.CONNECTING || vpnState == VpnConnectionState.DISCONNECTING
+        get() = vpnState == VpnConnectionState.CONNECTING ||
+            vpnState == VpnConnectionState.RECONNECTING ||
+            vpnState == VpnConnectionState.WAITING_FOR_NETWORK ||
+            vpnState == VpnConnectionState.DISCONNECTING
 
     val vpnConnected: Boolean
         get() = vpnState == VpnConnectionState.CONNECTED
