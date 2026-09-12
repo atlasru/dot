@@ -5,6 +5,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
 import android.net.TrafficStats
 import android.net.Uri
 import android.net.VpnService
@@ -22,18 +24,60 @@ import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import kotlin.math.min
 
 class DotVpnService : VpnService() {
     private val worker = Executors.newSingleThreadExecutor()
     private val trafficWorker = Executors.newSingleThreadScheduledExecutor()
+    private val reconnectWorker = Executors.newSingleThreadScheduledExecutor()
     private val splitTunnelStore by lazy { SplitTunnelStore(this) }
+    private val connectivityManager by lazy { getSystemService(ConnectivityManager::class.java) }
     private var trafficFuture: ScheduledFuture<*>? = null
+    private var reconnectFuture: ScheduledFuture<*>? = null
     private var tun: ParcelFileDescriptor? = null
     private var runningNodeName: String? = null
+    @Volatile private var desiredRawUri: String? = null
+    @Volatile private var desiredNodeName: String? = null
+    @Volatile private var userRequestedDisconnect = false
+    @Volatile private var networkAvailable = true
+    @Volatile private var reconnectAttempt = 0
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            networkAvailable = true
+            val rawUri = desiredRawUri ?: return
+            if (userRequestedDisconnect) return
+            val state = VpnRuntime.state.value.state
+            if (state == VpnConnectionState.WAITING_FOR_NETWORK || state == VpnConnectionState.ERROR) {
+                reconnectFuture?.cancel(false)
+                reconnectFuture = null
+                worker.execute { connect(rawUri, desiredNodeName, reconnecting = true) }
+            }
+        }
+
+        override fun onLost(network: Network) {
+            networkAvailable = connectivityManager.activeNetwork != null
+            if (networkAvailable || desiredRawUri == null || userRequestedDisconnect) return
+            worker.execute {
+                synchronized(this@DotVpnService) {
+                    if (userRequestedDisconnect || desiredRawUri == null) return@synchronized
+                    shutdownCore()
+                    publishState(
+                        VpnConnectionState.WAITING_FOR_NETWORK,
+                        desiredNodeName,
+                        "waiting for network…",
+                    )
+                    notifyStatus("waiting for network", desiredNodeName)
+                }
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        networkAvailable = connectivityManager.activeNetwork != null
+        runCatching { connectivityManager.registerDefaultNetworkCallback(networkCallback) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -46,6 +90,12 @@ class DotVpnService : VpnService() {
                     publishState(VpnConnectionState.ERROR, message = "missing VLESS profile")
                     stopSelf()
                 } else {
+                    userRequestedDisconnect = false
+                    desiredRawUri = rawUri
+                    desiredNodeName = nodeName
+                    reconnectAttempt = 0
+                    reconnectFuture?.cancel(false)
+                    reconnectFuture = null
                     // Foreground startup must never depend on a user-selected icon. Android gives a
                     // foreground service only a very small window to post a valid notification, so
                     // always bootstrap with the long-tested shield vector and switch the glyph only
@@ -54,7 +104,7 @@ class DotVpnService : VpnService() {
                         NOTIFICATION_ID,
                         notification("connecting", nodeName, preferSelectedIcon = false),
                     )
-                    worker.execute { connect(rawUri, nodeName) }
+                    worker.execute { connect(rawUri, nodeName, reconnecting = false) }
                 }
             }
         }
@@ -62,22 +112,48 @@ class DotVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        reconnectFuture?.cancel(true)
+        runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
         shutdownCore()
         worker.shutdownNow()
         trafficWorker.shutdownNow()
+        reconnectWorker.shutdownNow()
         super.onDestroy()
     }
 
     override fun onRevoke() {
+        userRequestedDisconnect = true
+        desiredRawUri = null
+        desiredNodeName = null
         disconnect()
         super.onRevoke()
     }
 
-    private fun connect(rawUri: String, nodeName: String?) {
+    private fun connect(rawUri: String, nodeName: String?, reconnecting: Boolean) {
         synchronized(this) {
+            if (userRequestedDisconnect || desiredRawUri == null) return
+            reconnectFuture?.cancel(false)
+            reconnectFuture = null
             shutdownCore()
             runningNodeName = nodeName
-            publishState(VpnConnectionState.CONNECTING, nodeName, "starting libXray…")
+
+            if (!networkAvailable) {
+                publishState(VpnConnectionState.WAITING_FOR_NETWORK, nodeName, "waiting for network…")
+                notifyStatus("waiting for network", nodeName)
+                return
+            }
+
+            if (reconnecting) {
+                publishState(
+                    VpnConnectionState.RECONNECTING,
+                    nodeName,
+                    "reconnecting…",
+                    reconnectAttempt = reconnectAttempt,
+                )
+                notifyStatus("reconnecting", nodeName)
+            } else {
+                publishState(VpnConnectionState.CONNECTING, nodeName, "starting libXray…")
+            }
 
             try {
                 val splitTunnelConfig = splitTunnelStore.load()
@@ -105,16 +181,55 @@ class DotVpnService : VpnService() {
                 val config = buildXrayConfig(rawUri, vpnInterface.fd)
                 invokeRunXrayFromJson(config)
 
+                reconnectAttempt = 0
                 publishState(VpnConnectionState.CONNECTED, nodeName, "connected")
                 startTrafficMeter(nodeName)
             } catch (error: Throwable) {
-                val message = error.message ?: error.javaClass.simpleName
+                val failure = VpnErrorClassifier.classify(error)
                 shutdownCore()
-                publishState(VpnConnectionState.ERROR, nodeName, message)
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                if (userRequestedDisconnect || desiredRawUri == null) {
+                    publishState(VpnConnectionState.ERROR, nodeName, failure.userMessage, failure)
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                } else if (!networkAvailable) {
+                    publishState(
+                        VpnConnectionState.WAITING_FOR_NETWORK,
+                        nodeName,
+                        "waiting for network…",
+                        failure,
+                    )
+                    notifyStatus("waiting for network", nodeName)
+                } else {
+                    scheduleReconnect(failure)
+                }
             }
         }
+    }
+
+    private fun scheduleReconnect(failure: VpnFailure) {
+        if (userRequestedDisconnect || desiredRawUri == null) return
+        reconnectAttempt += 1
+        val delaySeconds = RECONNECT_DELAYS_SECONDS[min(reconnectAttempt - 1, RECONNECT_DELAYS_SECONDS.lastIndex)]
+        val nodeName = desiredNodeName
+        publishState(
+            VpnConnectionState.RECONNECTING,
+            nodeName,
+            "${failure.userMessage} · retry in ${delaySeconds}s",
+            failure,
+            reconnectAttempt,
+        )
+        notifyStatus("reconnecting", nodeName)
+        reconnectFuture?.cancel(false)
+        reconnectFuture = reconnectWorker.schedule({
+            val rawUri = desiredRawUri ?: return@schedule
+            if (userRequestedDisconnect) return@schedule
+            if (!networkAvailable) {
+                publishState(VpnConnectionState.WAITING_FOR_NETWORK, desiredNodeName, "waiting for network…", failure)
+                notifyStatus("waiting for network", desiredNodeName)
+                return@schedule
+            }
+            worker.execute { connect(rawUri, desiredNodeName, reconnecting = true) }
+        }, delaySeconds, TimeUnit.SECONDS)
     }
 
     private fun startTrafficMeter(nodeName: String?) {
@@ -155,6 +270,15 @@ class DotVpnService : VpnService() {
                 notification("connected", nodeName, downRate, upRate, preferSelectedIcon = true),
             )
         }, 1L, 1L, TimeUnit.SECONDS)
+    }
+
+    private fun notifyStatus(status: String, nodeName: String?) {
+        runCatching {
+            getSystemService(NotificationManager::class.java).notify(
+                NOTIFICATION_ID,
+                notification(status, nodeName, preferSelectedIcon = false),
+            )
+        }
     }
 
     private fun uidRxBytes(uid: Int): Long = TrafficStats.getUidRxBytes(uid).takeIf { it >= 0L } ?: 0L
@@ -216,6 +340,12 @@ class DotVpnService : VpnService() {
     }
 
     private fun disconnect() {
+        userRequestedDisconnect = true
+        desiredRawUri = null
+        desiredNodeName = null
+        reconnectFuture?.cancel(true)
+        reconnectFuture = null
+        reconnectAttempt = 0
         worker.execute {
             publishState(VpnConnectionState.DISCONNECTING, runningNodeName, "disconnecting…")
             shutdownCore()
@@ -225,8 +355,14 @@ class DotVpnService : VpnService() {
         }
     }
 
-    private fun publishState(state: VpnConnectionState, nodeName: String? = null, message: String? = null) {
-        VpnRuntime.update(state, nodeName, message)
+    private fun publishState(
+        state: VpnConnectionState,
+        nodeName: String? = null,
+        message: String? = null,
+        failure: VpnFailure? = null,
+        reconnectAttempt: Int = 0,
+    ) {
+        VpnRuntime.update(state, nodeName, message, failure, reconnectAttempt)
         runCatching { DotQuickTileService.requestRefresh(this) }
     }
 
@@ -290,7 +426,7 @@ class DotVpnService : VpnService() {
             .setContentText(if (status == "connected") traffic else (nodeName ?: "VLESS"))
             .setSubText(if (status == "connected") "dot. · connected" else null)
             .setContentIntent(pendingIntent)
-            .setOngoing(status == "connected" || status == "connecting")
+            .setOngoing(status == "connected" || status == "connecting" || status == "reconnecting" || status == "waiting for network")
             .setOnlyAlertOnce(true)
             .setSound(null)
             .addAction(0, "Disconnect", disconnectPending)
@@ -327,6 +463,7 @@ class DotVpnService : VpnService() {
         private const val CHANNEL_ID = "dot_vpn"
         private const val NOTIFICATION_ID = 1001
         private const val MTU = 1500
+        private val RECONNECT_DELAYS_SECONDS = longArrayOf(1L, 2L, 5L, 10L, 30L)
         private val SAFE_NOTIFICATION_ICON = R.drawable.ic_notification_dot
         private val SERVER_ONLY_REALITY_KEYS = listOf(
             "target", "dest", "type", "xver", "serverNames", "privateKey", "minClientVer", "maxClientVer",
