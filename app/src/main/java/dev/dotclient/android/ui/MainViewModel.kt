@@ -328,13 +328,15 @@ class MainViewModel(
         viewModelScope.launch { runAllNodeTests(subscriptionId, activateDelaySort = false, selectAutoAfter = true) }
     }
 
-    private fun resolveAutoProfile(group: Subscription = state.value.selectedSubscription ?: return null): VlessProfile? =
-        AutoNodeSelector.select(
-            profiles = group.profiles,
+    private fun resolveAutoProfile(group: Subscription? = state.value.selectedSubscription): VlessProfile? {
+        val target = group ?: return null
+        return AutoNodeSelector.select(
+            profiles = target.profiles,
             latenciesMs = state.value.nodeLatenciesMs,
             failedIds = state.value.nodeLatencyFailedIds,
-            preferredProfileId = group.selectedProfileId,
+            preferredProfileId = target.selectedProfileId,
         )
+    }
 
     private fun resolvedConnectionProfile(): VlessProfile? {
         val current = state.value
