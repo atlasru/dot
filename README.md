@@ -2,7 +2,7 @@
 
 Minimal VLESS client for Android with an AMOLED-first, Nothing-inspired interface.
 
-Current Android version: **0.2.1**
+Current Android version: **0.3.0**
 
 ## Features
 
@@ -13,6 +13,7 @@ Current Android version: **0.2.1**
 - subscription refresh reports with added, edited and deleted node counts/details
 - classified subscription update errors with redacted raw-error viewing while keeping existing nodes intact
 - node selection and persistence
+- AUTO node mode that picks the fastest successful tested node
 - per-subscription node sorting by provider order, delay or natural name order
 - delay sorting runs URL tests first when current latency data is unavailable
 - LIST / MAP views for nodes, with LIST as the default
@@ -23,11 +24,14 @@ Current Android version: **0.2.1**
 - node latency / connection tests through libXray URL testing
 - direct node selection and switching while connected
 - per-app split tunneling with all-apps, exclude-selected and only-selected modes
+- network-aware reconnect after Wi-Fi/mobile-data changes
+- capped reconnect backoff: 1s, 2s, 5s, 10s, then 30s
+- connection failure classification for DNS, timeout, refused, TLS, REALITY, TUN, config and Xray startup errors
 - Android VpnService + TUN integration
 - libXray / Xray-core backend
 - realtime upload/download traffic
 - foreground VPN notification with active node and traffic
-- Quick Settings connect/disconnect tile
+- Quick Settings connect/disconnect tile, including reconnect/waiting states
 - long-press Quick Settings tile opens dot.
 - AMOLED, Graphite and Matrix themes
 - selectable launcher icon variants
@@ -37,13 +41,31 @@ Current Android version: **0.2.1**
 
 Android uses a small three-destination layout:
 
-- **Home** is connection-first: the pixel orb, connection state, active node, traffic and connection test stay in one place
+- **Home** is connection-first: the pixel orb, connection state, active node, AUTO status, traffic and connection test stay in one place
 - **Nodes** contains subscription switching, refresh/test actions, sorting, LIST/MAP views and per-node controls
-- **Settings** contains subscriptions, split tunneling, appearance and app information
+- **Settings** contains subscriptions, AUTO node, split tunneling, connection state, appearance and app information
 
 The primary destinations use a floating pill navigation bar above the Android system navigation/gesture area. The selected destination is highlighted as an inner pill with the dot. red accent, while navigation automatically respects the system navigation inset.
 
 The redesign changes information hierarchy without removing the existing node map, latency tests, sorting, subscription management, theme selection or launcher-icon controls.
+
+## AUTO node
+
+AUTO node keeps the manual node list intact but removes the need to pick a server for normal use.
+
+When AUTO is enabled, dot. uses the current URL-test results for the selected subscription and chooses the successful node with the lowest measured latency. Failed nodes are excluded. If no fresh latency data exists, dot. runs the existing group URL test first and stores the selected AUTO node as the current profile so Quick Settings reconnects use the same choice.
+
+Manually selecting a node disables AUTO, making the change explicit instead of silently fighting the user's selection.
+
+## Connection reliability
+
+The Android VPN service observes default-network changes through `ConnectivityManager`.
+
+If Wi-Fi or mobile data disappears while a tunnel is active, dot. moves to **waiting for network** instead of treating the interruption as a permanent failure. When connectivity returns, the same VLESS profile and split-tunnel configuration are re-established automatically.
+
+Failed reconnects use capped backoff intervals of 1, 2, 5, 10 and 30 seconds; further retries stay at 30 seconds. A manual disconnect cancels the reconnect loop immediately.
+
+Startup failures are classified into readable categories such as DNS, timeout, connection refused, TLS, REALITY, TUN, invalid configuration and Xray startup failure. The latest category and reconnect attempt are exposed in Settings while the detailed runtime error stays local to the process.
 
 ## Split tunneling
 
@@ -123,6 +145,8 @@ app/build/outputs/apk/debug/app-debug.apk
 Treat subscription URLs containing user IDs or tokens as credentials. Do not publish real subscription links, UUIDs or unredacted runtime logs.
 
 Split tunneling stores only Android package names selected by the user. dot. does not need broad installed-package visibility and does not send the app selection anywhere.
+
+AUTO node selection and reconnect diagnostics remain local to the device. dot. does not upload latency history, network state or runtime VPN errors.
 
 ## Stack
 
