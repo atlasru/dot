@@ -104,6 +104,8 @@ fun DotApp(viewModel: MainViewModel) {
         when (state.vpnState) {
             VpnConnectionState.CONNECTED,
             VpnConnectionState.CONNECTING,
+            VpnConnectionState.WAITING_FOR_NETWORK,
+            VpnConnectionState.RECONNECTING,
             VpnConnectionState.DISCONNECTING -> viewModel.disconnect()
 
             VpnConnectionState.DISCONNECTED,
@@ -265,11 +267,16 @@ private fun HomeScreen(
         Text(connectionLabel(state), style = MaterialTheme.typography.headlineLarge)
         Spacer(Modifier.height(4.dp))
         Text(
-            when {
-                state.vpnConnected -> state.runningNodeName ?: selectedProfile?.name ?: "connected"
-                state.vpnBusy -> state.runningNodeName ?: selectedProfile?.name ?: "working…"
-                selectedProfile != null -> selectedProfile.name
-                else -> "select a node"
+            buildString {
+                if (state.autoNodeEnabled) append("⚡ AUTO · ")
+                append(
+                    when {
+                        state.vpnConnected -> state.runningNodeName ?: selectedProfile?.name ?: "connected"
+                        state.vpnBusy -> state.runningNodeName ?: selectedProfile?.name ?: "working…"
+                        selectedProfile != null -> selectedProfile.name
+                        else -> "select a node"
+                    },
+                )
             },
             color = Color(0xFF777777),
             style = MaterialTheme.typography.bodyMedium,
@@ -308,7 +315,7 @@ private fun HomeScreen(
             Text(
                 it,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                color = Color(0xFF666666),
+                color = if (state.vpnState == VpnConnectionState.ERROR) DotRed else Color(0xFF666666),
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -740,12 +747,20 @@ private fun SettingsScreen(
         } else {
             item {
                 SettingsSectionTitle("VPN")
+                SettingsToggle(
+                    name = "auto node",
+                    description = "pick the fastest tested node",
+                    enabled = state.autoNodeEnabled,
+                    onToggle = viewModel::setAutoNodeEnabled,
+                )
                 SettingsLink(
                     "split tunneling",
                     splitTunnelSummary(splitTunnelConfig),
                     onSplitTunnel,
                 )
                 SettingLine("status", connectionLabel(state))
+                state.vpnFailureCategory?.let { SettingLine("last error", it.label) }
+                if (state.reconnectAttempt > 0) SettingLine("reconnect", "attempt ${state.reconnectAttempt}")
                 Spacer(Modifier.height(20.dp))
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -816,6 +831,31 @@ private fun SettingsLink(name: String, value: String, onClick: () -> Unit) {
     ) {
         Text(name, color = Color(0xFFB8B8B8))
         Text("$value  ›", color = Color(0xFF666666), style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun SettingsToggle(
+    name: String,
+    description: String,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onToggle(!enabled) }.padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(name, color = Color(0xFFB8B8B8))
+            Spacer(Modifier.height(3.dp))
+            Text(description, color = Color(0xFF555555), style = MaterialTheme.typography.labelMedium)
+        }
+        Text(
+            if (enabled) "ON" else "OFF",
+            color = if (enabled) Color.White else Color(0xFF666666),
+            style = MaterialTheme.typography.labelMedium,
+        )
     }
 }
 
@@ -1145,6 +1185,8 @@ private fun connectionLabel(state: DotUiState): String = when {
     state.requestingVpnPermission -> "permission"
     state.vpnState == VpnConnectionState.CONNECTING -> "connecting"
     state.vpnState == VpnConnectionState.CONNECTED -> "connected"
+    state.vpnState == VpnConnectionState.WAITING_FOR_NETWORK -> "waiting for network"
+    state.vpnState == VpnConnectionState.RECONNECTING -> "reconnecting"
     state.vpnState == VpnConnectionState.DISCONNECTING -> "disconnecting"
     state.vpnState == VpnConnectionState.ERROR -> "error"
     else -> "offline"
