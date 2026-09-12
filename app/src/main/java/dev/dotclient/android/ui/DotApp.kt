@@ -169,9 +169,7 @@ fun DotApp(viewModel: MainViewModel) {
                 config = splitTunnelConfig,
                 vpnConnected = state.vpnConnected,
                 onChange = updateSplitTunnel,
-                onReconnect = {
-                    state.selectedProfileId?.let(viewModel::switchProfile)
-                },
+                onReconnect = viewModel::reconnectCurrentProfile,
                 onBack = { screen = Screen.SETTINGS },
                 modifier = Modifier.padding(padding),
             )
