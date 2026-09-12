@@ -23,6 +23,8 @@ class DotQuickTileService : TileService() {
         when (VpnRuntime.state.value.state) {
             VpnConnectionState.CONNECTED,
             VpnConnectionState.CONNECTING,
+            VpnConnectionState.WAITING_FOR_NETWORK,
+            VpnConnectionState.RECONNECTING,
             VpnConnectionState.DISCONNECTING -> {
                 startService(Intent(this, DotVpnService::class.java).setAction(DotVpnService.ACTION_DISCONNECT))
                 setTileState(Tile.STATE_INACTIVE, "dot.", "disconnecting")
@@ -63,6 +65,8 @@ class DotQuickTileService : TileService() {
         val runtime = VpnRuntime.state.value
         val active = runtime.state == VpnConnectionState.CONNECTED ||
             runtime.state == VpnConnectionState.CONNECTING ||
+            runtime.state == VpnConnectionState.WAITING_FOR_NETWORK ||
+            runtime.state == VpnConnectionState.RECONNECTING ||
             runtime.state == VpnConnectionState.DISCONNECTING
 
         setTileState(
@@ -71,6 +75,8 @@ class DotQuickTileService : TileService() {
             when (runtime.state) {
                 VpnConnectionState.CONNECTED -> runtime.nodeName ?: "connected"
                 VpnConnectionState.CONNECTING -> "connecting"
+                VpnConnectionState.WAITING_FOR_NETWORK -> "waiting for network"
+                VpnConnectionState.RECONNECTING -> "reconnecting"
                 VpnConnectionState.DISCONNECTING -> "disconnecting"
                 VpnConnectionState.ERROR -> "error"
                 VpnConnectionState.DISCONNECTED -> "offline"
