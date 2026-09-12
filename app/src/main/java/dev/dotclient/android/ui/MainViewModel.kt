@@ -63,16 +63,16 @@ class MainViewModel(
                         connectionTestError = if (runtime.state == VpnConnectionState.CONNECTED) it.connectionTestError else null,
                     )
                 }
+
+                if (runtime.state == VpnConnectionState.DISCONNECTED && state.value.autoNodeEnabled) {
+                    state.value.selectedSubscription?.let { ensureAutoNodeData(it.id) }
+                }
             }
         }
 
         state.value.selectedSubscription
             ?.takeIf { it.sortMode == NodeSortMode.DELAY && it.profiles.isNotEmpty() }
             ?.let { ensureDelaySortData(it.id) }
-
-        if (state.value.autoNodeEnabled) {
-            state.value.selectedSubscription?.let { ensureAutoNodeData(it.id) }
-        }
     }
 
     private fun loadInitialState(): DotUiState {
@@ -309,12 +309,18 @@ class MainViewModel(
             mutableState.update { it.copy(message = "AUTO · ${selected.name}") }
             return
         }
+
+        if (state.value.vpnConnected || state.value.vpnBusy) {
+            mutableState.update { it.copy(message = "AUTO enabled · node test will refresh after disconnect") }
+            return
+        }
         ensureAutoNodeData(group.id)
     }
 
     private fun ensureAutoNodeData(subscriptionId: String) {
         val group = state.value.subscriptions.firstOrNull { it.id == subscriptionId } ?: return
         if (group.profiles.isEmpty() || state.value.testingNodeIds.isNotEmpty()) return
+        if (state.value.vpnConnected || state.value.vpnBusy) return
         val tested = group.profiles.all { profile ->
             profile.id in state.value.nodeLatenciesMs || profile.id in state.value.nodeLatencyFailedIds
         }
@@ -387,6 +393,11 @@ class MainViewModel(
     }
 
     fun requestVpnPermission(): Boolean {
+        if (state.value.autoNodeEnabled && state.value.testingNodeIds.isNotEmpty()) {
+            mutableState.update { it.copy(message = "AUTO · testing nodes…") }
+            return false
+        }
+
         val profile = resolvedConnectionProfile()
         if (profile == null) {
             mutableState.update { it.copy(message = "select a node first") }
@@ -422,13 +433,24 @@ class MainViewModel(
                 connectionTestError = null,
             )
         }
+        startVpn(profile)
+    }
 
-        val application = getApplication<Application>()
-        val intent = Intent(application, DotVpnService::class.java)
-            .setAction(DotVpnService.ACTION_CONNECT)
-            .putExtra(DotVpnService.EXTRA_VLESS_URI, profile.rawUri)
-            .putExtra(DotVpnService.EXTRA_NODE_NAME, profile.name)
-        ContextCompat.startForegroundService(application, intent)
+    fun reconnectCurrentProfile() {
+        val profile = resolvedConnectionProfile() ?: return
+        mutableState.update {
+            it.copy(
+                vpnState = VpnConnectionState.CONNECTING,
+                message = if (it.autoNodeEnabled) "AUTO · reconnecting ${profile.name}…" else "reconnecting ${profile.name}…",
+                vpnFailureCategory = null,
+                vpnFailureDetail = null,
+                reconnectAttempt = 0,
+                connectionTestRunning = false,
+                connectionTestLatencyMs = null,
+                connectionTestError = null,
+            )
+        }
+        startVpn(profile)
     }
 
     fun disconnect() {
@@ -634,6 +656,12 @@ class MainViewModel(
                 connectionTestError = null,
             )
         }
+        startVpn(profile)
+    }
+
+    fun redactedSubscriptionUrl(url: String): String = SecretRedactor.url(url)
+
+    private fun startVpn(profile: VlessProfile) {
         val application = getApplication<Application>()
         val intent = Intent(application, DotVpnService::class.java)
             .setAction(DotVpnService.ACTION_CONNECT)
@@ -641,8 +669,6 @@ class MainViewModel(
             .putExtra(DotVpnService.EXTRA_NODE_NAME, profile.name)
         ContextCompat.startForegroundService(application, intent)
     }
-
-    fun redactedSubscriptionUrl(url: String): String = SecretRedactor.url(url)
 
     private fun persist() {
         val current = state.value
