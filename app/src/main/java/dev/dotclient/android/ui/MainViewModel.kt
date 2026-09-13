@@ -9,6 +9,7 @@ import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.model.VlessProfile
 import dev.dotclient.android.core.parser.SubscriptionDecoder
+import dev.dotclient.android.core.reliability.AutoNodeSelector
 import dev.dotclient.android.core.subscription.SecretRedactor
 import dev.dotclient.android.core.subscription.SubscriptionClient
 import dev.dotclient.android.core.subscription.SubscriptionContentException
@@ -44,9 +45,14 @@ class MainViewModel(
                         requestingVpnPermission = false,
                         vpnPermissionGranted = runtime.state == VpnConnectionState.CONNECTING ||
                             runtime.state == VpnConnectionState.CONNECTED ||
+                            runtime.state == VpnConnectionState.WAITING_FOR_NETWORK ||
+                            runtime.state == VpnConnectionState.RECONNECTING ||
                             runtime.state == VpnConnectionState.DISCONNECTING,
                         vpnState = runtime.state,
                         message = runtime.message,
+                        vpnFailureCategory = runtime.failureCategory,
+                        vpnFailureDetail = runtime.failureDetail,
+                        reconnectAttempt = runtime.reconnectAttempt,
                         downloadBytesPerSecond = runtime.downloadBytesPerSecond,
                         uploadBytesPerSecond = runtime.uploadBytesPerSecond,
                         sessionDownloadBytes = runtime.sessionDownloadBytes,
@@ -56,6 +62,10 @@ class MainViewModel(
                         connectionTestLatencyMs = if (runtime.state == VpnConnectionState.CONNECTED) it.connectionTestLatencyMs else null,
                         connectionTestError = if (runtime.state == VpnConnectionState.CONNECTED) it.connectionTestError else null,
                     )
+                }
+
+                if (runtime.state == VpnConnectionState.DISCONNECTED && state.value.autoNodeEnabled) {
+                    state.value.selectedSubscription?.let { ensureAutoNodeData(it.id) }
                 }
             }
         }
@@ -70,6 +80,7 @@ class MainViewModel(
         return DotUiState(
             subscriptions = stored.subscriptions,
             selectedSubscriptionId = stored.selectedSubscriptionId,
+            autoNodeEnabled = uiPreferences.getBoolean("auto_node", false),
             themeMode = DotThemeMode.fromStorage(uiPreferences.getString("theme", null)),
         )
     }
@@ -203,6 +214,7 @@ class MainViewModel(
                 )
             }
             persist()
+            if (state.value.autoNodeEnabled && state.value.selectedSubscriptionId == id) ensureAutoNodeData(id)
         }
     }
 
@@ -256,9 +268,18 @@ class MainViewModel(
         mutableState.update { it.copy(selectedSubscriptionId = id, message = null) }
         persist()
         ensureDelaySortData(id)
+        if (state.value.autoNodeEnabled) ensureAutoNodeData(id)
     }
 
     fun selectProfile(id: String) {
+        if (state.value.autoNodeEnabled) {
+            uiPreferences.edit().putBoolean("auto_node", false).apply()
+            mutableState.update { it.copy(autoNodeEnabled = false) }
+        }
+        selectProfileInternal(id)
+    }
+
+    private fun selectProfileInternal(id: String) {
         val selectedGroupId = state.value.selectedSubscriptionId ?: return
         mutableState.update { old ->
             old.copy(
@@ -273,6 +294,62 @@ class MainViewModel(
             )
         }
         persist()
+    }
+
+    fun setAutoNodeEnabled(enabled: Boolean) {
+        uiPreferences.edit().putBoolean("auto_node", enabled).apply()
+        mutableState.update { it.copy(autoNodeEnabled = enabled, message = null) }
+        if (!enabled) return
+
+        val group = state.value.selectedSubscription ?: return
+        val selected = resolveAutoProfile(group)
+        val hasFreshResult = selected != null && selected.id in state.value.nodeLatenciesMs
+        if (hasFreshResult) {
+            selectProfileInternal(selected!!.id)
+            mutableState.update { it.copy(message = "AUTO · ${selected.name}") }
+            return
+        }
+
+        if (state.value.vpnConnected || state.value.vpnBusy) {
+            mutableState.update { it.copy(message = "AUTO enabled · node test will refresh after disconnect") }
+            return
+        }
+        ensureAutoNodeData(group.id)
+    }
+
+    private fun ensureAutoNodeData(subscriptionId: String) {
+        val group = state.value.subscriptions.firstOrNull { it.id == subscriptionId } ?: return
+        if (group.profiles.isEmpty() || state.value.testingNodeIds.isNotEmpty()) return
+        if (state.value.vpnConnected || state.value.vpnBusy) return
+        val tested = group.profiles.all { profile ->
+            profile.id in state.value.nodeLatenciesMs || profile.id in state.value.nodeLatencyFailedIds
+        }
+        if (tested) {
+            resolveAutoProfile(group)?.let { selected ->
+                selectProfileInternal(selected.id)
+                mutableState.update { it.copy(message = "AUTO · ${selected.name}") }
+            }
+            return
+        }
+        viewModelScope.launch { runAllNodeTests(subscriptionId, activateDelaySort = false, selectAutoAfter = true) }
+    }
+
+    private fun resolveAutoProfile(group: Subscription? = state.value.selectedSubscription): VlessProfile? {
+        val target = group ?: return null
+        return AutoNodeSelector.select(
+            profiles = target.profiles,
+            latenciesMs = state.value.nodeLatenciesMs,
+            failedIds = state.value.nodeLatencyFailedIds,
+            preferredProfileId = target.selectedProfileId,
+        )
+    }
+
+    private fun resolvedConnectionProfile(): VlessProfile? {
+        val current = state.value
+        val group = current.selectedSubscription ?: return null
+        val profile = if (current.autoNodeEnabled) resolveAutoProfile(group) else current.selectedProfile
+        if (profile != null && profile.id != group.selectedProfileId) selectProfileInternal(profile.id)
+        return profile
     }
 
     fun setNodeSortMode(mode: NodeSortMode) {
@@ -316,7 +393,13 @@ class MainViewModel(
     }
 
     fun requestVpnPermission(): Boolean {
-        if (state.value.selectedProfile == null) {
+        if (state.value.autoNodeEnabled && state.value.testingNodeIds.isNotEmpty()) {
+            mutableState.update { it.copy(message = "AUTO · testing nodes…") }
+            return false
+        }
+
+        val profile = resolvedConnectionProfile()
+        if (profile == null) {
             mutableState.update { it.copy(message = "select a node first") }
             return false
         }
@@ -324,14 +407,14 @@ class MainViewModel(
         mutableState.update {
             it.copy(
                 requestingVpnPermission = true,
-                message = "requesting Android VPN permission…",
+                message = if (it.autoNodeEnabled) "AUTO · ${profile.name}" else "requesting Android VPN permission…",
             )
         }
         return true
     }
 
     fun onVpnPermissionGranted() {
-        val profile = state.value.selectedProfile
+        val profile = resolvedConnectionProfile()
         if (profile == null) {
             mutableState.update { it.copy(requestingVpnPermission = false, message = "select a node first") }
             return
@@ -342,18 +425,32 @@ class MainViewModel(
                 requestingVpnPermission = false,
                 vpnPermissionGranted = true,
                 vpnState = VpnConnectionState.CONNECTING,
-                message = "starting VLESS tunnel…",
+                message = if (it.autoNodeEnabled) "AUTO · connecting ${profile.name}…" else "starting VLESS tunnel…",
+                vpnFailureCategory = null,
+                vpnFailureDetail = null,
+                reconnectAttempt = 0,
                 connectionTestLatencyMs = null,
                 connectionTestError = null,
             )
         }
+        startVpn(profile)
+    }
 
-        val application = getApplication<Application>()
-        val intent = Intent(application, DotVpnService::class.java)
-            .setAction(DotVpnService.ACTION_CONNECT)
-            .putExtra(DotVpnService.EXTRA_VLESS_URI, profile.rawUri)
-            .putExtra(DotVpnService.EXTRA_NODE_NAME, profile.name)
-        ContextCompat.startForegroundService(application, intent)
+    fun reconnectCurrentProfile() {
+        val profile = resolvedConnectionProfile() ?: return
+        mutableState.update {
+            it.copy(
+                vpnState = VpnConnectionState.CONNECTING,
+                message = if (it.autoNodeEnabled) "AUTO · reconnecting ${profile.name}…" else "reconnecting ${profile.name}…",
+                vpnFailureCategory = null,
+                vpnFailureDetail = null,
+                reconnectAttempt = 0,
+                connectionTestRunning = false,
+                connectionTestLatencyMs = null,
+                connectionTestError = null,
+            )
+        }
+        startVpn(profile)
     }
 
     fun disconnect() {
@@ -426,7 +523,11 @@ class MainViewModel(
         viewModelScope.launch { runAllNodeTests(group.id, activateDelaySort = false) }
     }
 
-    private suspend fun runAllNodeTests(subscriptionId: String, activateDelaySort: Boolean) {
+    private suspend fun runAllNodeTests(
+        subscriptionId: String,
+        activateDelaySort: Boolean,
+        selectAutoAfter: Boolean = false,
+    ) {
         val group = state.value.subscriptions.firstOrNull { it.id == subscriptionId } ?: return
         val profiles = group.profiles
         if (profiles.isEmpty() || state.value.testingNodeIds.isNotEmpty()) return
@@ -439,7 +540,7 @@ class MainViewModel(
                 nodeLatenciesMs = it.nodeLatenciesMs.filterKeys { id -> id !in profileIds },
                 nodeLatencyFailedIds = it.nodeLatencyFailedIds - profileIds,
                 pendingDelaySortSubscriptionId = if (delaySortPending) subscriptionId else it.pendingDelaySortSubscriptionId,
-                message = null,
+                message = if (selectAutoAfter) "AUTO · testing nodes…" else null,
             )
         }
 
@@ -475,10 +576,19 @@ class MainViewModel(
                     current.subscriptions
                 },
                 pendingDelaySortSubscriptionId = current.pendingDelaySortSubscriptionId.takeUnless { it == subscriptionId },
-                message = "URL test complete · cp.cloudflare.com",
+                message = if (selectAutoAfter) current.message else "URL test complete · cp.cloudflare.com",
             )
         }
         if (activateDelaySort) persist()
+
+        if (selectAutoAfter && state.value.autoNodeEnabled && state.value.selectedSubscriptionId == subscriptionId) {
+            state.value.selectedSubscription?.let { latest ->
+                resolveAutoProfile(latest)?.let { selected ->
+                    selectProfileInternal(selected.id)
+                    mutableState.update { it.copy(message = "AUTO · ${selected.name}") }
+                }
+            }
+        }
     }
 
     fun testConnection() {
@@ -539,11 +649,19 @@ class MainViewModel(
             it.copy(
                 vpnState = VpnConnectionState.CONNECTING,
                 message = "switching to ${profile.name}…",
+                vpnFailureCategory = null,
+                vpnFailureDetail = null,
                 connectionTestRunning = false,
                 connectionTestLatencyMs = null,
                 connectionTestError = null,
             )
         }
+        startVpn(profile)
+    }
+
+    fun redactedSubscriptionUrl(url: String): String = SecretRedactor.url(url)
+
+    private fun startVpn(profile: VlessProfile) {
         val application = getApplication<Application>()
         val intent = Intent(application, DotVpnService::class.java)
             .setAction(DotVpnService.ACTION_CONNECT)
@@ -551,8 +669,6 @@ class MainViewModel(
             .putExtra(DotVpnService.EXTRA_NODE_NAME, profile.name)
         ContextCompat.startForegroundService(application, intent)
     }
-
-    fun redactedSubscriptionUrl(url: String): String = SecretRedactor.url(url)
 
     private fun persist() {
         val current = state.value

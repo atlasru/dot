@@ -44,6 +44,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -104,6 +105,8 @@ fun DotApp(viewModel: MainViewModel) {
         when (state.vpnState) {
             VpnConnectionState.CONNECTED,
             VpnConnectionState.CONNECTING,
+            VpnConnectionState.WAITING_FOR_NETWORK,
+            VpnConnectionState.RECONNECTING,
             VpnConnectionState.DISCONNECTING -> viewModel.disconnect()
 
             VpnConnectionState.DISCONNECTED,
@@ -117,6 +120,26 @@ fun DotApp(viewModel: MainViewModel) {
                     beginVpnPermissionFlow()
                 }
             }
+        }
+    }
+
+    LaunchedEffect(
+        state.autoNodeEnabled,
+        state.testingNodeIds,
+        state.message,
+        state.selectedProfileId,
+        state.vpnState,
+    ) {
+        val autoSelectionReady = state.autoNodeEnabled &&
+            state.testingNodeIds.isEmpty() &&
+            state.selectedProfileId != null &&
+            state.message?.startsWith("AUTO · ") == true &&
+            !state.message.orEmpty().contains("testing", ignoreCase = true)
+
+        if (autoSelectionReady) {
+            val selectedId = state.selectedProfileId ?: return@LaunchedEffect
+            viewModel.setAutoNodeEnabled(false)
+            if (state.vpnConnected) viewModel.switchProfile(selectedId) else toggleVpn()
         }
     }
 
@@ -167,9 +190,7 @@ fun DotApp(viewModel: MainViewModel) {
                 config = splitTunnelConfig,
                 vpnConnected = state.vpnConnected,
                 onChange = updateSplitTunnel,
-                onReconnect = {
-                    state.selectedProfileId?.let(viewModel::switchProfile)
-                },
+                onReconnect = viewModel::reconnectCurrentProfile,
                 onBack = { screen = Screen.SETTINGS },
                 modifier = Modifier.padding(padding),
             )
@@ -308,7 +329,7 @@ private fun HomeScreen(
             Text(
                 it,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                color = Color(0xFF666666),
+                color = if (state.vpnState == VpnConnectionState.ERROR) DotRed else Color(0xFF666666),
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -424,6 +445,13 @@ private fun NodesScreen(
                 contentPadding = PaddingValues(top = 7.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
+                item(key = "auto-node") {
+                    AutoNodeRow(
+                        state = state,
+                        onClick = { viewModel.setAutoNodeEnabled(true) },
+                    )
+                    Spacer(Modifier.height(5.dp))
+                }
                 items(state.sortedProfiles, key = { it.id }) { profile ->
                     NodeRow(
                         profile = profile,
@@ -448,6 +476,62 @@ private fun NodesScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun AutoNodeRow(state: DotUiState, onClick: () -> Unit) {
+    val profileIds = state.profiles.mapTo(hashSetOf()) { it.id }
+    val bestLatency = state.nodeLatenciesMs
+        .filterKeys { it in profileIds }
+        .minByOrNull { it.value }
+    val autoTesting = state.autoNodeEnabled && state.testingNodeIds.isNotEmpty()
+    val canUseCachedWhileConnected = !state.vpnConnected || bestLatency != null
+    val enabled = !state.vpnBusy && state.testingNodeIds.isEmpty() && canUseCachedWhileConnected
+
+    Row(
+        Modifier.fillMaxWidth()
+            .background(Color(0xFF121212), RoundedCornerShape(7.dp))
+            .border(1.dp, if (autoTesting) Color(0xFF444444) else Color(0xFF282828), RoundedCornerShape(7.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 13.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(28.dp)
+                .background(Color(0xFF1B1B1B), CircleShape)
+                .border(1.dp, Color(0xFF333333), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("⚡", style = MaterialTheme.typography.bodyMedium)
+        }
+        Spacer(Modifier.width(11.dp))
+        Column(Modifier.weight(1f)) {
+            Text("AUTO NODE", color = if (enabled || autoTesting) Color.White else Color(0xFF666666), style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                when {
+                    autoTesting -> "testing nodes and choosing the fastest…"
+                    state.vpnConnected && bestLatency == null -> "disconnect once to measure nodes"
+                    bestLatency != null -> "connect to the best measured node"
+                    else -> "test nodes, choose the fastest and connect"
+                },
+                color = Color(0xFF5F5F5F),
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            when {
+                autoTesting -> "··"
+                bestLatency != null -> "${bestLatency.value} ms"
+                else -> "›"
+            },
+            color = if (bestLatency != null) Color(0xFFB8B8B8) else Color(0xFF666666),
+            style = MaterialTheme.typography.labelMedium,
+        )
     }
 }
 
@@ -746,6 +830,8 @@ private fun SettingsScreen(
                     onSplitTunnel,
                 )
                 SettingLine("status", connectionLabel(state))
+                state.vpnFailureCategory?.let { SettingLine("last error", it.label) }
+                if (state.reconnectAttempt > 0) SettingLine("reconnect", "attempt ${state.reconnectAttempt}")
                 Spacer(Modifier.height(20.dp))
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -1145,6 +1231,8 @@ private fun connectionLabel(state: DotUiState): String = when {
     state.requestingVpnPermission -> "permission"
     state.vpnState == VpnConnectionState.CONNECTING -> "connecting"
     state.vpnState == VpnConnectionState.CONNECTED -> "connected"
+    state.vpnState == VpnConnectionState.WAITING_FOR_NETWORK -> "waiting for network"
+    state.vpnState == VpnConnectionState.RECONNECTING -> "reconnecting"
     state.vpnState == VpnConnectionState.DISCONNECTING -> "disconnecting"
     state.vpnState == VpnConnectionState.ERROR -> "error"
     else -> "offline"
