@@ -341,3 +341,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @media (max-width: 960px) { .workspace-head, .nodes-toolbar { flex-wrap: wrap; gap: 12px; } .sidebar { width: 190px; } }
 
 .map-error { position: absolute; top: 8px; left: 10px; right: 10px; color: #ddd; font-size: 11px; pointer-events: none; z-index: 1; }
+.node-row-card { grid-template-columns: 42px minmax(0, 1fr) 78px; }
+.node-main { display: flex; }
+.nodes-toolbar > label { font-size: 10px; letter-spacing: .06em; color: var(--muted-2); }
+.nodes-toolbar select { font-size: 12px; color: var(--fg); }
+.subscription { display: flex; align-items: center; }
+.subscription > .grow { min-width: 180px; }
+.subscription > button { flex: 0 0 auto; }

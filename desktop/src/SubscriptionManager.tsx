@@ -66,9 +66,9 @@ export default function SubscriptionManager({ groups, prefs, vpn, notices, onCha
     </section>
     <section className="panel"><div className="panel-title">AUTOMATIC REFRESH</div>
       <label className="checkbox-label"><input type="checkbox" disabled={busy} checked={prefs.refresh_on_start} onChange={e => { const enabled = e.target.checked; action(async () => { await invoke("set_refresh_policy", { onStart: enabled, hours: prefs.refresh_interval_hours }); }); }} /> Refresh subscriptions when dot. starts</label>
-      <label>INTERVAL<select disabled={busy} value={prefs.refresh_interval_hours} onChange={e => { const hours = Number(e.target.value); action(async () => { await invoke("set_refresh_policy", { onStart: prefs.refresh_on_start, hours }); }); }}>
+      <label htmlFor="refresh-interval">INTERVAL</label><select id="refresh-interval" disabled={busy} value={prefs.refresh_interval_hours} onChange={e => { const hours = Number(e.target.value); action(async () => { await invoke("set_refresh_policy", { onStart: prefs.refresh_on_start, hours }); }); }}>
         <option value={0}>OFF</option>{[1, 6, 12, 24].map(h => <option key={h} value={h}>EVERY {h} {h === 1 ? "HOUR" : "HOURS"}</option>)}
-      </select></label>
+      </select>
       <p className="muted">Works while dot. is running, including in the tray. Local imports are skipped. Existing VPN sessions are not restarted.</p>
     </section>
   </>;
