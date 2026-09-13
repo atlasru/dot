@@ -1,6 +1,13 @@
 use std::{fs, path::{Path, PathBuf}, sync::Mutex};
 
-use crate::model::{AppPreferences, AppTheme, GroupView, PersistedState, SelectionView, SubscriptionGroup, VlessNode};
+use crate::{
+    model::{
+        AppPreferences, AppTheme, GroupView, NodeEditView, NodeLatency, NodeSortMode, PersistedState,
+        SelectionView, SubscriptionGroup, SubscriptionRefreshResult, VlessNode,
+    },
+    node_sort::sort_nodes,
+    subscription_diff,
+};
 
 pub struct Store { path: PathBuf, inner: Mutex<PersistedState> }
 
@@ -12,11 +19,13 @@ impl Store {
             serde_json::from_slice(&bytes).map_err(|e| format!("failed to parse state: {e}"))?
         } else { PersistedState::default() };
         normalize_selection(&mut state);
+        prune_runtime_metadata(&mut state);
         Ok(Self { path, inner: Mutex::new(state) })
     }
 
     pub fn groups(&self) -> Vec<GroupView> {
-        self.inner.lock().expect("store poisoned").groups.iter().map(GroupView::from).collect()
+        let state = self.inner.lock().expect("store poisoned");
+        state.groups.iter().map(|group| build_group_view(&state, group)).collect()
     }
 
     pub fn selection(&self) -> SelectionView {
@@ -27,26 +36,43 @@ impl Store {
     pub fn preferences(&self) -> AppPreferences { self.inner.lock().expect("store poisoned").preferences.clone() }
 
     pub fn set_theme(&self, theme: AppTheme) -> Result<AppPreferences, String> {
-        let mut s = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+        let mut guard = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+        let mut s = guard.clone();
         s.preferences.theme = theme;
         self.save_locked(&s)?;
+        *guard = s.clone();
         Ok(s.preferences.clone())
     }
 
     pub fn set_close_to_tray(&self, enabled: bool) -> Result<AppPreferences, String> {
-        let mut s = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+        let mut guard = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+        let mut s = guard.clone();
         s.preferences.close_to_tray = enabled;
         self.save_locked(&s)?;
+        *guard = s.clone();
         Ok(s.preferences.clone())
     }
 
+    pub fn set_sort_mode(&self, group_id: &str, mode: NodeSortMode) -> Result<GroupView, String> {
+        let mut guard = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+        let mut s = guard.clone();
+        if !s.groups.iter().any(|group| group.id == group_id) { return Err("subscription group not found".into()); }
+        s.sort_modes.insert(group_id.to_string(), mode);
+        self.save_locked(&s)?;
+        *guard = s.clone();
+        let group = s.groups.iter().find(|group| group.id == group_id).expect("group checked above");
+        Ok(build_group_view(&s, group))
+    }
+
     pub fn set_selection(&self, group_id: &str, node_id: &str) -> Result<SelectionView, String> {
-        let mut s = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+        let mut guard = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+        let mut s = guard.clone();
         let valid = s.groups.iter().any(|g| g.id == group_id && g.nodes.iter().any(|n| n.id == node_id));
         if !valid { return Err("selected node does not exist in subscription group".into()); }
         s.selected_group_id = Some(group_id.into());
         s.selected_node_id = Some(node_id.into());
         self.save_locked(&s)?;
+        *guard = s.clone();
         Ok(SelectionView { group_id: s.selected_group_id.clone(), node_id: s.selected_node_id.clone() })
     }
 
@@ -58,32 +84,158 @@ impl Store {
     }
 
     pub fn upsert_group(&self, group: SubscriptionGroup) -> Result<GroupView, String> {
-        let mut s = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+        let mut guard = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+        let mut s = guard.clone();
         let id = group.id.clone();
         if let Some(existing) = s.groups.iter_mut().find(|g| g.id == id) { *existing = group; } else { s.groups.push(group); }
         normalize_selection(&mut s);
+        prune_runtime_metadata(&mut s);
         self.save_locked(&s)?;
-        s.groups.iter().find(|g| g.id == id).map(GroupView::from).ok_or_else(|| "subscription group disappeared after save".into())
+        *guard = s.clone();
+        s.groups.iter().find(|g| g.id == id).map(|group| build_group_view(&s, group)).ok_or_else(|| "subscription group disappeared after save".into())
     }
 
-    pub fn replace_group_nodes(&self, group_id: &str, nodes: Vec<VlessNode>, updated_at_ms: u64) -> Result<GroupView, String> {
-        let mut s = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+    pub fn apply_refresh(&self, group_id: &str, nodes: Vec<VlessNode>, updated_at_ms: u64) -> Result<SubscriptionRefreshResult, String> {
+        self.refresh_transaction(group_id, nodes, updated_at_ms, None)
+    }
+
+    pub fn apply_source_refresh(&self, group_id: &str, nodes: Vec<VlessNode>, updated_at_ms: u64, name: String, url: String) -> Result<SubscriptionRefreshResult, String> {
+        self.refresh_transaction(group_id, nodes, updated_at_ms, Some((name, url)))
+    }
+
+    fn refresh_transaction(&self, group_id: &str, nodes: Vec<VlessNode>, updated_at_ms: u64, source: Option<(String, String)>) -> Result<SubscriptionRefreshResult, String> {
+        if nodes.is_empty() { return Err("subscription contains no usable nodes".into()); }
+        let mut guard = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+        let mut s = guard.clone();
         let index = s.groups.iter().position(|g| g.id == group_id).ok_or("subscription group not found")?;
+        if let Some((name, url)) = source {
+            if s.groups.iter().any(|g| g.id != group_id && g.url == url) { return Err("this subscription URL already exists".into()); }
+            s.groups[index].name = name;
+            s.groups[index].url = url;
+        }
+        let old_nodes = s.groups[index].nodes.clone();
+        let diff = subscription_diff::calculate(&old_nodes, &nodes);
+
+        let selected_replacement = if s.selected_group_id.as_deref() == Some(group_id) {
+            s.selected_node_id.as_deref().and_then(|old_id| diff.replacement_for(old_id)).map(|node| node.id.clone())
+        } else { None };
+
+        let selected_node_removed = s.selected_group_id.as_deref() == Some(group_id)
+            && s.selected_node_id.is_some() && selected_replacement.is_none();
+        let old_favorites: Vec<String> = old_nodes.iter().filter(|n| s.favorites.contains(&n.id)).map(|n| n.id.clone()).collect();
+        for old_id in old_favorites {
+            if let Some(node) = diff.replacement_for(&old_id) { s.favorites.insert(node.id.clone()); }
+        }
+        let old_latencies: Vec<(String, NodeLatency)> = old_nodes.iter().filter_map(|node| s.latencies.get(&node.id).cloned().map(|latency| (node.id.clone(), latency))).collect();
+        for (old_id, latency) in old_latencies {
+            if let Some(replacement) = diff.replacement_for(&old_id) {
+                s.latencies.insert(replacement.id.clone(), NodeLatency {
+                    node_id: replacement.id.clone(),
+                    latency_ms: latency.latency_ms,
+                    failed: latency.failed,
+                    tested_at_ms: latency.tested_at_ms,
+                });
+            }
+        }
+
         s.groups[index].nodes = nodes;
         s.groups[index].updated_at_ms = updated_at_ms;
+        if let Some(replacement_id) = selected_replacement {
+            s.selected_node_id = Some(replacement_id);
+        }
         normalize_selection(&mut s);
-        let view = GroupView::from(&s.groups[index]);
+        prune_runtime_metadata(&mut s);
         self.save_locked(&s)?;
-        Ok(view)
+        *guard = s.clone();
+
+        let group = build_group_view(&s, &s.groups[index]);
+        Ok(SubscriptionRefreshResult {
+            group,
+            added: diff.added.iter().map(Into::into).collect(),
+            deleted: diff.deleted.iter().map(Into::into).collect(),
+            edited: diff.edited.iter().map(|edit| NodeEditView {
+                before: (&edit.before).into(),
+                after: (&edit.after).into(),
+                changed_fields: edit.changed_fields.clone(),
+            }).collect(),
+            unchanged: diff.unchanged.len(),
+            selected_node_removed,
+        })
+    }
+
+    pub fn record_latency(&self, node_id: &str, latency_ms: Option<u64>, failed: bool, tested_at_ms: u64) -> Result<(), String> {
+        let mut guard = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+        let mut s = guard.clone();
+        if !s.groups.iter().any(|group| group.nodes.iter().any(|node| node.id == node_id)) {
+            return Err("node not found".into());
+        }
+        s.latencies.insert(node_id.to_string(), NodeLatency { node_id: node_id.to_string(), latency_ms, failed, tested_at_ms });
+        self.save_locked(&s)?;
+        *guard = s;
+        Ok(())
     }
 
     pub fn group_url(&self, group_id: &str) -> Result<String, String> {
         self.inner.lock().map_err(|_| "store lock poisoned".to_string())?.groups.iter().find(|g| g.id == group_id).map(|g| g.url.clone()).ok_or_else(|| "subscription group not found".into())
     }
 
+    pub fn group_nodes(&self, group_id: &str) -> Result<Vec<VlessNode>, String> {
+        self.inner.lock().map_err(|_| "store lock poisoned".to_string())?.groups.iter().find(|g| g.id == group_id).map(|g| g.nodes.clone()).ok_or_else(|| "subscription group not found".into())
+    }
+
     pub fn node(&self, group_id: &str, node_id: &str) -> Result<VlessNode, String> {
         let s = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
         s.groups.iter().find(|g| g.id == group_id).and_then(|g| g.nodes.iter().find(|n| n.id == node_id)).cloned().ok_or_else(|| "node not found".into())
+    }
+
+    pub fn edit_group(&self, group_id: &str, name: String, url: String) -> Result<(), String> {
+        self.transaction(|s| {
+            if !url.is_empty() && s.groups.iter().any(|g| g.id != group_id && g.url == url) {
+                return Err("this subscription URL already exists".into());
+            }
+            let group = s.groups.iter_mut().find(|g| g.id == group_id).ok_or("subscription group not found")?;
+            if group.url != url { group.updated_at_ms = 0; }
+            group.name = name;
+            group.url = url;
+            Ok(())
+        })
+    }
+
+    pub fn remove_group(&self, group_id: &str) -> Result<(), String> {
+        self.transaction(|s| {
+            if !s.groups.iter().any(|g| g.id == group_id) { return Err("subscription group not found".into()); }
+            s.groups.retain(|g| g.id != group_id);
+            normalize_selection(s);
+            prune_runtime_metadata(s);
+            Ok(())
+        })
+    }
+
+    pub fn set_favorite(&self, node_id: &str, enabled: bool) -> Result<(), String> {
+        self.transaction(|s| {
+            if !s.groups.iter().any(|g| g.nodes.iter().any(|n| n.id == node_id)) { return Err("node not found".into()); }
+            if enabled { s.favorites.insert(node_id.into()); } else { s.favorites.remove(node_id); }
+            Ok(())
+        })
+    }
+
+    pub fn set_refresh_policy(&self, on_start: bool, hours: u32) -> Result<AppPreferences, String> {
+        if ![0, 1, 6, 12, 24].contains(&hours) { return Err("unsupported refresh interval".into()); }
+        self.transaction(|s| {
+            s.preferences.refresh_on_start = on_start;
+            s.preferences.refresh_interval_hours = hours;
+            Ok(())
+        })?;
+        Ok(self.preferences())
+    }
+
+    fn transaction(&self, change: impl FnOnce(&mut PersistedState) -> Result<(), String>) -> Result<(), String> {
+        let mut guard = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+        let mut next = guard.clone();
+        change(&mut next)?;
+        self.save_locked(&next)?;
+        *guard = next;
+        Ok(())
     }
 
     fn save_locked(&self, state: &PersistedState) -> Result<(), String> {
@@ -97,6 +249,20 @@ impl Store {
     }
 }
 
+fn build_group_view(state: &PersistedState, group: &SubscriptionGroup) -> GroupView {
+    let mut view = GroupView::from(group);
+    view.sort_mode = state.sort_modes.get(&group.id).copied().unwrap_or_default();
+    for node in &mut view.nodes {
+        node.favorite = state.favorites.contains(&node.id);
+        if let Some(latency) = state.latencies.get(&node.id) {
+            node.latency_ms = latency.latency_ms;
+            node.latency_failed = latency.failed;
+        }
+    }
+    sort_nodes(&mut view.nodes, view.sort_mode);
+    view
+}
+
 fn normalize_selection(s: &mut PersistedState) {
     let valid = s.selected_group_id.as_deref().zip(s.selected_node_id.as_deref()).is_some_and(|(gid, nid)| s.groups.iter().any(|g| g.id == gid && g.nodes.iter().any(|n| n.id == nid)));
     if valid { return; }
@@ -107,6 +273,14 @@ fn normalize_selection(s: &mut PersistedState) {
         s.selected_group_id = None;
         s.selected_node_id = None;
     }
+}
+
+fn prune_runtime_metadata(s: &mut PersistedState) {
+    let valid_node_ids: std::collections::HashSet<String> = s.groups.iter().flat_map(|group| group.nodes.iter().map(|node| node.id.clone())).collect();
+    let valid_group_ids: std::collections::HashSet<String> = s.groups.iter().map(|group| group.id.clone()).collect();
+    s.favorites.retain(|id| valid_node_ids.contains(id));
+    s.latencies.retain(|node_id, _| valid_node_ids.contains(node_id));
+    s.sort_modes.retain(|group_id, _| valid_group_ids.contains(group_id));
 }
 
 #[cfg(windows)]
@@ -122,7 +296,6 @@ fn replace_file(source: &Path, target: &Path) -> Result<(), String> {
 
 #[cfg(not(windows))]
 fn replace_file(source: &Path, target: &Path) -> Result<(), String> {
-    if target.exists() { fs::remove_file(target).map_err(|e| format!("failed to replace state: {e}"))?; }
     fs::rename(source, target).map_err(|e| format!("failed to commit state: {e}"))
 }
 
@@ -130,9 +303,98 @@ fn replace_file(source: &Path, target: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     #[test]
-    fn old_state_without_preferences_migrates() {
+    fn old_state_without_preferences_or_node_metadata_migrates() {
         let state: PersistedState = serde_json::from_str(r#"{"groups":[]}"#).unwrap();
         assert_eq!(state.preferences.theme, AppTheme::Amoled);
         assert!(state.preferences.close_to_tray);
+        assert!(state.latencies.is_empty());
+        assert!(state.sort_modes.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod subscription_management_tests {
+    use super::*;
+    use crate::vless::parse_vless;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    struct Fixture { store: Store, dir: PathBuf }
+    impl Fixture {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!("dot-store-{}-{}-{}", std::process::id(), crate::refresh::now_ms(), NEXT.fetch_add(1, Ordering::Relaxed)));
+            let store = Store::open(dir.join("state.json")).unwrap();
+            Self { store, dir }
+        }
+    }
+    impl Drop for Fixture { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.dir); } }
+    fn node(name: &str) -> VlessNode { parse_vless(&format!("vless://test@example.com:443?security=tls&type=tcp#{name}")).unwrap() }
+    fn group(id: &str, nodes: Vec<VlessNode>) -> SubscriptionGroup {
+        SubscriptionGroup { id: id.into(), name: id.into(), url: format!("https://example.invalid/{id}"), updated_at_ms: 1, nodes }
+    }
+    #[test]
+    fn refresh_preserves_selection_favorites_latency_and_shared_metadata() {
+        let f = Fixture::new();
+        let old = node("old"); let new = node("new");
+        f.store.upsert_group(group("a", vec![old.clone()])).unwrap();
+        f.store.upsert_group(group("b", vec![old.clone()])).unwrap();
+        f.store.set_selection("a", &old.id).unwrap();
+        f.store.set_favorite(&old.id, true).unwrap();
+        f.store.record_latency(&old.id, Some(42), false, 2).unwrap();
+        let result = f.store.apply_refresh("a", vec![new.clone()], 3).unwrap();
+        assert!(!result.selected_node_removed);
+        assert_eq!(f.store.selection().node_id.as_deref(), Some(new.id.as_str()));
+        for g in f.store.groups() { assert!(g.nodes[0].favorite); assert_eq!(g.nodes[0].latency_ms, Some(42)); }
+        let reopened = Store::open(f.dir.join("state.json")).unwrap();
+        assert!(reopened.groups()[0].nodes[0].favorite);
+        assert_eq!(result.edited.len(), 1);
+    }
+    #[test]
+    fn deleted_selection_is_reported_and_last_group_clears_metadata() {
+        let f = Fixture::new(); let old = node("old");
+        f.store.upsert_group(group("a", vec![old.clone()])).unwrap();
+        f.store.set_favorite(&old.id, true).unwrap();
+        let other = parse_vless("vless://test@other.example:443?security=tls#other").unwrap();
+        let result = f.store.apply_refresh("a", vec![other.clone()], 2).unwrap();
+        assert!(result.selected_node_removed);
+        assert_eq!(f.store.selection().node_id.as_deref(), Some(other.id.as_str()));
+        f.store.remove_group("a").unwrap();
+        assert!(f.store.groups().is_empty());
+        assert!(f.store.selection().node_id.is_none());
+        assert!(f.store.inner.lock().unwrap().favorites.is_empty());
+    }
+    #[test]
+    fn invalid_refresh_and_duplicate_source_preserve_disk_and_memory() {
+        let f = Fixture::new();
+        f.store.upsert_group(group("a", vec![node("old")])).unwrap();
+        f.store.upsert_group(group("b", vec![node("other")])).unwrap();
+        let before = fs::read(f.dir.join("state.json")).unwrap();
+        assert!(f.store.apply_refresh("a", vec![], 2).is_err());
+        assert!(f.store.apply_source_refresh("a", vec![node("new")], 2, "changed".into(), "https://example.invalid/b".into()).is_err());
+        assert_eq!(fs::read(f.dir.join("state.json")).unwrap(), before);
+        assert_eq!(f.store.groups()[0].name, "a");
+    }
+    #[test]
+    fn write_failure_does_not_change_live_state() {
+        let f = Fixture::new(); let n = node("old");
+        f.store.upsert_group(group("a", vec![n.clone()])).unwrap();
+        fs::create_dir(f.dir.join("state.json.tmp")).unwrap();
+        assert!(f.store.set_favorite(&n.id, true).is_err());
+        assert!(f.store.remove_group("a").is_err());
+        assert!(!f.store.groups()[0].nodes[0].favorite);
+        assert_eq!(f.store.groups().len(), 1);
+    }
+    #[test]
+    fn source_edit_is_atomic_and_refresh_policy_persists() {
+        let f = Fixture::new();
+        f.store.upsert_group(group("a", vec![node("old")])).unwrap();
+        let result = f.store.apply_source_refresh("a", vec![node("new")], 50, "new group".into(), "https://example.invalid/new".into()).unwrap();
+        assert_eq!(result.group.id, "a");
+        assert_eq!(result.group.name, "new group");
+        assert_eq!(f.store.group_url("a").unwrap(), "https://example.invalid/new");
+        f.store.set_refresh_policy(true, 6).unwrap();
+        assert!(f.store.set_refresh_policy(false, 2).is_err());
+        let reopened = Store::open(f.dir.join("state.json")).unwrap();
+        assert!(reopened.preferences().refresh_on_start);
+        assert_eq!(reopened.preferences().refresh_interval_hours, 6);
     }
 }

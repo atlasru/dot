@@ -1,3 +1,12 @@
+# Desktop 0.3.0-alpha.1 (unreleased)
+
+- Unify Desktop node management and interactive map.
+- Add subscription editing/deletion, local VLESS imports, search and persistent favorites.
+- Add opt-in startup/scheduled subscription refresh that remains active in the tray.
+- Preserve data on failed fetches and disk writes; report removed selections.
+- Identify the running node by ID and prevent overlapping connection/test operations.
+- Synchronize Desktop version manifests and version the portable CI artifact.
+
 # Changelog
 
 ## 0.2.1
