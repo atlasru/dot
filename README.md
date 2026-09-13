@@ -13,7 +13,7 @@ Current Android version: **0.3.0**
 - subscription refresh reports with added, edited and deleted node counts/details
 - classified subscription update errors with redacted raw-error viewing while keeping existing nodes intact
 - node selection and persistence
-- AUTO node mode that picks the fastest successful tested node
+- one-tap AUTO NODE action that picks the fastest successful tested node and connects to it
 - per-subscription node sorting by provider order, delay or natural name order
 - delay sorting runs URL tests first when current latency data is unavailable
 - LIST / MAP views for nodes, with LIST as the default
@@ -41,21 +41,21 @@ Current Android version: **0.3.0**
 
 Android uses a small three-destination layout:
 
-- **Home** is connection-first: the pixel orb, connection state, active node, AUTO status, traffic and connection test stay in one place
-- **Nodes** contains subscription switching, refresh/test actions, sorting, LIST/MAP views and per-node controls
-- **Settings** contains subscriptions, AUTO node, split tunneling, connection state, appearance and app information
+- **Home** is connection-first: the pixel orb, connection state, active node, traffic and connection test stay in one place
+- **Nodes** contains the one-tap AUTO NODE action, subscription switching, refresh/test actions, sorting, LIST/MAP views and per-node controls
+- **Settings** contains subscriptions, split tunneling, connection state, appearance and app information
 
 The primary destinations use a floating pill navigation bar above the Android system navigation/gesture area. The selected destination is highlighted as an inner pill with the dot. red accent, while navigation automatically respects the system navigation inset.
 
 The redesign changes information hierarchy without removing the existing node map, latency tests, sorting, subscription management, theme selection or launcher-icon controls.
 
-## AUTO node
+## AUTO NODE
 
-AUTO node keeps the manual node list intact but removes the need to pick a server for normal use.
+AUTO NODE is a one-shot action at the top of the Nodes list rather than a persistent mode.
 
-When AUTO is enabled, dot. uses the current URL-test results for the selected subscription and chooses the successful node with the lowest measured latency. Failed nodes are excluded. If no fresh latency data exists, dot. runs the existing group URL test first and stores the selected AUTO node as the current profile so Quick Settings reconnects use the same choice.
+Tapping it chooses the successful node with the lowest available measured latency and connects to that node. If latency data is not available while the VPN core is idle, dot. runs the existing group URL test first, selects the fastest successful result and then continues into the normal Android VPN permission/connect flow.
 
-Manually selecting a node disables AUTO, making the change explicit instead of silently fighting the user's selection.
+When a tunnel is already active, AUTO NODE can switch immediately when usable latency results are already available. It does not continuously override later manual node selections.
 
 ## Connection reliability
 
@@ -146,7 +146,7 @@ Treat subscription URLs containing user IDs or tokens as credentials. Do not pub
 
 Split tunneling stores only Android package names selected by the user. dot. does not need broad installed-package visibility and does not send the app selection anywhere.
 
-AUTO node selection and reconnect diagnostics remain local to the device. dot. does not upload latency history, network state or runtime VPN errors.
+AUTO NODE selection and reconnect diagnostics remain local to the device. dot. does not upload latency history, network state or runtime VPN errors.
 
 ## Stack
 
