@@ -2,7 +2,7 @@
 
 The Windows client is built as a real VLESS/REALITY VPN product, not a UI prototype. UI controls are only exposed when their backend behavior exists.
 
-## Current milestone: M3 product
+## Current milestone: Desktop 0.1.1 node management
 
 Stack:
 
@@ -37,23 +37,58 @@ subscription URL
 - A session journal records active-process metadata and stale records are consumed safely on the next launch.
 - VPN state is independent from the engine mutex so status remains responsive during startup/shutdown.
 
-## M3 product features
+## Product features
 
 All items below have real backend behavior:
 
 - persistent subscription groups;
 - persistent selected node;
-- Home / Nodes / Settings UI;
+- Home / Nodes / Settings desktop workspace;
 - AMOLED, Graphite and Matrix themes;
 - realtime download/upload rate and session totals from the `dot0` Windows TUN interface;
 - connection duration;
 - system tray with Open, Connect/Disconnect and Exit;
 - left-click tray icon opens the main window;
 - optional close-to-tray behavior;
-- subscription refresh without replacing a working group when fetch/parse fails;
+- safe subscription refresh that keeps the previous working group when fetch/parse fails;
+- Android-compatible subscription diffing using `userId + host + port` logical identity;
+- added / edited / deleted / unchanged refresh summaries;
+- selected-node preservation across compatible subscription edits;
+- persistent per-node latency and failed-test state;
+- ORIGIN / DELAY / NAME node sorting;
+- natural numeric name ordering (`France #2` before `France #10`);
+- per-node URL tests through the pinned Xray runtime;
+- bounded batch URL testing for a complete subscription;
+- sanitized subscription network errors that do not echo subscription URLs or credentials;
 - About information tied to the pinned desktop/Xray versions.
 
 There are intentionally no UI toggles for unimplemented DNS modes, split tunneling, kill switch, autostart or updater behavior.
+
+## Node management behavior
+
+### Refresh
+
+A successful refresh computes a semantic diff before replacing stored nodes. Nodes are matched using the same logical identity as Android:
+
+```text
+lowercase(userId) + lowercase(host) + port
+```
+
+Exact raw VLESS links are matched first. Remaining nodes with the same logical identity are treated as edits. Matching latency state and the selected logical node are migrated to the replacement node ID. If downloading or parsing fails, the stored working group is not mutated.
+
+### Sorting
+
+Each subscription stores its own sort mode:
+
+- `ORIGIN` preserves provider order;
+- `NAME` uses natural numeric ordering;
+- `DELAY` orders successful tests by latency, failed tests after them, and untested nodes last.
+
+If DELAY is selected without existing test results, the UI starts a complete group test while the VPN is offline. Until results exist, provider order remains stable.
+
+### URL testing
+
+Single-node tests can run offline. While connected, only the active node can be tested through the live tunnel. `TEST ALL` requires the VPN to be offline and tests up to six nodes concurrently using isolated Xray test processes.
 
 ## Runtime files
 

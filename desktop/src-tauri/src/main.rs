@@ -6,9 +6,11 @@ mod config;
 mod engine;
 #[cfg(windows)] mod job;
 mod model;
+mod node_sort;
 mod session;
 mod storage;
 mod subscription;
+mod subscription_diff;
 mod traffic;
 mod tray;
 mod url_test;
@@ -57,12 +59,14 @@ fn main() {
             commands::switch_node,
             commands::set_theme,
             commands::set_close_to_tray,
+            commands::set_node_sort,
             commands::add_subscription,
             commands::refresh_subscription,
             commands::connect,
             commands::disconnect,
             commands::vpn_status,
             commands::url_test,
+            commands::url_test_group,
         ])
         .run(tauri::generate_context!())
         .expect("error while running dot. Desktop");
