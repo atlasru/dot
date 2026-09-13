@@ -31,12 +31,16 @@ impl RefreshService {
             let nodes = SubscriptionClient::new()?.fetch(&url)?;
             store.apply_refresh(group_id, nodes, now_ms())
         })();
+        self.record(store, group_id, &result);
+        result
+    }
+
+    pub fn record(&self, store: &Store, group_id: &str, result: &Result<SubscriptionRefreshResult, String>) {
         let notice = RefreshNotice { group_id: group_id.into(), attempted_at_ms: now_ms(), error: result.as_ref().err().cloned(), result: result.as_ref().ok().cloned() };
         let mut notices = self.notices.write().unwrap_or_else(|p| p.into_inner());
         let groups = store.groups();
         notices.retain(|id, _| groups.iter().any(|g| &g.id == id));
         notices.insert(group_id.into(), notice);
-        result
     }
 }
 
@@ -83,5 +87,43 @@ mod tests {
         assert!(!due(3_600_000, 0, Some(3_500_000), 1, false));
         assert!(due(3_900_000, 0, Some(3_500_000), 1, false));
         assert!(!due(100, 200, None, 1, false));
+    }
+}
+
+#[cfg(test)]
+mod network_tests {
+    use super::*;
+    use std::{io::{Read, Write}, net::TcpListener};
+    use crate::{model::SubscriptionGroup, vless::parse_vless};
+    #[test]
+    fn failed_refresh_keeps_working_group_and_success_publishes_diff() {
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/private-token", server.local_addr().unwrap());
+        let old = parse_vless("vless://test@example.com:443?security=tls#old").unwrap();
+        let fresh = "vless://test@example.com:443?security=tls#renamed";
+        let dir = std::env::temp_dir().join(format!("dot-refresh-{}-{}", std::process::id(), now_ms()));
+        let store = Store::open(dir.join("state.json")).unwrap();
+        store.upsert_group(SubscriptionGroup { id: "test".into(), name: "test".into(), url, updated_at_ms: 10, nodes: vec![old.clone()] }).unwrap();
+        let worker = thread::spawn(move || {
+            for (status, body) in [("500 Internal Server Error", "failed"), ("200 OK", fresh)] {
+                let (mut socket, _) = server.accept().unwrap();
+                socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut request = [0; 4096]; let _ = socket.read(&mut request).unwrap();
+                write!(socket, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        let service = RefreshService::new();
+        let _guard = service.gate.lock().unwrap();
+        let error = service.refresh_locked(&store, "test").unwrap_err();
+        assert!(!error.contains("private-token"));
+        assert_eq!(store.groups()[0].nodes[0].id, old.id);
+        assert_eq!(store.groups()[0].updated_at_ms, 10);
+        assert!(service.notices(&store)[0].error.is_some());
+        let result = service.refresh_locked(&store, "test").unwrap();
+        assert_eq!(result.edited.len(), 1);
+        assert_eq!(store.groups()[0].nodes[0].name, "renamed");
+        assert!(service.notices(&store)[0].error.is_none());
+        worker.join().unwrap();
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

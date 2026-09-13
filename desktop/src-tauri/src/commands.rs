@@ -151,7 +151,9 @@ pub async fn edit_subscription(group_id: String, name: String, url: String, stat
         let old_url = store.group_url(&group_id)?;
         if old_url != url && !url.is_empty() {
             let nodes = SubscriptionClient::new()?.fetch(&url)?;
-            store.apply_source_refresh(&group_id, nodes, now_ms(), name, url)?;
+            let result = store.apply_source_refresh(&group_id, nodes, now_ms(), name, url);
+            service.record(&store, &group_id, &result);
+            result?;
             Ok(())
         } else {
             store.edit_group(&group_id, name, url)

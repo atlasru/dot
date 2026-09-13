@@ -9,6 +9,6 @@ for (const [name, update] of [
 ]) {
   const file = path.join(root, name), before = fs.readFileSync(file, "utf8"), after = update(before);
   if (process.argv.includes("--check")) {
-    if (before !== after) throw new Error(`${name}: run npm run sync-version`);
+    if (before.replace(/\r\n/g, "\n") !== after.replace(/\r\n/g, "\n")) throw new Error(`${name}: run npm run sync-version`);
   } else fs.writeFileSync(file, after);
 }
