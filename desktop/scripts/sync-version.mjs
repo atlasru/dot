@@ -4,6 +4,14 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
 for (const [name, update] of [
+  ["package-lock.json", text => {
+    const lock = JSON.parse(text);
+    lock.version = version;
+    lock.packages[""].version = version;
+    return JSON.stringify(lock, null, 2) + "\n";
+  }],
+  ...(fs.existsSync(path.join(root, "src-tauri/Cargo.lock")) ? [["src-tauri/Cargo.lock", text =>
+    text.replace(/(name = "dot-desktop"\r?\nversion = ")[^"]+"/, `$1${version}"`)]] : []),
   ["src-tauri/Cargo.toml", text => text.replace(/^version = ".*"/m, `version = "${version}"`)],
   ["src-tauri/tauri.conf.json", text => JSON.stringify({ ...JSON.parse(text), version }, null, 2) + "\n"],
 ]) {

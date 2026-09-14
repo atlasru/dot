@@ -1,20 +1,21 @@
-# Desktop 0.3.0-alpha.2 (unreleased)
+# Changelog
+
+## 0.3.0 — unified Android and Windows
+
+### Windows
 
 - Make the Home Orb the connection control: connect, disconnect and cancel startup.
 - Remove the separate Connect/Disconnect button; keep keyboard access and state-aware disabling.
-
-# Desktop 0.3.0-alpha.1 (unreleased)
-
 - Unify Desktop node management and interactive map.
 - Add subscription editing/deletion, local VLESS imports, search and persistent favorites.
 - Add opt-in startup/scheduled subscription refresh that remains active in the tray.
 - Preserve data on failed fetches and disk writes; report removed selections.
 - Identify the running node by ID and prevent overlapping connection/test operations.
 - Synchronize Desktop version manifests and version the portable CI artifact.
+- Promote the manually tested Desktop functionality to stable 0.3.0.
 
-# Changelog
+### Android
 
-## 0.3.0
 
 - add one-tap AUTO NODE at the top of the Nodes list to choose the fastest successful URL-tested node and connect immediately
 - automatically run the existing group URL test first when AUTO NODE needs latency data and the VPN core is idle
@@ -25,6 +26,11 @@
 - classify VPN startup failures into DNS, timeout, connection-refused, TLS, REALITY, TUN, config, Xray and unknown categories
 - expose reconnect attempt and the latest failure category in the Android UI
 - add unit tests for AUTO selection and VPN failure classification
+
+### Distribution
+
+- Build both platforms from one validated source revision; publish only from a matching version tag.
+- Publish the honestly named Android dev-signed debug APK and unsigned Windows release-mode portable ZIP with SHA-256 checksums.
 
 ## 0.2.1
 

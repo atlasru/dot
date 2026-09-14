@@ -2,13 +2,13 @@
 
 Windows VLESS client built with Tauri 2, React/TypeScript, Rust, Xray-core v26.7.28 and Wintun.
 
-## 0.3.0-alpha.1 — unified Desktop workspace
+## 0.3.0 — unified Desktop workspace
 
-This development line combines the node-management work from PR #34 with the map components from Desktop 0.2.2-alpha.1. Android and the website remain on the current main baseline.
+Stable Desktop release, published together with Android 0.3.0 from the same source revision.
 
 ### Home and connection
 
-- Connect, Disconnect and switch nodes with a controlled restart.
+- Home Orb connects, disconnects and cancels startup; switching nodes uses a controlled restart.
 - Validate generated configuration with the pinned `xray.exe run -test` before starting TUN.
 - Publish Connected after startup and an external connectivity probe.
 - Show interface download/upload rates, session totals and connection duration.
@@ -50,7 +50,7 @@ cd desktop
 npm run sync-version
 ```
 
-This synchronizes Cargo and Tauri manifests. Build/CI rejects version drift. UI reads the running Tauri package version, and the CI portable artifact uses the same version.
+This synchronizes Cargo and Tauri manifests and package lock versions, including Cargo.lock when present. Build/CI rejects version drift. UI reads the running Tauri package version, and the CI portable artifact uses the same version.
 
 ```sh
 cd desktop
@@ -62,7 +62,7 @@ npm run tauri -- dev
 
 Windows development requires the official `xray.exe` and `wintun.dll` under `desktop/src-tauri/runtime/`. CI downloads them from the pinned Xray release. Administrator privileges are required for TUN and routing changes.
 
-The existing unified-release workflow describes historical Android 0.1.8 packaging; it is not the release path for this alpha. The Desktop PR workflow produces the versioned portable Windows build without publishing a release.
+The [unified release workflow](RELEASING.md) builds both platforms at the same revision. Windows uses release mode and a verified portable ZIP containing the executable, Xray and Wintun. The application is unsigned; WebView2 Runtime must be installed. NSIS is configured but is not a validated release artifact.
 
 ## Validation
 
@@ -79,4 +79,4 @@ Manual Windows release checklist:
 - [ ] Scheduled refresh while the window is closed to the tray
 - [ ] DNS, IPv4/IPv6 behavior and routing cleanup after disconnect
 
-Keep this alpha PR in draft until manual Windows regression is completed. Split tunneling, kill switch, automatic reconnect/AUTO node selection, custom DNS modes, autostart and application updating remain future milestones.
+The owner approved the tested Desktop functionality for v0.3.0. Split tunneling, kill switch, automatic reconnect/AUTO node selection, custom DNS modes, autostart and application updating remain future milestones.
