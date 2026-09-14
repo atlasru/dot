@@ -1,5 +1,7 @@
 const repo = 'atlasru/dot';
 const releasePage = `https://github.com/${repo}/releases/latest`;
+const androidFallback = `https://github.com/${repo}/releases/download/v0.3.0/dot-android-0.3.0-dev-debug.apk`;
+const desktopFallback = `https://github.com/${repo}/releases/download/v0.3.0/dot-desktop-0.3.0-windows-x64.zip`;
 
 const $ = (id) => document.getElementById(id);
 const formatBytes = (bytes) => {
@@ -41,14 +43,14 @@ const applyPlatform = () => {
   if (kind === 'android') {
     lead.textContent = 'Minimal VLESS client for Android.';
     note.textContent = 'Android detected · APK build available';
-    setPrimary('download for android', releaseAssets.android?.browser_download_url);
+    setPrimary('download for android', releaseAssets.android?.browser_download_url || androidFallback);
     return;
   }
 
   if (kind === 'windows') {
     lead.textContent = 'Minimal VLESS client for Windows.';
     note.textContent = 'Windows detected · portable x64 build available';
-    setPrimary('download for windows', releaseAssets.desktop?.browser_download_url);
+    setPrimary('download for windows', releaseAssets.desktop?.browser_download_url || desktopFallback);
     return;
   }
 
@@ -83,7 +85,13 @@ const parseVersionFromName = (name, prefix, suffix) => {
   return name.slice(prefix.length, -suffix.length);
 };
 
+const setDownloadFallbacks = () => {
+  $('androidDownload').href = androidFallback;
+  $('desktopDownload').href = desktopFallback;
+};
+
 const loadRelease = async () => {
+  setDownloadFallbacks();
   try {
     const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
       headers: { Accept: 'application/vnd.github+json' }
@@ -112,8 +120,7 @@ const loadRelease = async () => {
 
     $('allReleases').href = release.html_url || releasePage;
   } catch {
-    $('androidDownload').href = releasePage;
-    $('desktopDownload').href = releasePage;
+    setDownloadFallbacks();
   } finally {
     applyPlatform();
   }
@@ -195,6 +202,7 @@ const observer = new IntersectionObserver((entries) => {
 
 document.querySelectorAll('.reveal').forEach((element) => observer.observe(element));
 
+setDownloadFallbacks();
 applyPlatform();
 loadRelease();
 loadNetwork();
