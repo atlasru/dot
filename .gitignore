@@ -21,3 +21,11 @@ keystore.properties
 *.log
 .DS_Store
 Thumbs.db
+
+# Desktop build outputs
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/runtime/
+desktop/src-tauri/icons/
+desktop/portable/

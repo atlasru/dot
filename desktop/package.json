@@ -1,14 +1,19 @@
 {
   "name": "dot-desktop",
   "private": true,
-  "version": "0.1.0-alpha.3",
+  "version": "0.3.0-alpha.2",
   "type": "module",
-  "engines": { "node": ">=20.19" },
+  "engines": {
+    "node": ">=20.19"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420",
-    "build": "vite build",
+    "build": "npm run check-version && npm run typecheck && vite build",
     "tauri": "tauri",
-    "icons": "tauri icon app-icon.svg"
+    "icons": "tauri icon app-icon.svg",
+    "sync-version": "node scripts/sync-version.mjs",
+    "check-version": "node scripts/sync-version.mjs --check",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1",
@@ -17,6 +22,9 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.11.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^7.0.2",
     "vite": "8.1.5"
   }
 }

@@ -134,7 +134,7 @@ impl VpnEngine {
 
         self.job = Some(job);
         self.child = Some(child);
-        let value = EngineSnapshot { phase: EnginePhase::Connected, node_name: Some(node.name.clone()), message: Some("connected".into()) };
+        let value = EngineSnapshot { phase: EnginePhase::Connected, node_name: Some(node.name.clone()), node_id: Some(node.id.clone()), message: Some("connected".into()) };
         self.publish(value.clone());
         Ok(value)
     }
@@ -142,7 +142,7 @@ impl VpnEngine {
     pub fn stop(&mut self) -> EngineSnapshot {
         self.cancel.store(true, Ordering::SeqCst);
         let current = self.snapshot();
-        self.publish(EngineSnapshot { phase: EnginePhase::Stopping, node_name: current.node_name, message: Some("disconnecting".into()) });
+        self.publish(EngineSnapshot { phase: EnginePhase::Stopping, node_name: current.node_name, node_id: current.node_id, message: Some("disconnecting".into()) });
         self.stop_internal();
         let value = EngineSnapshot::default();
         self.publish(value.clone());
@@ -160,22 +160,22 @@ impl VpnEngine {
                 self.job = None;
                 let _ = self.journal.clear();
                 let current = self.snapshot();
-                self.publish(EngineSnapshot { phase: EnginePhase::Error, node_name: current.node_name, message: Some(format!("Xray stopped unexpectedly ({status})")) });
+                self.publish(EngineSnapshot { phase: EnginePhase::Error, node_name: current.node_name, node_id: current.node_id, message: Some(format!("Xray stopped unexpectedly ({status})")) });
             }
             Ok(None) => {}
             Err(error) => {
                 let current = self.snapshot();
-                self.publish(EngineSnapshot { phase: EnginePhase::Error, node_name: current.node_name, message: Some(format!("failed to inspect Xray process: {error}")) });
+                self.publish(EngineSnapshot { phase: EnginePhase::Error, node_name: current.node_name, node_id: current.node_id, message: Some(format!("failed to inspect Xray process: {error}")) });
             }
         }
     }
 
     fn set_starting(&self, node: &VlessNode, message: &str) {
-        self.publish(EngineSnapshot { phase: EnginePhase::Starting, node_name: Some(node.name.clone()), message: Some(message.into()) });
+        self.publish(EngineSnapshot { phase: EnginePhase::Starting, node_name: Some(node.name.clone()), node_id: Some(node.id.clone()), message: Some(message.into()) });
     }
 
     fn publish_error(&self, node: &VlessNode, message: String) -> String {
-        self.publish(EngineSnapshot { phase: EnginePhase::Error, node_name: Some(node.name.clone()), message: Some(message.clone()) });
+        self.publish(EngineSnapshot { phase: EnginePhase::Error, node_name: Some(node.name.clone()), node_id: Some(node.id.clone()), message: Some(message.clone()) });
         message
     }
 

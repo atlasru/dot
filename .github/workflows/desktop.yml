@@ -38,7 +38,15 @@ jobs:
           }
 
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Read Desktop version
+        id: desktop-version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          "version=$version" >> $env:GITHUB_OUTPUT
+          npm run check-version
 
       - name: Prepare Xray runtime
         shell: pwsh
@@ -82,7 +90,7 @@ jobs:
       - name: Upload desktop portable build
         uses: actions/upload-artifact@v4
         with:
-          name: dot-desktop-alpha
+          name: dot-desktop-${{ steps.desktop-version.outputs.version }}-windows-x64
           path: desktop/portable
 
       - name: Upload dependency locks for bootstrap
