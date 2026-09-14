@@ -64,15 +64,15 @@
       <div class="download-grid">
         <article class="download-card reveal">
           <div class="download-title"><span>ANDROID</span><span class="badge">STABLE</span></div>
-          <p class="version" id="androidVersion">v0.1.8</p>
+          <p class="version" id="androidVersion">v0.3.0-dev-debug</p>
           <p>Kotlin · Jetpack Compose · Android VpnService · libXray</p>
           <div class="download-meta"><span>Android 8.0+</span><span id="androidSize">APK</span></div>
           <a class="button button-primary full" id="androidDownload" href="https://github.com/atlasru/dot/releases/latest">download apk</a>
           <details class="verify"><summary>verify download</summary><code id="androidHash">SHA-256 available in the latest release</code></details>
         </article>
         <article class="download-card reveal" data-delay="80">
-          <div class="download-title"><span>WINDOWS</span><span class="badge badge-alpha">ALPHA</span></div>
-          <p class="version" id="desktopVersion">v0.2.2-alpha.1</p>
+          <div class="download-title"><span>WINDOWS</span><span class="badge">PORTABLE</span></div>
+          <p class="version" id="desktopVersion">v0.3.0</p>
           <p>Rust · Xray-core · Wintun</p>
           <div class="download-meta"><span>Windows x64 · portable</span><span id="desktopSize">ZIP</span></div>
           <a class="button button-primary full" id="desktopDownload" href="https://github.com/atlasru/dot/releases/latest">download zip</a>
@@ -174,7 +174,7 @@
         <details><summary>What is dot.?</summary><p>An open-source VLESS client for Android and Windows built around subscriptions, node testing, map view and a minimal interface.</p></details>
         <details><summary>Does dot. provide VPN servers?</summary><p>No. dot. is a client. You need your own compatible VLESS subscription.</p></details>
         <details><summary>Which transports are supported?</summary><p>The current Android release focuses on VLESS with REALITY and TLS through Xray-core.</p></details>
-        <details><summary>Why is the Windows build unsigned?</summary><p>The desktop client is still an alpha build and the current Windows executable has not been code-signed yet.</p></details>
+        <details><summary>Why is the Windows build unsigned?</summary><p>The Windows executable is unsigned. Extract the complete portable ZIP, including its runtime folder. Microsoft Edge WebView2 Runtime is required.</p></details>
         <details><summary>Does the website track visitors?</summary><p>No analytics or advertising scripts are included. The network-status card optionally requests your public IP metadata from a third-party lookup service in your browser.</p></details>
       </div>
     </section>

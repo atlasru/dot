@@ -1,8 +1,8 @@
 # dot.
 
-Minimal VLESS client for Android with an AMOLED-first, Nothing-inspired interface.
+Minimal VLESS client for Android and Windows with an AMOLED-first, Nothing-inspired interface.
 
-Current Android version: **0.3.0**
+Current unified Android / Windows version: **0.3.0**
 
 ## Features
 
@@ -115,7 +115,12 @@ Only the resolved node IP is sent to the geolocation provider; subscription URLs
 
 ## Installation
 
-Development builds are produced by GitHub Actions. Open the latest successful `android` workflow run and download the `dot-debug` artifact.
+Download Android and Windows from the [unified v0.3.0 release](https://github.com/atlasru/dot/releases/tag/v0.3.0).
+
+- Android 8.0+: `dot-android-0.3.0-dev-debug.apk` is the debug variant, signed with the public development key, not a production signing key. Installed version: `0.3.0-debug` / code `300`.
+- Windows x64: `dot-desktop-0.3.0-windows-x64.zip` contains the unsigned release-mode executable and Xray/Wintun runtime. Extract everything together. Requires Microsoft Edge WebView2 Runtime and administrator privileges for VPN routing.
+
+See [Desktop](docs/DESKTOP.md) for its workspace, subscriptions, map, tests and tray support, and [Release process](docs/RELEASING.md) for build/signing details.
 
 Debug builds use the same development signing key, so newer versions can be installed over previous builds without deleting app data.
 

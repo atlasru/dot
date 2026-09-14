@@ -1,13 +1,10 @@
 name: android
 
 on:
-  push:
-    branches: [ main ]
-    tags: [ 'v*' ]
-  pull_request:
+  workflow_call:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -35,18 +32,38 @@ jobs:
           unzip -j /tmp/libxray-android.zip '*libXray.aar' -d app/libs
           test -s app/libs/libXray.aar
           ls -lh app/libs/libXray.aar
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify release source
+        run: python3 scripts/verify-release.py
       - name: Unit tests
         run: gradle testDebugUnitTest
       - name: Build debug APK
         run: gradle assembleDebug
+      - name: Verify APK identity and development signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          "$tools/aapt" dump badging "$apk" > apk-badging.txt
+          version=$(node -p "require('./desktop/package.json').version")
+          grep -F "package: name='dev.dotclient.android.debug'" apk-badging.txt
+          grep -F "versionName='$version-debug'" apk-badging.txt
+          code=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' app/build.gradle.kts)
+          grep -F "versionCode='$code'" apk-badging.txt
+          grep -F "sdkVersion:'26'" apk-badging.txt
+          "$tools/apksigner" verify --verbose --print-certs "$apk" > apk-signing.txt
+          keytool -exportcert -keystore app/build/signing/dot-dev.jks -alias dotdev -storepass dot-debug -file dev-cert.der
+          fingerprint=$(sha256sum dev-cert.der | cut -d' ' -f1)
+          grep -F "Signer #1 certificate SHA-256 digest: $fingerprint" apk-signing.txt
+          mkdir -p release-assets
+          cp "$apk" "release-assets/dot-android-$version-dev-debug.apk"
+          printf '%s\n' "$GITHUB_SHA" > release-assets/android-source.txt
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: dot-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-      - name: Publish tagged debug milestone
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: app/build/outputs/apk/debug/app-debug.apk
-          generate_release_notes: true
+          name: dot-android-build
+          path: release-assets/
+          if-no-files-found: error
