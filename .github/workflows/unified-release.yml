@@ -75,6 +75,43 @@ jobs:
             release-notes.md
           if-no-files-found: error
 
+  promote:
+    # An explicit reviewed release request is the only main-branch promotion path.
+    # Both platform builds and the exact archive/checksum gate have already passed.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: assets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create requested tag from validated main and dispatch tag build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .github/release-request.json || exit 0
+          tag=$(python3 -c 'import json; print(json.load(open(".github/release-request.json"))["tag"])')
+          version=$(python3 -c 'import json; print(json.load(open("desktop/package.json"))["version"])')
+          test "$tag" = "v$version"
+          # A consumed request must never move or replace an existing tag/release.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/" --jq '.[].ref' > tags.txt
+          if grep -Fx "refs/tags/$tag" tags.txt; then
+            echo 'Requested tag already exists; no automatic changes.'
+            exit 0
+          fi
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name' > releases.txt
+          if grep -Fx "$tag" releases.txt; then exit 1; fi
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$tag" -f "sha=$GITHUB_SHA"
+          # GITHUB_TOKEN tag pushes do not trigger push workflows; dispatch explicitly.
+          gh workflow run unified-release.yml --ref "$tag"
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: assets
