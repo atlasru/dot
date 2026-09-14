@@ -80,11 +80,6 @@ const applyPlatform = () => {
   setPrimary('view releases', releasePage);
 };
 
-const parseVersionFromName = (name, prefix, suffix) => {
-  if (!name?.startsWith(prefix) || !name.endsWith(suffix)) return null;
-  return name.slice(prefix.length, -suffix.length);
-};
-
 const setDownloadFallbacks = () => {
   $('androidDownload').href = androidFallback;
   $('desktopDownload').href = desktopFallback;
@@ -99,20 +94,25 @@ const loadRelease = async () => {
     if (!response.ok) throw new Error(`GitHub ${response.status}`);
     const release = await response.json();
     const assets = Array.isArray(release.assets) ? release.assets : [];
+    const displayVersion = release.tag_name
+      ? (release.tag_name.startsWith('v') ? release.tag_name : `v${release.tag_name}`)
+      : null;
+
     releaseAssets.android = assets.find((asset) => /^dot-android-.+\.apk$/i.test(asset.name)) || null;
     releaseAssets.desktop = assets.find((asset) => /^dot-desktop-.+-windows-x64\.zip$/i.test(asset.name)) || null;
 
+    if (displayVersion) {
+      $('androidVersion').textContent = displayVersion;
+      $('desktopVersion').textContent = displayVersion;
+    }
+
     if (releaseAssets.android) {
-      const version = parseVersionFromName(releaseAssets.android.name, 'dot-android-', '.apk');
-      if (version) $('androidVersion').textContent = `v${version}`;
       $('androidDownload').href = releaseAssets.android.browser_download_url;
       $('androidSize').textContent = formatBytes(releaseAssets.android.size) || 'APK';
       if (releaseAssets.android.digest) $('androidHash').textContent = releaseAssets.android.digest.replace(/^sha256:/i, 'SHA-256: ');
     }
 
     if (releaseAssets.desktop) {
-      const version = parseVersionFromName(releaseAssets.desktop.name, 'dot-desktop-', '-windows-x64.zip');
-      if (version) $('desktopVersion').textContent = `v${version}`;
       $('desktopDownload').href = releaseAssets.desktop.browser_download_url;
       $('desktopSize').textContent = formatBytes(releaseAssets.desktop.size) || 'ZIP';
       if (releaseAssets.desktop.digest) $('desktopHash').textContent = releaseAssets.desktop.digest.replace(/^sha256:/i, 'SHA-256: ');
