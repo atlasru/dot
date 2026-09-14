@@ -299,7 +299,9 @@ function ConnectionPanel({ group, node, vpn, traffic, testing, onToggleVpn, onUr
 }) {
   const connected = vpn.phase === "connected";
   const pending = vpn.phase === "starting" || vpn.phase === "stopping";
-  const button = vpn.phase === "stopping" ? "STOPPING" : connected || vpn.phase === "starting" ? "DISCONNECT" : "CONNECT";
+  const orbAction = vpn.phase === "starting" ? "Cancel connection" : connected ? "Disconnect VPN" : "Connect VPN";
+  const orbDisabled = vpn.phase === "stopping" || testing || (!node && !connected && vpn.phase !== "starting");
+  const orbState = vpn.phase === "error" ? "error" : connected ? "connected" : pending ? "pending" : "";
   const currentNode = vpn.phase !== "connected" || vpn.node_id === node?.id;
   const testResult = testing ? "TESTING…" : node?.latency_failed ? "FAILED" : node?.latency_ms ? `${node.latency_ms} ms` : "READY";
   const displayNode = vpn.node_name ?? node?.name ?? "SELECT A NODE";
@@ -307,13 +309,19 @@ function ConnectionPanel({ group, node, vpn, traffic, testing, onToggleVpn, onUr
   return <div className="connection-view">
     <div className="view-kicker">HOME</div>
     <div className="connection-center">
-      <Wordmark hero connected={connected} pending={pending} error={vpn.phase === "error"} />
+      <button
+        type="button"
+        className={`wordmark hero orb-button ${orbState}`}
+        aria-label={orbAction}
+        title={orbAction}
+        disabled={orbDisabled}
+        onClick={onToggleVpn}
+      />
       <div className={`phase ${vpn.phase}`}>{vpn.phase.toUpperCase()}</div>
       <button className="active-node-button" onClick={onOpenNodes}>{displayNode}</button>
       <div className="active-node-meta">{group?.name ?? "NO SUBSCRIPTION"}{node ? ` · ${node.security} · ${node.transport}` : ""}</div>
 
       <div className="connection-actions">
-        <button className="connect-button" disabled={vpn.phase === "stopping" || (!node && vpn.phase === "offline")} onClick={onToggleVpn}>{button}</button>
         <button className={`url-test-button ${node?.latency_failed ? "failed" : ""}`} disabled={!node || pending || testing || !currentNode} onClick={onUrlTest}>
           <span>URL TEST</span><strong>{testResult}</strong>
         </button>

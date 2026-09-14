@@ -1,3 +1,8 @@
+# Desktop 0.3.0-alpha.2 (unreleased)
+
+- Make the Home Orb the connection control: connect, disconnect and cancel startup.
+- Remove the separate Connect/Disconnect button; keep keyboard access and state-aware disabling.
+
 # Desktop 0.3.0-alpha.1 (unreleased)
 
 - Unify Desktop node management and interactive map.

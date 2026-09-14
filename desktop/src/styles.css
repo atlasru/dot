@@ -208,9 +208,7 @@ button:disabled { cursor: default; opacity: .42; }
 .active-node-button:hover { color: var(--fg); }
 .active-node-meta { width: 100%; margin-top: 5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .5px; }
 .connection-actions { width: min(350px, 100%); display: grid; gap: 8px; margin-top: 20px; }
-.connect-button, .url-test-button { width: 100%; height: 42px; border-radius: 2px; font-weight: 700; letter-spacing: 1px; }
-.connect-button { border: 1px solid var(--fg); background: var(--fg); color: var(--bg); }
-.connect-button:hover:not(:disabled) { filter: brightness(.88); }
+.url-test-button { width: 100%; height: 42px; border-radius: 2px; font-weight: 700; letter-spacing: 1px; }
 .url-test-button { display: flex; align-items: center; justify-content: space-between; padding: 0 13px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--muted-2); }
 .url-test-button:hover:not(:disabled) { border-color: var(--muted-2); color: var(--fg); }
 .url-test-button span, .url-test-button strong { font-size: 9px; }
@@ -348,3 +346,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .subscription { display: flex; align-items: center; }
 .subscription > .grow { min-width: 180px; }
 .subscription > button { flex: 0 0 auto; }
+
+.orb-button { padding: 0; background: transparent; appearance: none; cursor: pointer; }
+.orb-button:hover:not(:disabled) { border-color: var(--fg); }
+.orb-button:active:not(:disabled) { transform: scale(.98); }
+.orb-button:focus-visible { outline: 2px solid var(--red); outline-offset: 5px; }
+.orb-button:disabled { cursor: default; }
