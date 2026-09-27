@@ -4,6 +4,7 @@ import android.content.Context
 import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.parser.VlessUriParser
+import dev.dotclient.android.core.parser.Hysteria2UriParser
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -14,6 +15,7 @@ data class StoredSubscriptions(
 
 class SubscriptionStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private var loadFailure: Throwable? = null
 
     fun load(): StoredSubscriptions {
         val raw = preferences.getString(KEY_STATE, null) ?: return StoredSubscriptions()
@@ -30,7 +32,8 @@ class SubscriptionStore(context: Context) {
                     val profiles = buildList {
                         for (profileIndex in 0 until rawProfiles.length()) {
                             val uri = rawProfiles.optString(profileIndex)
-                            VlessUriParser.parse(uri).getOrNull()?.let(::add)
+                            (if (uri.startsWith("vless://", true)) VlessUriParser.parse(uri)
+                            else Hysteria2UriParser.parse(uri)).getOrNull()?.let(::add)
                         }
                     }
                     val selectedRawUri = item.optString("selectedProfileUri").takeIf { it.isNotBlank() }
@@ -59,12 +62,14 @@ class SubscriptionStore(context: Context) {
                 .takeIf { selected -> groups.any { it.id == selected } }
                 ?: groups.firstOrNull()?.id
             StoredSubscriptions(groups, selectedSubscriptionId)
-        }.getOrElse {
+        }.getOrElse { error ->
+            loadFailure = error
             StoredSubscriptions()
         }
     }
 
     fun save(subscriptions: List<Subscription>, selectedSubscriptionId: String?) {
+        check(loadFailure == null) { "Subscription state could not be read; refusing to overwrite it" }
         val groups = JSONArray()
         subscriptions.forEach { subscription ->
             val profiles = JSONArray()

@@ -1,6 +1,6 @@
 package dev.dotclient.android.core.reliability
 
-import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.core.model.ProxyNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -55,7 +55,7 @@ class AutoNodeSelectorTest {
         assertNull(AutoNodeSelector.select(emptyList(), emptyMap(), emptySet()))
     }
 
-    private fun profile(name: String) = VlessProfile(
+    private fun profile(name: String) = ProxyNode(
         name = name,
         host = "$name.example.com",
         port = 443,

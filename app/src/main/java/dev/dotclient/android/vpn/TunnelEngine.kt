@@ -1,11 +1,11 @@
 package dev.dotclient.android.vpn
 
-import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.core.model.ProxyNode
 import kotlinx.coroutines.flow.StateFlow
 
 interface TunnelEngine {
     val state: StateFlow<EngineState>
-    suspend fun start(profile: VlessProfile, tunFd: Int): Result<Unit>
+    suspend fun start(profile: ProxyNode, tunFd: Int): Result<Unit>
     suspend fun stop()
 }
 

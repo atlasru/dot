@@ -3,7 +3,16 @@ use reqwest::blocking::Client;
 use std::{time::Duration, io::Read};
 pub const MAX_SUBSCRIPTION_BYTES: usize = 4 * 1024 * 1024;
 
-use crate::{model::VlessNode, vless::parse_vless};
+use crate::{hysteria2::parse_hysteria2, model::ProxyNode, vless::parse_vless};
+
+fn supported(line: &str) -> bool {
+    ["vless://", "hy2://", "hysteria2://"].iter().any(|scheme| line.to_ascii_lowercase().starts_with(scheme))
+}
+
+fn parse_node(line: &str) -> Result<ProxyNode, String> {
+    if line.to_ascii_lowercase().starts_with("vless://") { parse_vless(line) }
+    else { parse_hysteria2(line) }
+}
 
 pub struct SubscriptionClient {
     http: Client,
@@ -20,7 +29,7 @@ impl SubscriptionClient {
         Ok(Self { http })
     }
 
-    pub fn fetch(&self, url: &str) -> Result<Vec<VlessNode>, String> {
+    pub fn fetch(&self, url: &str) -> Result<Vec<ProxyNode>, String> {
         let response = self
             .http
             .get(url)
@@ -59,14 +68,14 @@ fn format_request_error(error: reqwest::Error) -> String {
     }
 }
 
-pub fn decode_subscription(body: &str) -> Result<Vec<VlessNode>, String> {
+pub fn decode_subscription(body: &str) -> Result<Vec<ProxyNode>, String> {
     if body.len() > MAX_SUBSCRIPTION_BYTES { return Err("subscription exceeds 4 MB".into()); }
     let body = body.trim().trim_start_matches('\u{feff}').trim();
     if body.is_empty() {
         return Err("subscription response is empty".into());
     }
 
-    let plaintext = if body.to_ascii_lowercase().contains("vless://") {
+    let plaintext = if body.split_whitespace().any(supported) {
         body.to_string()
     } else {
         decode_base64(body).ok_or_else(|| "unsupported subscription format".to_string())?
@@ -78,9 +87,9 @@ pub fn decode_subscription(body: &str) -> Result<Vec<VlessNode>, String> {
     for token in plaintext
         .split(|c: char| c.is_whitespace())
         .map(str::trim)
-        .filter(|s| s.to_ascii_lowercase().starts_with("vless://"))
+        .filter(|s| supported(s))
     {
-        match parse_vless(token) {
+        match parse_node(token) {
             Ok(node) => { if seen.insert(node.id.clone()) { nodes.push(node); } },
             Err(error) => errors.push(error),
         }
@@ -88,9 +97,9 @@ pub fn decode_subscription(body: &str) -> Result<Vec<VlessNode>, String> {
 
     if nodes.is_empty() {
         if let Some(first) = errors.first() {
-            Err(format!("subscription contains no usable VLESS nodes: {first}"))
+            Err(format!("subscription contains no usable nodes: {first}"))
         } else {
-            Err("subscription contains no VLESS nodes".into())
+            Err("subscription contains no supported nodes".into())
         }
     } else {
         Ok(nodes)
@@ -107,7 +116,7 @@ fn decode_base64(input: &str) -> Option<String> {
     ] {
         if let Ok(bytes) = engine.decode(compact.as_bytes()) {
             if let Ok(text) = String::from_utf8(bytes) {
-                if text.to_ascii_lowercase().contains("vless://") {
+                if text.split_whitespace().any(supported) {
                     return Some(text);
                 }
             }
@@ -132,6 +141,16 @@ mod tests {
     fn accepts_base64() {
         let encoded = STANDARD.encode(LINK.as_bytes());
         assert_eq!(decode_subscription(&encoded).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn accepts_hy2_only_and_mixed_base64() {
+        let hy2 = "hy2://password@example.com:443?sni=example.com#HY2";
+        assert_eq!(decode_subscription(hy2).unwrap()[0].protocol(), "HY2");
+        let mixed = STANDARD.encode(format!("{LINK}\n{hy2}\nhysteria2://pass@other.example:8443#other\nunsupported://x"));
+        let nodes = decode_subscription(&mixed).unwrap();
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(nodes[0].protocol(), "VLESS");
     }
 
     #[test]

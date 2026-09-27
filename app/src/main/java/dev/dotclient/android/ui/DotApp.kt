@@ -62,7 +62,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.dotclient.android.BuildConfig
 import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.Subscription
-import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.core.model.ProxyNode
 import dev.dotclient.android.core.splittunnel.SplitTunnelConfig
 import dev.dotclient.android.core.splittunnel.SplitTunnelMode
 import dev.dotclient.android.core.splittunnel.SplitTunnelStore
@@ -357,7 +357,7 @@ private fun TrafficSummary(state: DotUiState) {
 
 @Composable
 private fun ActiveNodeCard(
-    profile: VlessProfile?,
+    profile: ProxyNode?,
     runningName: String?,
     latencyMs: Long?,
     onClick: () -> Unit,
@@ -666,7 +666,7 @@ private fun NodeViewSwitcher(
 
 @Composable
 private fun NodeRow(
-    profile: VlessProfile,
+    profile: ProxyNode,
     selected: Boolean,
     running: Boolean,
     latencyMs: Long?,
@@ -703,7 +703,7 @@ private fun NodeRow(
             }
             Spacer(Modifier.height(3.dp))
             Text(
-                "${profile.security.name.lowercase()} · ${profile.transport.name.lowercase()}",
+                "${profile.protocol} · ${profile.security.name.lowercase()} · ${profile.transport.name.lowercase()}",
                 color = Color(0xFF5F5F5F),
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
@@ -926,11 +926,11 @@ private fun AboutScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         Spacer(Modifier.height(42.dp))
         Text("dot.", style = MaterialTheme.typography.displayLarge)
         Spacer(Modifier.height(8.dp))
-        Text("minimal VLESS client for Android", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+        Text("VLESS and Hysteria2 client for Android", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(34.dp))
         AboutValue("version", BuildConfig.VERSION_NAME.removeSuffix("-debug"))
         AboutValue("core", "libXray v26.7.28")
-        AboutValue("protocol", "VLESS / REALITY")
+        AboutValue("protocol", "VLESS / REALITY / HY2")
         AboutValue("android", "API 26+")
         Spacer(Modifier.height(28.dp))
         Text("project", style = MaterialTheme.typography.titleLarge)

@@ -15,6 +15,7 @@ import android.os.Process
 import dev.dotclient.android.MainActivity
 import dev.dotclient.android.R
 import dev.dotclient.android.core.splittunnel.SplitTunnelStore
+import dev.dotclient.android.core.parser.Hysteria2UriParser
 import dev.dotclient.android.ui.LauncherIcon
 import dev.dotclient.android.ui.LauncherIconManager
 import libXray.DialerController
@@ -87,7 +88,7 @@ class DotVpnService : VpnService() {
                 val rawUri = intent.getStringExtra(EXTRA_VLESS_URI)
                 val nodeName = intent.getStringExtra(EXTRA_NODE_NAME)
                 if (rawUri.isNullOrBlank()) {
-                    publishState(VpnConnectionState.ERROR, message = "missing VLESS profile")
+                    publishState(VpnConnectionState.ERROR, message = "missing proxy node")
                     stopSelf()
                 } else {
                     userRequestedDisconnect = false
@@ -285,6 +286,13 @@ class DotVpnService : VpnService() {
     private fun uidTxBytes(uid: Int): Long = TrafficStats.getUidTxBytes(uid).takeIf { it >= 0L } ?: 0L
 
     private fun buildXrayConfig(rawUri: String, tunFd: Int): String {
+        if (rawUri.startsWith("hy2://", true) || rawUri.startsWith("hysteria2://", true)) {
+            val config = Hysteria2XrayConfig.fromUri(rawUri)
+            config.put("env", JSONObject().put("xray.tun.fd", tunFd.toString()))
+            config.put("inbounds", JSONArray().put(JSONObject().put("tag", "dot-tun")
+                .put("protocol", "tun").put("settings", JSONObject().put("name", "dot0").put("mtu", MTU))))
+            return config.toString()
+        }
         val conversionRequest = JSONObject()
             .put("apiVersion", LIBXRAY_API_VERSION)
             .put("method", "convertShareLinksToXrayJson")

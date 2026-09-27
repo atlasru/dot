@@ -1,6 +1,6 @@
 package dev.dotclient.android.core.subscription
 
-import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.core.model.ProxyNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -64,13 +64,13 @@ class SubscriptionDifferTest {
         host: String = "node.example",
         sni: String? = "node.example",
         rawUri: String = "vless://same@$host:443?security=reality#$name",
-    ) = VlessProfile(
+    ) = ProxyNode(
         id = "$name-id",
         name = name,
         host = host,
         port = 443,
         userId = "same",
-        security = VlessProfile.Security.REALITY,
+        security = ProxyNode.Security.REALITY,
         sni = sni,
         rawUri = rawUri,
     )

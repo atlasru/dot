@@ -9,7 +9,7 @@ use std::{
 
 use reqwest::{blocking::Client, Proxy};
 
-use crate::{config::build_url_test_config, job::ProcessJob, model::VlessNode};
+use crate::{config::build_url_test_config, job::ProcessJob, model::ProxyNode};
 
 const TEST_URL: &str = "http://cp.cloudflare.com/";
 
@@ -22,7 +22,7 @@ pub fn test_active_connection() -> Result<u64, String> {
     measure_request(&client)
 }
 
-pub fn test_node(runtime_source: &Path, work_dir: &Path, node: &VlessNode) -> Result<u64, String> {
+pub fn test_node(runtime_source: &Path, work_dir: &Path, node: &ProxyNode) -> Result<u64, String> {
     fs::create_dir_all(work_dir).map_err(|e| format!("failed to create URL test directory: {e}"))?;
     let xray = runtime_source.join("xray.exe");
     if !xray.is_file() {
@@ -53,7 +53,7 @@ pub fn test_node(runtime_source: &Path, work_dir: &Path, node: &VlessNode) -> Re
         return Err(if stderr.is_empty() {
             "Xray rejected the URL test config".into()
         } else {
-            stderr
+            node.redact(&stderr)
         });
     }
 

@@ -3,7 +3,7 @@ use std::{fs, path::{Path, PathBuf}, sync::Mutex};
 use crate::{
     model::{
         AppPreferences, AppTheme, GroupView, NodeEditView, NodeLatency, NodeSortMode, PersistedState,
-        SelectionView, SubscriptionGroup, SubscriptionRefreshResult, VlessNode,
+        SelectionView, SubscriptionGroup, SubscriptionRefreshResult, ProxyNode,
     },
     node_sort::sort_nodes,
     subscription_diff,
@@ -76,7 +76,7 @@ impl Store {
         Ok(SelectionView { group_id: s.selected_group_id.clone(), node_id: s.selected_node_id.clone() })
     }
 
-    pub fn selected_node(&self) -> Result<VlessNode, String> {
+    pub fn selected_node(&self) -> Result<ProxyNode, String> {
         let s = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
         let group_id = s.selected_group_id.as_deref().ok_or("no subscription group selected")?;
         let node_id = s.selected_node_id.as_deref().ok_or("no node selected")?;
@@ -95,15 +95,15 @@ impl Store {
         s.groups.iter().find(|g| g.id == id).map(|group| build_group_view(&s, group)).ok_or_else(|| "subscription group disappeared after save".into())
     }
 
-    pub fn apply_refresh(&self, group_id: &str, nodes: Vec<VlessNode>, updated_at_ms: u64) -> Result<SubscriptionRefreshResult, String> {
+    pub fn apply_refresh(&self, group_id: &str, nodes: Vec<ProxyNode>, updated_at_ms: u64) -> Result<SubscriptionRefreshResult, String> {
         self.refresh_transaction(group_id, nodes, updated_at_ms, None)
     }
 
-    pub fn apply_source_refresh(&self, group_id: &str, nodes: Vec<VlessNode>, updated_at_ms: u64, name: String, url: String) -> Result<SubscriptionRefreshResult, String> {
+    pub fn apply_source_refresh(&self, group_id: &str, nodes: Vec<ProxyNode>, updated_at_ms: u64, name: String, url: String) -> Result<SubscriptionRefreshResult, String> {
         self.refresh_transaction(group_id, nodes, updated_at_ms, Some((name, url)))
     }
 
-    fn refresh_transaction(&self, group_id: &str, nodes: Vec<VlessNode>, updated_at_ms: u64, source: Option<(String, String)>) -> Result<SubscriptionRefreshResult, String> {
+    fn refresh_transaction(&self, group_id: &str, nodes: Vec<ProxyNode>, updated_at_ms: u64, source: Option<(String, String)>) -> Result<SubscriptionRefreshResult, String> {
         if nodes.is_empty() { return Err("subscription contains no usable nodes".into()); }
         let mut guard = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
         let mut s = guard.clone();
@@ -179,11 +179,11 @@ impl Store {
         self.inner.lock().map_err(|_| "store lock poisoned".to_string())?.groups.iter().find(|g| g.id == group_id).map(|g| g.url.clone()).ok_or_else(|| "subscription group not found".into())
     }
 
-    pub fn group_nodes(&self, group_id: &str) -> Result<Vec<VlessNode>, String> {
+    pub fn group_nodes(&self, group_id: &str) -> Result<Vec<ProxyNode>, String> {
         self.inner.lock().map_err(|_| "store lock poisoned".to_string())?.groups.iter().find(|g| g.id == group_id).map(|g| g.nodes.clone()).ok_or_else(|| "subscription group not found".into())
     }
 
-    pub fn node(&self, group_id: &str, node_id: &str) -> Result<VlessNode, String> {
+    pub fn node(&self, group_id: &str, node_id: &str) -> Result<ProxyNode, String> {
         let s = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
         s.groups.iter().find(|g| g.id == group_id).and_then(|g| g.nodes.iter().find(|n| n.id == node_id)).cloned().ok_or_else(|| "node not found".into())
     }
@@ -302,6 +302,7 @@ fn replace_file(source: &Path, target: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hysteria2::parse_hysteria2;
     #[test]
     fn old_state_without_preferences_or_node_metadata_migrates() {
         let state: PersistedState = serde_json::from_str(r#"{"groups":[]}"#).unwrap();
@@ -309,6 +310,32 @@ mod tests {
         assert!(state.preferences.close_to_tray);
         assert!(state.latencies.is_empty());
         assert!(state.sort_modes.is_empty());
+    }
+
+    #[test]
+    fn v030_state_roundtrip_preserves_user_metadata() {
+        let old_node = crate::vless::parse_vless("vless://test@example.com:443?security=tls#old").unwrap();
+        let mut legacy = serde_json::to_value(&old_node).unwrap();
+        legacy.as_object_mut().unwrap().remove("proxy_config");
+        let id = old_node.id.clone();
+        let old_state = serde_json::json!({
+            "groups": [{"id":"group", "name":"saved", "url":"https://example.com/sub",
+                "updated_at_ms": 123, "nodes":[legacy]}],
+            "selected_group_id": "group", "selected_node_id": id,
+            "favorites": [id], "latencies": {(id.clone()): {"node_id": id, "latency_ms": 42, "failed": false, "tested_at_ms": 12}},
+            "sort_modes": {"group": "delay"},
+            "preferences": {"theme": "matrix", "close_to_tray": false, "refresh_on_start": true, "refresh_interval_hours": 6}
+        });
+        let mut state: PersistedState = serde_json::from_value(old_state).unwrap();
+        assert_eq!(state.groups[0].nodes[0].protocol(), "VLESS");
+        state.groups[0].nodes.push(parse_hysteria2("hy2://pass@other.example#hy2").unwrap());
+        let reopened: PersistedState = serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+        assert_eq!(reopened.selected_node_id, Some(id.clone()));
+        assert!(reopened.favorites.contains(&id));
+        assert_eq!(reopened.latencies[&id].latency_ms, Some(42));
+        assert_eq!(reopened.sort_modes["group"], NodeSortMode::Delay);
+        assert!(reopened.preferences.refresh_on_start);
+        assert_eq!(reopened.groups[0].nodes[1].protocol(), "HY2");
     }
 }
 
@@ -327,8 +354,8 @@ mod subscription_management_tests {
         }
     }
     impl Drop for Fixture { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.dir); } }
-    fn node(name: &str) -> VlessNode { parse_vless(&format!("vless://test@example.com:443?security=tls&type=tcp#{name}")).unwrap() }
-    fn group(id: &str, nodes: Vec<VlessNode>) -> SubscriptionGroup {
+    fn node(name: &str) -> ProxyNode { parse_vless(&format!("vless://test@example.com:443?security=tls&type=tcp#{name}")).unwrap() }
+    fn group(id: &str, nodes: Vec<ProxyNode>) -> SubscriptionGroup {
         SubscriptionGroup { id: id.into(), name: id.into(), url: format!("https://example.invalid/{id}"), updated_at_ms: 1, nodes }
     }
     #[test]
