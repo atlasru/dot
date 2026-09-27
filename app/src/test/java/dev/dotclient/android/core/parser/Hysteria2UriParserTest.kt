@@ -37,5 +37,7 @@ class Hysteria2UriParserTest {
         val redacted = SecretRedactor.raw("hy2://secret@example.com?obfs-password=maskSecret", "")
         assertFalse(redacted.contains("secret"))
         assertFalse(redacted.contains("maskSecret"))
+        val node = Hysteria2UriParser.parse("hy2://secret@example.com?obfs=salamander&obfs-password=maskSecret").getOrThrow()
+        assertEquals("*** and ***", node.redact("secret and maskSecret"))
     }
 }

@@ -11,6 +11,7 @@ import org.json.JSONObject
 data class StoredSubscriptions(
     val subscriptions: List<Subscription> = emptyList(),
     val selectedSubscriptionId: String? = null,
+    val loadError: String? = null,
 )
 
 class SubscriptionStore(context: Context) {
@@ -64,7 +65,7 @@ class SubscriptionStore(context: Context) {
             StoredSubscriptions(groups, selectedSubscriptionId)
         }.getOrElse { error ->
             loadFailure = error
-            StoredSubscriptions()
+            StoredSubscriptions(loadError = "Stored subscriptions could not be read. Original data is preserved; export a backup before resetting the app.")
         }
     }
 

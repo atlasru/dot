@@ -80,6 +80,7 @@ class MainViewModel(
         return DotUiState(
             subscriptions = stored.subscriptions,
             selectedSubscriptionId = stored.selectedSubscriptionId,
+            message = stored.loadError,
             autoNodeEnabled = uiPreferences.getBoolean("auto_node", false),
             themeMode = DotThemeMode.fromStorage(uiPreferences.getString("theme", null)),
         )
@@ -510,7 +511,7 @@ class MainViewModel(
                             nodeLatenciesMs = current.nodeLatenciesMs - profile.id,
                             nodeLatencyFailedIds = current.nodeLatencyFailedIds + profile.id,
                             testingNodeIds = current.testingNodeIds - profile.id,
-                            message = error.message ?: "url test failed",
+                            message = profile.redact(error.message ?: "url test failed"),
                         )
                     }
                 }
@@ -672,6 +673,7 @@ class MainViewModel(
 
     private fun persist() {
         val current = state.value
-        subscriptionStore.save(current.subscriptions, current.selectedSubscriptionId)
+        runCatching { subscriptionStore.save(current.subscriptions, current.selectedSubscriptionId) }
+            .onFailure { error -> mutableState.update { it.copy(message = error.message) } }
     }
 }

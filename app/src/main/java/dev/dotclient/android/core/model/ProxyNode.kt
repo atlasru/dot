@@ -29,6 +29,15 @@ data class ProxyNode(
         is ProxyConfig.Hysteria2 -> "HY2"
     }
     override fun toString(): String = "ProxyNode(id=$id, name=$name, host=$host, port=$port, protocol=$protocol)"
+    fun redact(value: String): String {
+        var safe = value.replace(rawUri, "[proxy URI redacted]")
+        val secrets = when (val payload = config) {
+            ProxyConfig.Vless -> listOf(userId)
+            is ProxyConfig.Hysteria2 -> listOfNotNull(payload.auth, payload.salamanderPassword)
+        }
+        secrets.filter(String::isNotEmpty).forEach { safe = safe.replace(it, "***") }
+        return safe
+    }
 }
 
 sealed class ProxyConfig {

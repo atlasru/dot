@@ -186,7 +186,7 @@ class DotVpnService : VpnService() {
                 publishState(VpnConnectionState.CONNECTED, nodeName, "connected")
                 startTrafficMeter(nodeName)
             } catch (error: Throwable) {
-                val failure = VpnErrorClassifier.classify(error)
+                val failure = VpnErrorClassifier.classify(error, rawUri)
                 shutdownCore()
                 if (userRequestedDisconnect || desiredRawUri == null) {
                     publishState(VpnConnectionState.ERROR, nodeName, failure.userMessage, failure)

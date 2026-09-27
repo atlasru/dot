@@ -56,7 +56,7 @@ pub fn parse_hysteria2(raw: &str) -> Result<ProxyNode, String> {
     let name = url.fragment().filter(|v| !v.is_empty()).map(decode).transpose()?
         .unwrap_or_else(|| format!("{host}:{port}"));
     let sni = get(&["sni", "serverName", "peer"]);
-    let alpn = get(&["alpn"]).map(|v| v.split(',').map(str::trim)
+    let alpn: Vec<String> = get(&["alpn"]).map(|v| v.split(',').map(str::trim)
         .filter(|v| !v.is_empty()).map(str::to_string).collect()).unwrap_or_default();
     let proxy_config = ProxyConfig::Hysteria2(Hysteria2Config {
         auth, sni: sni.clone(), insecure, alpn: alpn.clone(), congestion,
