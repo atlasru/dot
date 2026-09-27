@@ -25,16 +25,18 @@ class SubscriptionStore(context: Context) {
             val groupsJson = root.optJSONArray("subscriptions") ?: JSONArray()
             val groups = buildList {
                 for (index in 0 until groupsJson.length()) {
-                    val item = groupsJson.optJSONObject(index) ?: continue
-                    val id = item.optString("id").takeIf { it.isNotBlank() } ?: continue
+                    val item = groupsJson.optJSONObject(index) ?: error("Invalid stored subscription")
+                    val id = item.optString("id").takeIf { it.isNotBlank() }
+                        ?: error("Stored subscription has no ID")
                     val name = item.optString("name").ifBlank { "vpn${index + 1}" }
-                    val url = item.optString("url").takeIf { it.isNotBlank() } ?: continue
+                    val url = item.optString("url").takeIf { it.isNotBlank() }
+                        ?: error("Stored subscription has no URL")
                     val rawProfiles = item.optJSONArray("profiles") ?: JSONArray()
                     val profiles = buildList {
                         for (profileIndex in 0 until rawProfiles.length()) {
                             val uri = rawProfiles.optString(profileIndex)
-                            (if (uri.startsWith("vless://", true)) VlessUriParser.parse(uri)
-                            else Hysteria2UriParser.parse(uri)).getOrNull()?.let(::add)
+                            add((if (uri.startsWith("vless://", true)) VlessUriParser.parse(uri)
+                            else Hysteria2UriParser.parse(uri)).getOrThrow())
                         }
                     }
                     val selectedRawUri = item.optString("selectedProfileUri").takeIf { it.isNotBlank() }
