@@ -57,7 +57,7 @@ export default function SubscriptionManager({ groups, prefs, vpn, notices, onCha
         <div className="filter-row"><button type="button" className={mode === "url" ? "segment active" : "segment"} onClick={() => setMode("url")}>SUBSCRIPTION URL</button><button type="button" className={mode === "text" ? "segment active" : "segment"} onClick={() => setMode("text")}>IMPORT LINKS</button></div>
         <label>GROUP NAME<input required value={name} onChange={e => setName(e.target.value)} placeholder="My servers" /></label>
         {mode === "url" ? <label>URL<input required type="url" autoComplete="off" spellCheck={false} value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…" /></label> : <>
-          <label>VLESS LINKS OR BASE64<textarea required value={text} onChange={e => setText(e.target.value)} placeholder="Paste one or more vless:// links" spellCheck={false} /></label>
+          <label>VLESS / HY2 LINKS OR BASE64<textarea required value={text} onChange={e => setText(e.target.value)} placeholder="Paste vless://, hy2:// or hysteria2:// links" spellCheck={false} /></label>
           <label>IMPORT FROM FILE<input type="file" accept=".txt,.conf,.list" disabled={busy} onChange={e => { loadFile(e.target.files?.[0]); e.target.value = ""; }} /></label>
         </>}
         <button className="quiet" disabled={busy || !name.trim() || !(mode === "url" ? url.trim() : text.trim())}>{busy ? "WORKING…" : mode === "url" ? "ADD SUBSCRIPTION" : "IMPORT NODES"}</button>

@@ -27,7 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.core.model.ProxyNode
 import dev.dotclient.android.core.subscription.NodeEdit
 
 private val UpdateDialogRed = Color(0xFFFF2D2D)
@@ -189,7 +189,7 @@ private fun DetailHeader(text: String) {
 }
 
 @Composable
-private fun DetailProfile(symbol: String, profile: VlessProfile, deleted: Boolean = false) {
+private fun DetailProfile(symbol: String, profile: ProxyNode, deleted: Boolean = false) {
     Text(
         "$symbol ${profile.name}",
         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),

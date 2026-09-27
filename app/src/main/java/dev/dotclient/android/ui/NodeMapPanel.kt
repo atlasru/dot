@@ -37,7 +37,7 @@ import androidx.compose.ui.unit.dp
 import dev.dotclient.android.core.geo.NodeGeoLocation
 import dev.dotclient.android.core.geo.NodeGeoResolver
 import dev.dotclient.android.core.geo.NodeGeoSource
-import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.core.model.ProxyNode
 import java.util.Locale
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -51,7 +51,7 @@ private data class CountryCluster(
     val name: String,
     val latitude: Double,
     val longitude: Double,
-    val profiles: List<VlessProfile>,
+    val profiles: List<ProxyNode>,
     val cities: List<String>,
     val fallbackOnly: Boolean,
 )
@@ -90,7 +90,7 @@ fun NodeMapPanel(
         }
     }
 
-    val profilesById = remember(group.profiles) { group.profiles.associateBy(VlessProfile::id) }
+    val profilesById = remember(group.profiles) { group.profiles.associateBy(ProxyNode::id) }
     val clusters = remember(locations, profilesById) {
         locations.values
             .mapNotNull { location -> profilesById[location.profileId]?.let { it to location } }
@@ -206,7 +206,7 @@ private fun CountrySheet(
 
         Spacer(Modifier.height(7.dp))
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 170.dp)) {
-            items(orderedProfiles, key = VlessProfile::id) { profile ->
+            items(orderedProfiles, key = ProxyNode::id) { profile ->
                 val running = state.vpnConnected && profile.name == state.runningNodeName
                 val failed = profile.id in state.nodeLatencyFailedIds
                 Row(

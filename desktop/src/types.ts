@@ -9,6 +9,7 @@ export interface NodeView {
   name: string;
   host: string;
   port: number;
+  protocol: "VLESS" | "HY2";
   security: Security;
   transport: Transport;
   latency_ms: number | null;

@@ -45,7 +45,7 @@ class NodeSorterTest {
         assertEquals(profiles, NodeSorter.sort(profiles, NodeSortMode.DELAY, emptyMap()))
     }
 
-    private fun profile(name: String) = VlessProfile(
+    private fun profile(name: String) = ProxyNode(
         id = "$name-id",
         name = name,
         host = "$name.example",

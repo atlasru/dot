@@ -1,12 +1,13 @@
 # dot.
 
-Minimal VLESS client for Android and Windows with an AMOLED-first, Nothing-inspired interface.
+Minimal VLESS and Hysteria2 client for Android and Windows with an AMOLED-first, Nothing-inspired interface.
 
-Current unified Android / Windows version: **0.3.0**
+Current stable Android / Windows release: **0.3.0**. The 0.4.0 branch is in development.
 
 ## Features
 
 - VLESS with REALITY / TLS
+- Hysteria2 over TLS and UDP/QUIC (`hy2://` and `hysteria2://`); optional Salamander finalmask and packet size range
 - HTTPS subscription import
 - plaintext and Base64 subscription decoding
 - multiple subscription groups

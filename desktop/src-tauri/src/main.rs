@@ -5,6 +5,7 @@ mod config;
 #[cfg(test)] mod config_smoke;
 mod engine;
 mod geo;
+mod hysteria2;
 mod refresh;
 #[cfg(windows)] mod job;
 mod model;

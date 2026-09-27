@@ -319,7 +319,7 @@ function ConnectionPanel({ group, node, vpn, traffic, testing, onToggleVpn, onUr
       />
       <div className={`phase ${vpn.phase}`}>{vpn.phase.toUpperCase()}</div>
       <button className="active-node-button" onClick={onOpenNodes}>{displayNode}</button>
-      <div className="active-node-meta">{group?.name ?? "NO SUBSCRIPTION"}{node ? ` · ${node.security} · ${node.transport}` : ""}</div>
+      <div className="active-node-meta">{group?.name ?? "NO SUBSCRIPTION"}{node ? ` · ${node.protocol} · ${node.security} · ${node.transport}` : ""}</div>
 
       <div className="connection-actions">
         <button className={`url-test-button ${node?.latency_failed ? "failed" : ""}`} disabled={!node || pending || testing || !currentNode} onClick={onUrlTest}>

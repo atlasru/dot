@@ -7,7 +7,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.Subscription
-import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.core.model.ProxyNode
 import dev.dotclient.android.core.parser.SubscriptionDecoder
 import dev.dotclient.android.core.reliability.AutoNodeSelector
 import dev.dotclient.android.core.subscription.SecretRedactor
@@ -80,6 +80,7 @@ class MainViewModel(
         return DotUiState(
             subscriptions = stored.subscriptions,
             selectedSubscriptionId = stored.selectedSubscriptionId,
+            message = stored.loadError,
             autoNodeEnabled = uiPreferences.getBoolean("auto_node", false),
             themeMode = DotThemeMode.fromStorage(uiPreferences.getString("theme", null)),
         )
@@ -158,7 +159,7 @@ class MainViewModel(
                 val message = when (decoded.format) {
                     SubscriptionDecoder.DecodeResult.Format.EMPTY -> "The subscription is empty."
                     SubscriptionDecoder.DecodeResult.Format.UNSUPPORTED -> "The server responded, but dot. could not parse the subscription."
-                    else -> "The subscription contains no supported VLESS nodes."
+                    else -> "The subscription contains no supported nodes."
                 }
                 showSubscriptionUpdateError(subscription, SubscriptionContentException(message))
                 return@launch
@@ -334,7 +335,7 @@ class MainViewModel(
         viewModelScope.launch { runAllNodeTests(subscriptionId, activateDelaySort = false, selectAutoAfter = true) }
     }
 
-    private fun resolveAutoProfile(group: Subscription? = state.value.selectedSubscription): VlessProfile? {
+    private fun resolveAutoProfile(group: Subscription? = state.value.selectedSubscription): ProxyNode? {
         val target = group ?: return null
         return AutoNodeSelector.select(
             profiles = target.profiles,
@@ -344,7 +345,7 @@ class MainViewModel(
         )
     }
 
-    private fun resolvedConnectionProfile(): VlessProfile? {
+    private fun resolvedConnectionProfile(): ProxyNode? {
         val current = state.value
         val group = current.selectedSubscription ?: return null
         val profile = if (current.autoNodeEnabled) resolveAutoProfile(group) else current.selectedProfile
@@ -425,7 +426,7 @@ class MainViewModel(
                 requestingVpnPermission = false,
                 vpnPermissionGranted = true,
                 vpnState = VpnConnectionState.CONNECTING,
-                message = if (it.autoNodeEnabled) "AUTO · connecting ${profile.name}…" else "starting VLESS tunnel…",
+                message = if (it.autoNodeEnabled) "AUTO · connecting ${profile.name}…" else "starting ${profile.protocol} tunnel…",
                 vpnFailureCategory = null,
                 vpnFailureDetail = null,
                 reconnectAttempt = 0,
@@ -485,7 +486,7 @@ class MainViewModel(
         uiPreferences.edit().putString("theme", theme.name).apply()
     }
 
-    fun testNode(profile: VlessProfile) {
+    fun testNode(profile: ProxyNode) {
         if (state.value.testingNodeIds.contains(profile.id)) return
         viewModelScope.launch {
             mutableState.update {
@@ -510,7 +511,7 @@ class MainViewModel(
                             nodeLatenciesMs = current.nodeLatenciesMs - profile.id,
                             nodeLatencyFailedIds = current.nodeLatencyFailedIds + profile.id,
                             testingNodeIds = current.testingNodeIds - profile.id,
-                            message = error.message ?: "url test failed",
+                            message = profile.redact(error.message ?: "url test failed"),
                         )
                     }
                 }
@@ -661,7 +662,7 @@ class MainViewModel(
 
     fun redactedSubscriptionUrl(url: String): String = SecretRedactor.url(url)
 
-    private fun startVpn(profile: VlessProfile) {
+    private fun startVpn(profile: ProxyNode) {
         val application = getApplication<Application>()
         val intent = Intent(application, DotVpnService::class.java)
             .setAction(DotVpnService.ACTION_CONNECT)
@@ -672,6 +673,7 @@ class MainViewModel(
 
     private fun persist() {
         val current = state.value
-        subscriptionStore.save(current.subscriptions, current.selectedSubscriptionId)
+        runCatching { subscriptionStore.save(current.subscriptions, current.selectedSubscriptionId) }
+            .onFailure { error -> mutableState.update { it.copy(message = error.message) } }
     }
 }

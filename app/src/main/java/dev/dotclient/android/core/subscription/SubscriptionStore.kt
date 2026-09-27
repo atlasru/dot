@@ -4,16 +4,19 @@ import android.content.Context
 import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.parser.VlessUriParser
+import dev.dotclient.android.core.parser.Hysteria2UriParser
 import org.json.JSONArray
 import org.json.JSONObject
 
 data class StoredSubscriptions(
     val subscriptions: List<Subscription> = emptyList(),
     val selectedSubscriptionId: String? = null,
+    val loadError: String? = null,
 )
 
 class SubscriptionStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private var loadFailure: Throwable? = null
 
     fun load(): StoredSubscriptions {
         val raw = preferences.getString(KEY_STATE, null) ?: return StoredSubscriptions()
@@ -22,15 +25,18 @@ class SubscriptionStore(context: Context) {
             val groupsJson = root.optJSONArray("subscriptions") ?: JSONArray()
             val groups = buildList {
                 for (index in 0 until groupsJson.length()) {
-                    val item = groupsJson.optJSONObject(index) ?: continue
-                    val id = item.optString("id").takeIf { it.isNotBlank() } ?: continue
+                    val item = groupsJson.optJSONObject(index) ?: error("Invalid stored subscription")
+                    val id = item.optString("id").takeIf { it.isNotBlank() }
+                        ?: error("Stored subscription has no ID")
                     val name = item.optString("name").ifBlank { "vpn${index + 1}" }
-                    val url = item.optString("url").takeIf { it.isNotBlank() } ?: continue
+                    val url = item.optString("url").takeIf { it.isNotBlank() }
+                        ?: error("Stored subscription has no URL")
                     val rawProfiles = item.optJSONArray("profiles") ?: JSONArray()
                     val profiles = buildList {
                         for (profileIndex in 0 until rawProfiles.length()) {
                             val uri = rawProfiles.optString(profileIndex)
-                            VlessUriParser.parse(uri).getOrNull()?.let(::add)
+                            add((if (uri.startsWith("vless://", true)) VlessUriParser.parse(uri)
+                            else Hysteria2UriParser.parse(uri)).getOrThrow())
                         }
                     }
                     val selectedRawUri = item.optString("selectedProfileUri").takeIf { it.isNotBlank() }
@@ -59,12 +65,14 @@ class SubscriptionStore(context: Context) {
                 .takeIf { selected -> groups.any { it.id == selected } }
                 ?: groups.firstOrNull()?.id
             StoredSubscriptions(groups, selectedSubscriptionId)
-        }.getOrElse {
-            StoredSubscriptions()
+        }.getOrElse { error ->
+            loadFailure = error
+            StoredSubscriptions(loadError = "Stored subscriptions could not be read. Original data is preserved; export a backup before resetting the app.")
         }
     }
 
     fun save(subscriptions: List<Subscription>, selectedSubscriptionId: String?) {
+        check(loadFailure == null) { "Subscription state could not be read; refusing to overwrite it" }
         val groups = JSONArray()
         subscriptions.forEach { subscription ->
             val profiles = JSONArray()

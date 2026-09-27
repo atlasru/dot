@@ -1,7 +1,7 @@
 package dev.dotclient.android.core.geo
 
 import android.content.Context
-import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.core.model.ProxyNode
 import java.net.Inet6Address
 import java.net.InetAddress
 import java.util.Locale
@@ -41,7 +41,7 @@ class NodeGeoResolver(context: Context) {
         .build()
     private val countryCenters = ConcurrentHashMap<String, CountryCenter>()
 
-    suspend fun resolve(profile: VlessProfile): NodeGeoLocation? = withContext(Dispatchers.IO) {
+    suspend fun resolve(profile: ProxyNode): NodeGeoLocation? = withContext(Dispatchers.IO) {
         readCached(profile)?.let { return@withContext it }
 
         val resolvedIp = resolvePublicIp(profile.host)
@@ -106,7 +106,7 @@ class NodeGeoResolver(context: Context) {
         )
     }
 
-    private fun fallbackFromName(profile: VlessProfile): NodeGeoLocation? {
+    private fun fallbackFromName(profile: ProxyNode): NodeGeoLocation? {
         val code = countryCodeFromNodeName(profile.name) ?: return null
         val center = countryCenters[code] ?: lookupCountryCenter(code)?.also { countryCenters[code] = it } ?: return null
         return NodeGeoLocation(
@@ -205,12 +205,12 @@ class NodeGeoResolver(context: Context) {
         Locale.Builder().setRegion(code).build().getDisplayCountry(Locale.ENGLISH)
     }.getOrDefault(code).ifBlank { code }
 
-    private fun cacheKey(profile: VlessProfile): String {
+    private fun cacheKey(profile: ProxyNode): String {
         val fallbackCode = countryCodeFromNodeName(profile.name).orEmpty()
         return "node:${profile.host.lowercase(Locale.ROOT)}:$fallbackCode"
     }
 
-    private fun readCached(profile: VlessProfile): NodeGeoLocation? {
+    private fun readCached(profile: ProxyNode): NodeGeoLocation? {
         val raw = preferences.getString(cacheKey(profile), null) ?: return null
         val json = runCatching { JSONObject(raw) }.getOrNull() ?: return null
         val storedAt = json.optLong("storedAt", 0L)
@@ -234,7 +234,7 @@ class NodeGeoResolver(context: Context) {
         )
     }
 
-    private fun writeCached(profile: VlessProfile, location: NodeGeoLocation) {
+    private fun writeCached(profile: ProxyNode, location: NodeGeoLocation) {
         val json = JSONObject()
             .put("storedAt", System.currentTimeMillis())
             .put("countryCode", location.countryCode)

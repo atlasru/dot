@@ -1,14 +1,16 @@
-use crate::model::VlessNode;
+use crate::model::ProxyNode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct NodeIdentity {
+    protocol: &'static str,
     user_id: String,
     host: String,
     port: u16,
 }
 
-fn identity(node: &VlessNode) -> NodeIdentity {
+fn identity(node: &ProxyNode) -> NodeIdentity {
     NodeIdentity {
+        protocol: node.protocol(),
         user_id: node.user_id.to_lowercase(),
         host: node.host.to_lowercase(),
         port: node.port,
@@ -17,27 +19,27 @@ fn identity(node: &VlessNode) -> NodeIdentity {
 
 #[derive(Debug, Clone)]
 pub struct NodeMatch {
-    pub before: VlessNode,
-    pub after: VlessNode,
+    pub before: ProxyNode,
+    pub after: ProxyNode,
 }
 
 #[derive(Debug, Clone)]
 pub struct NodeEdit {
-    pub before: VlessNode,
-    pub after: VlessNode,
+    pub before: ProxyNode,
+    pub after: ProxyNode,
     pub changed_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct SubscriptionDiff {
-    pub added: Vec<VlessNode>,
-    pub deleted: Vec<VlessNode>,
+    pub added: Vec<ProxyNode>,
+    pub deleted: Vec<ProxyNode>,
     pub edited: Vec<NodeEdit>,
     pub unchanged: Vec<NodeMatch>,
 }
 
 impl SubscriptionDiff {
-    pub fn replacement_for(&self, old_node_id: &str) -> Option<&VlessNode> {
+    pub fn replacement_for(&self, old_node_id: &str) -> Option<&ProxyNode> {
         self.unchanged
             .iter()
             .find(|entry| entry.before.id == old_node_id)
@@ -51,7 +53,7 @@ impl SubscriptionDiff {
     }
 }
 
-pub fn calculate(old_nodes: &[VlessNode], new_nodes: &[VlessNode]) -> SubscriptionDiff {
+pub fn calculate(old_nodes: &[ProxyNode], new_nodes: &[ProxyNode]) -> SubscriptionDiff {
     let mut identities = Vec::<NodeIdentity>::new();
     for node in old_nodes.iter().chain(new_nodes.iter()) {
         let key = identity(node);
@@ -63,12 +65,12 @@ pub fn calculate(old_nodes: &[VlessNode], new_nodes: &[VlessNode]) -> Subscripti
     let mut diff = SubscriptionDiff::default();
 
     for key in identities {
-        let mut old_remaining: Vec<VlessNode> = old_nodes
+        let mut old_remaining: Vec<ProxyNode> = old_nodes
             .iter()
             .filter(|node| identity(node) == key)
             .cloned()
             .collect();
-        let mut new_remaining: Vec<VlessNode> = new_nodes
+        let mut new_remaining: Vec<ProxyNode> = new_nodes
             .iter()
             .filter(|node| identity(node) == key)
             .cloned()
@@ -111,7 +113,7 @@ pub fn calculate(old_nodes: &[VlessNode], new_nodes: &[VlessNode]) -> Subscripti
     diff
 }
 
-fn changed_fields(before: &VlessNode, after: &VlessNode) -> Vec<String> {
+fn changed_fields(before: &ProxyNode, after: &ProxyNode) -> Vec<String> {
     let mut fields = Vec::new();
     if before.name != after.name { fields.push("name".into()); }
     if !before.host.eq_ignore_ascii_case(&after.host) { fields.push("host".into()); }
@@ -131,15 +133,17 @@ fn changed_fields(before: &VlessNode, after: &VlessNode) -> Vec<String> {
     if before.alpn != after.alpn { fields.push("ALPN".into()); }
     if before.spider_x != after.spider_x { fields.push("spiderX".into()); }
     if before.mldsa65_verify != after.mldsa65_verify { fields.push("ML-DSA verification".into()); }
+    if before.proxy_config != after.proxy_config { fields.push("protocol settings".into()); }
     fields
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hysteria2::parse_hysteria2;
     use crate::vless::parse_vless;
 
-    fn node(uri: &str) -> VlessNode { parse_vless(uri).unwrap() }
+    fn node(uri: &str) -> ProxyNode { parse_vless(uri).unwrap() }
 
     #[test]
     fn keeps_exact_node_unchanged() {
@@ -184,5 +188,16 @@ mod tests {
         assert_eq!(diff.replacement_for(&exact.id).map(|node| node.raw_uri.as_str()), Some(fresh_exact.raw_uri.as_str()));
         assert_eq!(diff.replacement_for(&old_other.id).map(|node| node.raw_uri.as_str()), Some(fresh_other.raw_uri.as_str()));
         assert_eq!(diff.edited.len(), 1);
+    }
+
+    #[test]
+    fn separates_protocols_and_preserves_hy2_identity_on_auth_edit() {
+        let vless = node("vless://same@example.com:443?security=tls#vless");
+        let before = parse_hysteria2("hy2://old@example.com:443?sni=first#hy2").unwrap();
+        let after = parse_hysteria2("hysteria2://new@example.com:443?sni=second#hy2").unwrap();
+        let diff = calculate(&[vless.clone(), before.clone()], &[vless, after]);
+        assert_eq!(diff.unchanged.len(), 1);
+        assert_eq!(diff.edited.len(), 1);
+        assert_eq!(diff.replacement_for(&before.id).unwrap().protocol(), "HY2");
     }
 }
