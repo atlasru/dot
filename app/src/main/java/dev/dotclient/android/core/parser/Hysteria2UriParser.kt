@@ -18,6 +18,9 @@ object Hysteria2UriParser {
         val host = (uri.host ?: if (hostPort.startsWith('[')) hostPort.substringAfter('[').substringBefore(']')
             else hostPort.substringBefore(':')).trim('[', ']')
         require(host.isNotBlank()) { "Hysteria2 host is missing" }
+        val explicitPort = if (hostPort.startsWith('[')) hostPort.substringAfter(']', "").removePrefix(":")
+            else hostPort.substringAfter(':', "")
+        require(explicitPort.isEmpty() || explicitPort.toIntOrNull() != null) { "Invalid Hysteria2 port" }
         val port = if (uri.port == -1) 443 else uri.port
         require(port in 1..65535) { "Invalid Hysteria2 port" }
         val auth = uri.rawUserInfo?.decode().orEmpty()
