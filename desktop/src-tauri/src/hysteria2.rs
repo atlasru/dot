@@ -16,7 +16,7 @@ pub fn parse_hysteria2(raw: &str) -> Result<ProxyNode, String> {
     let host = url.host_str().ok_or("Hysteria2 host is missing")?
         .trim_matches(|c| c == '[' || c == ']').to_string();
     let port = url.port().unwrap_or(443);
-    let decode = |value: &str| percent_decode_str(value).decode_utf8().map(str::to_string)
+    let decode = |value: &str| percent_decode_str(value).decode_utf8().map(|v| v.into_owned())
         .map_err(|_| "invalid Hysteria2 percent encoding".to_string());
     let auth = match url.password() {
         Some(password) => format!("{}:{}", decode(url.username())?, decode(password)?),
