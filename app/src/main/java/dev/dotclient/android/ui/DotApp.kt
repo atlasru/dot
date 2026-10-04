@@ -845,6 +845,9 @@ private fun SettingsScreen(
                     shape = RoundedCornerShape(2.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("SAVE", style = MaterialTheme.typography.labelLarge) }
+                state.message?.takeUnless { it.equals("connected", true) }?.let {
+                    Text(it, color = DotRed, style = MaterialTheme.typography.bodySmall)
+                }
                 TextButton(
                     onClick = { editorOpen = false },
                     modifier = Modifier.fillMaxWidth(),
