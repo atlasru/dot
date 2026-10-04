@@ -10,12 +10,13 @@ pub enum Security { None, Tls, Reality }
 #[serde(rename_all = "lowercase")]
 pub enum Transport { Raw, Websocket, Grpc, Xhttp, Httpupgrade }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VlessNode {
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ProxyNode {
     pub id: String,
     pub name: String,
     pub host: String,
     pub port: u16,
+    #[serde(default)]
     pub user_id: String,
     pub encryption: String,
     pub flow: Option<String>,
@@ -33,6 +34,51 @@ pub struct VlessNode {
     pub mode: Option<String>,
     pub alpn: Vec<String>,
     pub raw_uri: String,
+    #[serde(default)]
+    pub proxy_config: ProxyConfig,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "protocol", content = "config", rename_all = "lowercase")]
+pub enum ProxyConfig {
+    Vless,
+    Hysteria2(Hysteria2Config),
+}
+impl Default for ProxyConfig { fn default() -> Self { Self::Vless } }
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Hysteria2Config {
+    pub auth: String,
+    pub sni: Option<String>,
+    pub insecure: bool,
+    pub alpn: Vec<String>,
+    pub congestion: Option<String>,
+    pub up: Option<String>,
+    pub down: Option<String>,
+    pub salamander_password: Option<String>,
+    pub packet_size: Option<String>,
+}
+
+impl ProxyNode {
+    pub fn protocol(&self) -> &'static str {
+        match self.proxy_config { ProxyConfig::Vless => "VLESS", ProxyConfig::Hysteria2(_) => "HY2" }
+    }
+    pub fn redact(&self, text: &str) -> String {
+        let mut safe = text.replace(&self.raw_uri, "[proxy URI redacted]");
+        if let ProxyConfig::Hysteria2(config) = &self.proxy_config {
+            for secret in [Some(config.auth.as_str()), config.salamander_password.as_deref()].into_iter().flatten() {
+                if !secret.is_empty() { safe = safe.replace(secret, "***"); }
+            }
+        } else if !self.user_id.is_empty() { safe = safe.replace(&self.user_id, "***"); }
+        safe
+    }
+}
+impl std::fmt::Debug for ProxyNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProxyNode").field("id", &self.id).field("name", &self.name)
+            .field("host", &self.host).field("port", &self.port)
+            .field("protocol", &self.protocol()).finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,7 +87,9 @@ pub struct SubscriptionGroup {
     pub name: String,
     pub url: String,
     pub updated_at_ms: u64,
-    pub nodes: Vec<VlessNode>,
+    pub nodes: Vec<ProxyNode>,
+    #[serde(default)]
+    pub hwid: Option<crate::subscription_identity::SubscriptionIdentity>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -103,6 +151,7 @@ pub struct NodeView {
     pub name: String,
     pub host: String,
     pub port: u16,
+    pub protocol: &'static str,
     pub security: Security,
     pub transport: Transport,
     pub latency_ms: Option<u64>,
@@ -118,15 +167,17 @@ pub struct GroupView {
     pub sort_mode: NodeSortMode,
     pub remote: bool,
     pub nodes: Vec<NodeView>,
+    pub hwid: Option<crate::subscription_identity::SubscriptionIdentity>,
 }
 
-impl From<&VlessNode> for NodeView {
-    fn from(v: &VlessNode) -> Self {
+impl From<&ProxyNode> for NodeView {
+    fn from(v: &ProxyNode) -> Self {
         Self {
             id: v.id.clone(),
             name: v.name.clone(),
             host: v.host.clone(),
             port: v.port,
+            protocol: v.protocol(),
             security: v.security,
             transport: v.transport,
             latency_ms: None,
@@ -144,6 +195,7 @@ impl From<&SubscriptionGroup> for GroupView {
             sort_mode: NodeSortMode::Origin,
             remote: !v.url.is_empty(),
             nodes: v.nodes.iter().map(NodeView::from).collect(),
+            hwid: v.hwid.clone(),
         }
     }
 }
@@ -199,8 +251,8 @@ pub struct NodeChangeView {
     pub id: String,
     pub name: String,
 }
-impl From<&VlessNode> for NodeChangeView {
-    fn from(node: &VlessNode) -> Self { Self { id: node.id.clone(), name: node.name.clone() } }
+impl From<&ProxyNode> for NodeChangeView {
+    fn from(node: &ProxyNode) -> Self { Self { id: node.id.clone(), name: node.name.clone() } }
 }
 
 #[derive(Debug, Clone, Serialize)]

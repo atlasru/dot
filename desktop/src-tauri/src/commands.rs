@@ -11,6 +11,7 @@ use crate::{
     },
     storage::Store,
     subscription::SubscriptionClient,
+    subscription_identity::SubscriptionIdentity,
     url_test,
 };
 
@@ -97,10 +98,11 @@ pub fn set_node_sort(group_id: String, mode: String, state: State<'_, SharedStat
 }
 
 #[tauri::command]
-pub async fn add_subscription(name: String, url: String, state: State<'_, SharedState>) -> Result<GroupView, String> {
+pub async fn add_subscription(name: String, url: String, hwid: Option<String>, state: State<'_, SharedState>) -> Result<GroupView, String> {
     let url = validate_url(&url)?;
     let name = name.trim().to_string();
     if name.is_empty() { return Err("subscription name is empty".into()); }
+    let hwid = hwid.map(SubscriptionIdentity::parse).unwrap_or_else(SubscriptionIdentity::generate)?;
     let store = Arc::clone(&state.store);
     let service = Arc::clone(&state.refresh);
     tauri::async_runtime::spawn_blocking(move || {
@@ -108,9 +110,9 @@ pub async fn add_subscription(name: String, url: String, state: State<'_, Shared
         if store.groups().iter().any(|g| store.group_url(&g.id).ok().as_deref() == Some(&url)) {
             return Err("this subscription URL already exists".into());
         }
-        let nodes = SubscriptionClient::new()?.fetch(&url)?;
+        let nodes = SubscriptionClient::new()?.fetch(&url, &hwid)?;
         let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, format!("{url}:{}", now_ms()).as_bytes()).to_string();
-        store.upsert_group(SubscriptionGroup { id, name, url, updated_at_ms: now_ms(), nodes })
+        store.upsert_group(SubscriptionGroup { id, name, url, updated_at_ms: now_ms(), nodes, hwid: Some(hwid) })
     }).await.map_err(|_| "subscription task failed".to_string())?
 }
 
@@ -139,24 +141,29 @@ pub fn set_favorite(node_id: String, enabled: bool, state: State<'_, SharedState
 pub fn subscription_url(group_id: String, state: State<'_, SharedState>) -> Result<String, String> { state.store.group_url(&group_id) }
 
 #[tauri::command]
-pub async fn edit_subscription(group_id: String, name: String, url: String, state: State<'_, SharedState>) -> Result<(), String> {
+pub fn generate_subscription_hwid() -> Result<String, String> { Ok(SubscriptionIdentity::generate()?.as_str().to_string()) }
+
+#[tauri::command]
+pub async fn edit_subscription(group_id: String, name: String, url: String, hwid: Option<String>, state: State<'_, SharedState>) -> Result<(), String> {
     let name = name.trim().to_string();
     if name.is_empty() { return Err("subscription name is empty".into()); }
     let url = if url.trim().is_empty() { String::new() } else { validate_url(&url)? };
+    let hwid = hwid.map(SubscriptionIdentity::parse).transpose()?;
     let store = Arc::clone(&state.store);
     let service = Arc::clone(&state.refresh);
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = service.gate.lock().map_err(|_| "subscription lock poisoned".to_string())?;
         // A changed URL is fetched and parsed before any persisted state is replaced.
-        let old_url = store.group_url(&group_id)?;
+        let (old_url, old_hwid) = store.subscription_source(&group_id)?;
+        let hwid = hwid.unwrap_or(old_hwid);
         if old_url != url && !url.is_empty() {
-            let nodes = SubscriptionClient::new()?.fetch(&url)?;
-            let result = store.apply_source_refresh(&group_id, nodes, now_ms(), name, url);
+            let nodes = SubscriptionClient::new()?.fetch(&url, &hwid)?;
+            let result = store.apply_source_refresh(&group_id, nodes, now_ms(), name, url, hwid);
             service.record(&store, &group_id, &result);
             result?;
             Ok(())
         } else {
-            store.edit_group(&group_id, name, url)
+            store.edit_group(&group_id, name, url, hwid)
         }
     }).await.map_err(|_| "subscription task failed".to_string())?
 }
@@ -190,7 +197,7 @@ pub async fn import_nodes(name: String, text: String, state: State<'_, SharedSta
         let _guard = service.gate.lock().map_err(|_| "subscription lock poisoned".to_string())?;
         let nodes = crate::subscription::decode_subscription(&text)?;
         let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, format!("local:{name}:{}", now_ms()).as_bytes()).to_string();
-        store.upsert_group(SubscriptionGroup { id, name, url: String::new(), updated_at_ms: now_ms(), nodes })
+        store.upsert_group(SubscriptionGroup { id, name, url: String::new(), updated_at_ms: now_ms(), nodes, hwid: None })
     }).await.map_err(|_| "import task failed".to_string())?
 }
 

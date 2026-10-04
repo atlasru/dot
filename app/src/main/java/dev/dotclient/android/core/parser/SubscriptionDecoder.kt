@@ -1,11 +1,12 @@
 package dev.dotclient.android.core.parser
 
 import java.util.Base64
-import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.core.model.ProxyNode
+import dev.dotclient.android.core.subscription.SecretRedactor
 
 object SubscriptionDecoder {
     data class DecodeResult(
-        val profiles: List<VlessProfile>,
+        val profiles: List<ProxyNode>,
         val rejectedLines: List<String>,
         val format: Format,
     ) {
@@ -34,19 +35,19 @@ object SubscriptionDecoder {
             .map(String::trim)
             .filter(String::isNotBlank)
 
-        if (candidateLines.none { it.startsWith("vless://", ignoreCase = true) }) return null
+        if (candidateLines.none(::supported)) return null
 
-        val profiles = mutableListOf<VlessProfile>()
+        val profiles = mutableListOf<ProxyNode>()
         val rejected = mutableListOf<String>()
 
         candidateLines.forEach { line ->
-            if (!line.startsWith("vless://", ignoreCase = true)) {
-                rejected += line.take(160)
+            if (!supported(line)) {
+                rejected += SecretRedactor.raw(line.take(160), "")
                 return@forEach
             }
-            VlessUriParser.parse(line)
+            (if (line.startsWith("vless://", true)) VlessUriParser.parse(line) else Hysteria2UriParser.parse(line))
                 .onSuccess(profiles::add)
-                .onFailure { rejected += redact(line) }
+                .onFailure { rejected += SecretRedactor.raw(line, "") }
         }
 
         return DecodeResult(profiles, rejected, DecodeResult.Format.PLAINTEXT)
@@ -61,6 +62,6 @@ object SubscriptionDecoder {
         return runCatching { bytes.toString(Charsets.UTF_8) }.getOrNull()
     }
 
-    private fun redact(value: String): String =
-        value.replace(Regex("vless://[^@]+@", RegexOption.IGNORE_CASE), "vless://***@")
+    private fun supported(value: String) = listOf("vless://", "hy2://", "hysteria2://")
+        .any { value.startsWith(it, ignoreCase = true) }
 }

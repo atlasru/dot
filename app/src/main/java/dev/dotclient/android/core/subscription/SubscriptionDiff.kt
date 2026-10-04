@@ -1,54 +1,56 @@
 package dev.dotclient.android.core.subscription
 
-import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.core.model.ProxyNode
 import java.util.Locale
 
 data class NodeIdentity(
+    val protocol: String,
     val userId: String,
     val host: String,
     val port: Int,
 )
 
-fun VlessProfile.nodeIdentity(): NodeIdentity = NodeIdentity(
+fun ProxyNode.nodeIdentity(): NodeIdentity = NodeIdentity(
+    protocol = protocol,
     userId = userId.lowercase(Locale.ROOT),
     host = host.lowercase(Locale.ROOT),
     port = port,
 )
 
 data class NodeMatch(
-    val before: VlessProfile,
-    val after: VlessProfile,
+    val before: ProxyNode,
+    val after: ProxyNode,
 )
 
 data class NodeEdit(
-    val before: VlessProfile,
-    val after: VlessProfile,
+    val before: ProxyNode,
+    val after: ProxyNode,
     val changedFields: List<String>,
 )
 
 data class SubscriptionDiff(
-    val added: List<VlessProfile>,
-    val deleted: List<VlessProfile>,
+    val added: List<ProxyNode>,
+    val deleted: List<ProxyNode>,
     val edited: List<NodeEdit>,
     val unchanged: List<NodeMatch>,
 ) {
     val hasChanges: Boolean
         get() = added.isNotEmpty() || deleted.isNotEmpty() || edited.isNotEmpty()
 
-    fun replacementFor(oldProfileId: String): VlessProfile? =
+    fun replacementFor(oldProfileId: String): ProxyNode? =
         unchanged.firstOrNull { it.before.id == oldProfileId }?.after
             ?: edited.firstOrNull { it.before.id == oldProfileId }?.after
 }
 
 object SubscriptionDiffer {
-    fun calculate(oldProfiles: List<VlessProfile>, newProfiles: List<VlessProfile>): SubscriptionDiff {
-        val added = mutableListOf<VlessProfile>()
-        val deleted = mutableListOf<VlessProfile>()
+    fun calculate(oldProfiles: List<ProxyNode>, newProfiles: List<ProxyNode>): SubscriptionDiff {
+        val added = mutableListOf<ProxyNode>()
+        val deleted = mutableListOf<ProxyNode>()
         val edited = mutableListOf<NodeEdit>()
         val unchanged = mutableListOf<NodeMatch>()
 
-        val oldByIdentity = oldProfiles.groupBy(VlessProfile::nodeIdentity)
-        val newByIdentity = newProfiles.groupBy(VlessProfile::nodeIdentity)
+        val oldByIdentity = oldProfiles.groupBy(ProxyNode::nodeIdentity)
+        val newByIdentity = newProfiles.groupBy(ProxyNode::nodeIdentity)
         val identities = LinkedHashSet<NodeIdentity>().apply {
             addAll(oldByIdentity.keys)
             addAll(newByIdentity.keys)
@@ -89,7 +91,7 @@ object SubscriptionDiffer {
         )
     }
 
-    private fun changedFields(before: VlessProfile, after: VlessProfile): List<String> = buildList {
+    private fun changedFields(before: ProxyNode, after: ProxyNode): List<String> = buildList {
         if (before.name != after.name) add("name")
         if (!before.host.equals(after.host, ignoreCase = true)) add("host")
         if (before.port != after.port) add("port")
@@ -104,5 +106,6 @@ object SubscriptionDiffer {
         if (before.hostHeader != after.hostHeader) add("host header")
         if (before.serviceName != after.serviceName) add("service name")
         if (before.encryption != after.encryption) add("encryption")
+        if (before.config != after.config) add("protocol settings")
     }
 }

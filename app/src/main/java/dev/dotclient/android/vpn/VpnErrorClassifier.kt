@@ -1,5 +1,8 @@
 package dev.dotclient.android.vpn
 
+import dev.dotclient.android.core.subscription.SecretRedactor
+import dev.dotclient.android.core.parser.Hysteria2UriParser
+
 enum class VpnFailureCategory(val label: String) {
     NO_NETWORK("no network"),
     DNS("DNS failed"),
@@ -10,6 +13,7 @@ enum class VpnFailureCategory(val label: String) {
     TUN("VPN interface failed"),
     CONFIG("invalid VPN configuration"),
     XRAY("Xray failed to start"),
+    HYSTERIA("Hysteria2 could not establish a UDP/QUIC connection. Try another network or a VLESS node."),
     UNKNOWN("VPN connection failed"),
 }
 
@@ -20,7 +24,7 @@ data class VpnFailure(
 )
 
 object VpnErrorClassifier {
-    fun classify(error: Throwable): VpnFailure {
+    fun classify(error: Throwable, rawUri: String? = null): VpnFailure {
         val raw = buildString {
             append(error.message.orEmpty())
             var cause = error.cause
@@ -39,6 +43,7 @@ object VpnErrorClassifier {
             "timeout" in normalized || "timed out" in normalized || "deadline exceeded" in normalized -> VpnFailureCategory.TIMEOUT
             "refused" in normalized -> VpnFailureCategory.REFUSED
             "reality" in normalized -> VpnFailureCategory.REALITY
+            "hysteria" in normalized || "quic" in normalized -> VpnFailureCategory.HYSTERIA
             "tls" in normalized || "certificate" in normalized || "handshake" in normalized -> VpnFailureCategory.TLS
             "tun" in normalized || "establish" in normalized -> VpnFailureCategory.TUN
             "config" in normalized || "invalid" in normalized || "convertsharelinks" in normalized -> VpnFailureCategory.CONFIG
@@ -49,7 +54,10 @@ object VpnErrorClassifier {
         return VpnFailure(
             category = category,
             userMessage = category.label,
-            detail = raw.take(500),
+            detail = rawUri?.takeIf { it.startsWith("hy2://", true) || it.startsWith("hysteria2://", true) }
+                ?.let { Hysteria2UriParser.parse(it).getOrNull()?.redact(raw.take(500)) }
+                ?.let { SecretRedactor.raw(it, "") }
+                ?: SecretRedactor.raw(raw.take(500), ""),
         )
     }
 }

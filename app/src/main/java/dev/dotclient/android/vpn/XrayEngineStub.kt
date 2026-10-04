@@ -1,6 +1,6 @@
 package dev.dotclient.android.vpn
 
-import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.core.model.ProxyNode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -14,7 +14,7 @@ class XrayEngineStub : TunnelEngine {
     private val mutableState = MutableStateFlow<EngineState>(EngineState.Stopped)
     override val state: StateFlow<EngineState> = mutableState
 
-    override suspend fun start(profile: VlessProfile, tunFd: Int): Result<Unit> {
+    override suspend fun start(profile: ProxyNode, tunFd: Int): Result<Unit> {
         mutableState.value = EngineState.Failed("libXray is not bundled in this milestone")
         return Result.failure(IllegalStateException("libXray is not bundled in this milestone"))
     }
