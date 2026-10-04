@@ -19,6 +19,8 @@ jobs:
         with:
           gradle-version: '9.5.0'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Install SDK
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - name: Fetch libXray
