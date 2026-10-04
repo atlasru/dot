@@ -57,6 +57,8 @@ npm run tauri -- build --no-bundle
 
 The GitHub Actions unified workflow builds Android and Windows from the same source revision, runs both unit suites and the frontend fixture test, and verifies packaged assets. Hysteria2 is not on main at the feature baseline; its separate draft PR is not merged by this change.
 
+At this baseline, `lintDebug` reports the existing `StartActivityAndCollapseDeprecated` error in `DotQuickTileService.kt`. That file is unchanged by this feature. Android unit tests and APK compilation pass independently of that lint result.
+
 ## Remaining device checks
 
 On a real Android device and Windows PC:

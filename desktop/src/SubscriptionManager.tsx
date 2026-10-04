@@ -18,7 +18,7 @@ export default function SubscriptionManager({ groups, prefs, vpn, notices, onCha
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
-    invoke<string>("generate_subscription_hwid").then(value => { if (active) setHwid(value); })
+    invoke<string>("generate_subscription_hwid").then(value => { if (active) setHwid(current => current || value); })
       .catch(e => { if (active) setError(String(e)); });
     return () => { active = false; };
   }, []);
