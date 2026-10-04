@@ -7,6 +7,7 @@ use crate::{
     },
     node_sort::sort_nodes,
     subscription_diff,
+    subscription_identity::SubscriptionIdentity,
 };
 
 pub struct Store { path: PathBuf, inner: Mutex<PersistedState> }
@@ -18,9 +19,21 @@ impl Store {
             let bytes = fs::read(&path).map_err(|e| format!("failed to read state: {e}"))?;
             serde_json::from_slice(&bytes).map_err(|e| format!("failed to parse state: {e}"))?
         } else { PersistedState::default() };
+        let mut migrated = false;
+        for group in &mut state.groups {
+            match &group.hwid {
+                Some(identity) => identity.validate()?,
+                None => { group.hwid = Some(SubscriptionIdentity::generate()?); migrated = true; }
+            }
+        }
         normalize_selection(&mut state);
         prune_runtime_metadata(&mut state);
-        Ok(Self { path, inner: Mutex::new(state) })
+        let store = Self { path, inner: Mutex::new(state) };
+        if migrated {
+            let guard = store.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+            store.save_locked(&guard)?;
+        }
+        Ok(store)
     }
 
     pub fn groups(&self) -> Vec<GroupView> {
@@ -83,10 +96,14 @@ impl Store {
         s.groups.iter().find(|g| g.id == group_id).and_then(|g| g.nodes.iter().find(|n| n.id == node_id)).cloned().ok_or_else(|| "selected node no longer exists".into())
     }
 
-    pub fn upsert_group(&self, group: SubscriptionGroup) -> Result<GroupView, String> {
+    pub fn upsert_group(&self, mut group: SubscriptionGroup) -> Result<GroupView, String> {
         let mut guard = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
         let mut s = guard.clone();
         let id = group.id.clone();
+        if group.hwid.is_none() {
+            group.hwid = Some(s.groups.iter().find(|g| g.id == id).and_then(|g| g.hwid.clone()).map(Ok).unwrap_or_else(SubscriptionIdentity::generate)?);
+        }
+        group.hwid.as_ref().expect("identity initialized").validate()?;
         if let Some(existing) = s.groups.iter_mut().find(|g| g.id == id) { *existing = group; } else { s.groups.push(group); }
         normalize_selection(&mut s);
         prune_runtime_metadata(&mut s);
@@ -99,19 +116,21 @@ impl Store {
         self.refresh_transaction(group_id, nodes, updated_at_ms, None)
     }
 
-    pub fn apply_source_refresh(&self, group_id: &str, nodes: Vec<VlessNode>, updated_at_ms: u64, name: String, url: String) -> Result<SubscriptionRefreshResult, String> {
-        self.refresh_transaction(group_id, nodes, updated_at_ms, Some((name, url)))
+    pub fn apply_source_refresh(&self, group_id: &str, nodes: Vec<VlessNode>, updated_at_ms: u64, name: String, url: String, hwid: SubscriptionIdentity) -> Result<SubscriptionRefreshResult, String> {
+        hwid.validate()?;
+        self.refresh_transaction(group_id, nodes, updated_at_ms, Some((name, url, hwid)))
     }
 
-    fn refresh_transaction(&self, group_id: &str, nodes: Vec<VlessNode>, updated_at_ms: u64, source: Option<(String, String)>) -> Result<SubscriptionRefreshResult, String> {
+    fn refresh_transaction(&self, group_id: &str, nodes: Vec<VlessNode>, updated_at_ms: u64, source: Option<(String, String, SubscriptionIdentity)>) -> Result<SubscriptionRefreshResult, String> {
         if nodes.is_empty() { return Err("subscription contains no usable nodes".into()); }
         let mut guard = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
         let mut s = guard.clone();
         let index = s.groups.iter().position(|g| g.id == group_id).ok_or("subscription group not found")?;
-        if let Some((name, url)) = source {
+        if let Some((name, url, hwid)) = source {
             if s.groups.iter().any(|g| g.id != group_id && g.url == url) { return Err("this subscription URL already exists".into()); }
             s.groups[index].name = name;
             s.groups[index].url = url;
+            s.groups[index].hwid = Some(hwid);
         }
         let old_nodes = s.groups[index].nodes.clone();
         let diff = subscription_diff::calculate(&old_nodes, &nodes);
@@ -179,6 +198,13 @@ impl Store {
         self.inner.lock().map_err(|_| "store lock poisoned".to_string())?.groups.iter().find(|g| g.id == group_id).map(|g| g.url.clone()).ok_or_else(|| "subscription group not found".into())
     }
 
+    pub fn subscription_source(&self, group_id: &str) -> Result<(String, SubscriptionIdentity), String> {
+        let state = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+        let group = state.groups.iter().find(|g| g.id == group_id).ok_or("subscription group not found")?;
+        let hwid = group.hwid.clone().ok_or("subscription identity is missing")?;
+        Ok((group.url.clone(), hwid))
+    }
+
     pub fn group_nodes(&self, group_id: &str) -> Result<Vec<VlessNode>, String> {
         self.inner.lock().map_err(|_| "store lock poisoned".to_string())?.groups.iter().find(|g| g.id == group_id).map(|g| g.nodes.clone()).ok_or_else(|| "subscription group not found".into())
     }
@@ -188,7 +214,8 @@ impl Store {
         s.groups.iter().find(|g| g.id == group_id).and_then(|g| g.nodes.iter().find(|n| n.id == node_id)).cloned().ok_or_else(|| "node not found".into())
     }
 
-    pub fn edit_group(&self, group_id: &str, name: String, url: String) -> Result<(), String> {
+    pub fn edit_group(&self, group_id: &str, name: String, url: String, hwid: SubscriptionIdentity) -> Result<(), String> {
+        hwid.validate()?;
         self.transaction(|s| {
             if !url.is_empty() && s.groups.iter().any(|g| g.id != group_id && g.url == url) {
                 return Err("this subscription URL already exists".into());
@@ -197,6 +224,7 @@ impl Store {
             if group.url != url { group.updated_at_ms = 0; }
             group.name = name;
             group.url = url;
+            group.hwid = Some(hwid);
             Ok(())
         })
     }
@@ -329,7 +357,7 @@ mod subscription_management_tests {
     impl Drop for Fixture { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.dir); } }
     fn node(name: &str) -> VlessNode { parse_vless(&format!("vless://test@example.com:443?security=tls&type=tcp#{name}")).unwrap() }
     fn group(id: &str, nodes: Vec<VlessNode>) -> SubscriptionGroup {
-        SubscriptionGroup { id: id.into(), name: id.into(), url: format!("https://example.invalid/{id}"), updated_at_ms: 1, nodes }
+        SubscriptionGroup { id: id.into(), name: id.into(), url: format!("https://example.invalid/{id}"), updated_at_ms: 1, nodes, hwid: None }
     }
     #[test]
     fn refresh_preserves_selection_favorites_latency_and_shared_metadata() {
@@ -369,7 +397,7 @@ mod subscription_management_tests {
         f.store.upsert_group(group("b", vec![node("other")])).unwrap();
         let before = fs::read(f.dir.join("state.json")).unwrap();
         assert!(f.store.apply_refresh("a", vec![], 2).is_err());
-        assert!(f.store.apply_source_refresh("a", vec![node("new")], 2, "changed".into(), "https://example.invalid/b".into()).is_err());
+        assert!(f.store.apply_source_refresh("a", vec![node("new")], 2, "changed".into(), "https://example.invalid/b".into(), SubscriptionIdentity::generate().unwrap()).is_err());
         assert_eq!(fs::read(f.dir.join("state.json")).unwrap(), before);
         assert_eq!(f.store.groups()[0].name, "a");
     }
@@ -387,7 +415,7 @@ mod subscription_management_tests {
     fn source_edit_is_atomic_and_refresh_policy_persists() {
         let f = Fixture::new();
         f.store.upsert_group(group("a", vec![node("old")])).unwrap();
-        let result = f.store.apply_source_refresh("a", vec![node("new")], 50, "new group".into(), "https://example.invalid/new".into()).unwrap();
+        let result = f.store.apply_source_refresh("a", vec![node("new")], 50, "new group".into(), "https://example.invalid/new".into(), SubscriptionIdentity::generate().unwrap()).unwrap();
         assert_eq!(result.group.id, "a");
         assert_eq!(result.group.name, "new group");
         assert_eq!(f.store.group_url("a").unwrap(), "https://example.invalid/new");
@@ -396,5 +424,79 @@ mod subscription_management_tests {
         let reopened = Store::open(f.dir.join("state.json")).unwrap();
         assert!(reopened.preferences().refresh_on_start);
         assert_eq!(reopened.preferences().refresh_interval_hours, 6);
+    }
+
+    #[test]
+    fn identities_persist_and_editing_or_regenerating_a_preserves_b() {
+        let f = Fixture::new();
+        let a = f.store.upsert_group(group("a", vec![node("A")])).unwrap();
+        let b = f.store.upsert_group(group("b", vec![node("B")])).unwrap();
+        assert_ne!(a.hwid, b.hwid);
+        assert_eq!(Store::open(f.dir.join("state.json")).unwrap().groups()[0].hwid, a.hwid);
+        let custom = SubscriptionIdentity::parse("ABC123-existing-Value==".into()).unwrap();
+        f.store.edit_group("a", "a".into(), f.store.group_url("a").unwrap(), custom.clone()).unwrap();
+        assert_eq!(f.store.subscription_source("a").unwrap().1, custom);
+        assert_eq!(f.store.groups()[1].hwid, b.hwid);
+        let regenerated = SubscriptionIdentity::generate().unwrap();
+        f.store.edit_group("a", "a".into(), f.store.group_url("a").unwrap(), regenerated.clone()).unwrap();
+        let reopened = Store::open(f.dir.join("state.json")).unwrap();
+        assert_eq!(reopened.subscription_source("a").unwrap().1, regenerated);
+        assert_eq!(reopened.groups()[1].hwid, b.hwid);
+        f.store.apply_refresh("a", vec![node("renamed")], 3).unwrap();
+        assert_eq!(f.store.subscription_source("a").unwrap().1, regenerated);
+    }
+
+    #[test]
+    fn legacy_migration_is_saved_once_without_changing_nodes_credentials_or_urls() {
+        let f = Fixture::new();
+        f.store.upsert_group(group("a", vec![node("A")])).unwrap();
+        f.store.upsert_group(group("b", vec![node("B")])).unwrap();
+        let path = f.dir.join("state.json");
+        let mut legacy: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        for group in legacy["groups"].as_array_mut().unwrap() { group.as_object_mut().unwrap().remove("hwid"); }
+        fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let reopened = Store::open(path.clone()).unwrap();
+        let after = fs::read(&path).unwrap();
+        let migrated: serde_json::Value = serde_json::from_slice(&after).unwrap();
+        for (before, after) in legacy["groups"].as_array().unwrap().iter().zip(migrated["groups"].as_array().unwrap()) {
+            for field in ["id", "name", "url", "nodes", "updated_at_ms"] { assert_eq!(before[field], after[field]); }
+        }
+        assert_ne!(reopened.groups()[0].hwid, reopened.groups()[1].hwid);
+        assert_eq!(reopened.groups()[0].hwid, Store::open(path.clone()).unwrap().groups()[0].hwid);
+        assert_eq!(fs::read(&path).unwrap(), after);
+    }
+
+    #[test]
+    fn failed_migration_or_invalid_saved_identity_never_overwrites_legacy_file() {
+        let f = Fixture::new();
+        f.store.upsert_group(group("a", vec![node("A")])).unwrap();
+        let path = f.dir.join("state.json");
+        let mut legacy: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        legacy["groups"][0].as_object_mut().unwrap().remove("hwid");
+        let before = serde_json::to_vec(&legacy).unwrap();
+        fs::write(&path, &before).unwrap();
+        fs::create_dir(path.with_extension("json.tmp")).unwrap();
+        assert!(Store::open(path.clone()).is_err());
+        assert_eq!(fs::read(&path).unwrap(), before);
+        fs::remove_dir(path.with_extension("json.tmp")).unwrap();
+        let reopened = Store::open(path.clone()).unwrap();
+        assert!(reopened.groups()[0].hwid.is_some());
+        legacy["groups"][0]["hwid"] = serde_json::json!("bad\r\nvalue");
+        let invalid = serde_json::to_vec(&legacy).unwrap();
+        fs::write(&path, &invalid).unwrap();
+        assert!(Store::open(path.clone()).is_err());
+        assert_eq!(fs::read(&path).unwrap(), invalid);
+    }
+
+    #[test]
+    fn failed_identity_edit_keeps_disk_and_live_identity_unchanged() {
+        let f = Fixture::new();
+        let original = f.store.upsert_group(group("a", vec![node("A")])).unwrap();
+        let before = fs::read(f.dir.join("state.json")).unwrap();
+        fs::create_dir(f.dir.join("state.json.tmp")).unwrap();
+        let next = SubscriptionIdentity::generate().unwrap();
+        assert!(f.store.edit_group("a", "changed".into(), f.store.group_url("a").unwrap(), next).is_err());
+        assert_eq!(original.hwid, f.store.groups()[0].hwid);
+        assert_eq!(fs::read(f.dir.join("state.json")).unwrap(), before);
     }
 }

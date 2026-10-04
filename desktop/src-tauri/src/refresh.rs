@@ -26,9 +26,9 @@ impl RefreshService {
 
     pub fn refresh_locked(&self, store: &Store, group_id: &str) -> Result<SubscriptionRefreshResult, String> {
         let result = (|| {
-            let url = store.group_url(group_id)?;
+            let (url, hwid) = store.subscription_source(group_id)?;
             if url.is_empty() { return Err("local imports have no subscription URL".into()); }
-            let nodes = SubscriptionClient::new()?.fetch(&url)?;
+            let nodes = SubscriptionClient::new()?.fetch(&url, &hwid)?;
             store.apply_refresh(group_id, nodes, now_ms())
         })();
         self.record(store, group_id, &result);
@@ -56,22 +56,25 @@ pub fn spawn(store: Arc<Store>, service: Arc<RefreshService>) {
     thread::spawn(move || {
         let mut startup = true;
         loop {
-            let policy = store.preferences();
-            let initial = startup && policy.refresh_on_start;
+            refresh_due(&store, &service, startup);
             startup = false;
-            for group in store.groups().into_iter().filter(|g| g.remote) {
-                // UI edits and all network refreshes share this gate. Re-read after acquiring it.
-                let Ok(_guard) = service.gate.lock() else { return; };
-                let Some(current) = store.groups().into_iter().find(|g| g.id == group.id && g.remote) else { continue; };
-                let policy = store.preferences();
-                let last_attempt = service.notices.read().unwrap_or_else(|p| p.into_inner()).get(&group.id).map(|n| n.attempted_at_ms);
-                if due(now_ms(), current.updated_at_ms, last_attempt, policy.refresh_interval_hours, initial && policy.refresh_on_start) {
-                    let _ = service.refresh_locked(&store, &group.id);
-                }
-            }
             thread::sleep(Duration::from_secs(30));
         }
     });
+}
+
+fn refresh_due(store: &Store, service: &RefreshService, startup: bool) {
+    let initial = startup && store.preferences().refresh_on_start;
+    for group in store.groups().into_iter().filter(|g| g.remote) {
+        // UI edits and all network refreshes share this gate. Re-read after acquiring it.
+        let Ok(_guard) = service.gate.lock() else { return; };
+        let Some(current) = store.groups().into_iter().find(|g| g.id == group.id && g.remote) else { continue; };
+        let policy = store.preferences();
+        let last_attempt = service.notices.read().unwrap_or_else(|p| p.into_inner()).get(&group.id).map(|n| n.attempted_at_ms);
+        if due(now_ms(), current.updated_at_ms, last_attempt, policy.refresh_interval_hours, initial && policy.refresh_on_start) {
+            let _ = service.refresh_locked(store, &group.id);
+        }
+    }
 }
 
 pub fn now_ms() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64 }
@@ -103,7 +106,7 @@ mod network_tests {
         let fresh = "vless://test@example.com:443?security=tls#renamed";
         let dir = std::env::temp_dir().join(format!("dot-refresh-{}-{}", std::process::id(), now_ms()));
         let store = Store::open(dir.join("state.json")).unwrap();
-        store.upsert_group(SubscriptionGroup { id: "test".into(), name: "test".into(), url, updated_at_ms: 10, nodes: vec![old.clone()] }).unwrap();
+        store.upsert_group(SubscriptionGroup { id: "test".into(), name: "test".into(), url, updated_at_ms: 10, nodes: vec![old.clone()], hwid: None }).unwrap();
         let worker = thread::spawn(move || {
             for (status, body) in [("500 Internal Server Error", "failed"), ("200 OK", fresh)] {
                 let (mut socket, _) = server.accept().unwrap();
@@ -123,6 +126,52 @@ mod network_tests {
         assert_eq!(result.edited.len(), 1);
         assert_eq!(store.groups()[0].nodes[0].name, "renamed");
         assert!(service.notices(&store)[0].error.is_none());
+        worker.join().unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn actual_scheduler_and_manual_refresh_use_group_identity_instead_of_selection() {
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", server.local_addr().unwrap());
+        let dir = std::env::temp_dir().join(format!("dot-background-identity-{}-{}", std::process::id(), now_ms()));
+        let store = Arc::new(Store::open(dir.join("state.json")).unwrap());
+        let old = parse_vless("vless://test@example.com:443?security=tls#old").unwrap();
+        let a = crate::subscription_identity::SubscriptionIdentity::parse("AAAAAAAAAA-first".into()).unwrap();
+        let b = crate::subscription_identity::SubscriptionIdentity::parse("BBBBBBBBBB-second".into()).unwrap();
+        for (id, identity) in [("a", a.clone()), ("b", b.clone())] {
+            store.upsert_group(SubscriptionGroup { id: id.into(), name: id.into(), url: format!("{origin}/{id}"), updated_at_ms: 1, nodes: vec![old.clone()], hwid: Some(identity) }).unwrap();
+        }
+        store.set_selection("b", &old.id).unwrap();
+        store.set_refresh_policy(true, 0).unwrap();
+        let worker = thread::spawn(move || {
+            for (path, identity) in [("/a", a.as_str()), ("/b", b.as_str()), ("/a", "CUSTOM123456789")] {
+                let (mut socket, _) = server.accept().unwrap();
+                socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut bytes = Vec::new();
+                while !bytes.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    assert_eq!(socket.read(&mut byte).unwrap(), 1);
+                    bytes.push(byte[0]);
+                }
+                let request = String::from_utf8(bytes).unwrap();
+                assert!(request.starts_with(&format!("GET {path} HTTP/1.1\r\n")));
+                assert!(request.contains(&format!("x-hwid: {identity}\r\n")));
+                assert!(request.contains("x-device-os: Windows\r\n"));
+                let body = "vless://test@example.com:443?security=tls#new";
+                write!(socket, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        let service = Arc::new(RefreshService::new());
+        let background_store = Arc::clone(&store);
+        let background_service = Arc::clone(&service);
+        thread::spawn(move || refresh_due(&background_store, &background_service, true)).join().unwrap();
+        assert_eq!(store.selection().group_id.as_deref(), Some("b"));
+        store.edit_group("a", "a".into(), store.group_url("a").unwrap(), crate::subscription_identity::SubscriptionIdentity::parse("CUSTOM123456789".into()).unwrap()).unwrap();
+        let restarted = Store::open(dir.join("state.json")).unwrap();
+        let _guard = service.gate.lock().unwrap();
+        service.refresh_locked(&restarted, "a").unwrap();
+        assert_eq!(restarted.subscription_source("b").unwrap().1.as_str(), "BBBBBBBBBB-second");
         worker.join().unwrap();
         let _ = std::fs::remove_dir_all(dir);
     }

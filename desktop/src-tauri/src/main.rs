@@ -13,6 +13,7 @@ mod node_sort;
 mod session;
 mod storage;
 mod subscription;
+mod subscription_identity;
 mod subscription_diff;
 mod traffic;
 mod tray;
@@ -64,6 +65,7 @@ fn main() {
             commands::edit_subscription,
             commands::remove_subscription,
             commands::subscription_url,
+            commands::generate_subscription_hwid,
             commands::import_nodes,
             commands::list_groups,
             commands::selection,
