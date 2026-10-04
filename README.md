@@ -11,6 +11,7 @@ Current stable Android / Windows release: **0.3.0**. The 0.4.0 branch is in deve
 - HTTPS subscription import
 - plaintext and Base64 subscription decoding
 - multiple subscription groups
+- per-subscription device identity (X-HWID), with edit, copy and manual regeneration
 - subscription refresh reports with added, edited and deleted node counts/details
 - classified subscription update errors with redacted raw-error viewing while keeping existing nodes intact
 - node selection and persistence
@@ -83,6 +84,12 @@ Only launchable applications are shown in the selector, so dot. does not request
 Changing split-tunnel rules while connected does not mutate the live TUN interface. The UI offers an explicit reconnect action to apply the new app routing.
 
 ## Subscription updates
+
+Each subscription has its own locally generated HWID for subscription-service compatibility. It uses 128 random bits (`dot-` followed by 32 lowercase hexadecimal characters), survives restarts, and is never derived from hardware identifiers. Existing subscriptions receive an HWID once during migration.
+
+Change, paste, copy or regenerate it in **Settings → Subscriptions → Add/Edit** on Android and **Settings → Subscriptions → EDIT** on Windows. Saving a regenerated value changes the identity presented by that subscription. Values are preserved exactly; both clients accept 10–64 ASCII letters, digits, `=` or `-`. There is no automatic rotation.
+
+Subscription downloads send `x-hwid`, `x-device-os`, `x-ver-os` and `x-device-model` alongside the existing User-Agent. Identity headers are scoped to the subscription origin and removed on redirects to a different origin. They are never added to VPN traffic, node tests, GeoIP or other requests. See [device identity details and validation](docs/SUBSCRIPTION_IDENTITY.md).
 
 Refreshing a subscription now compares the newly parsed VLESS profiles with the currently stored profiles before replacing them. `dot.` reports added, edited and deleted nodes, preserves the selected node when the same logical endpoint was edited, and carries matching latency results across the refresh.
 

@@ -24,6 +24,7 @@ export interface GroupView {
   sort_mode: NodeSortMode;
   remote: boolean;
   nodes: NodeView[];
+  hwid: string | null;
 }
 
 export interface EngineSnapshot { phase: EnginePhase; node_name: string | null; node_id: string | null; message: string | null; }

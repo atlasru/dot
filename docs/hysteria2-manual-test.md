@@ -25,3 +25,11 @@ Existing Android subscriptions are stored as raw URIs and re-parsed, so old VLES
 - Disconnect, close to tray, reconnect, switch VLESS/HY2 live, run individual and group URL tests, verify traffic stats and process cleanup.
 - Test standard HY2, Salamander, bad auth, bad SNI and blocked UDP. Confirm failed tests display FAIL and are not treated as successful nodes.
 - Restart and confirm subscriptions, selection, favorites, latency, sorting and preferences persist. Confirm old 0.3.0 state loads first.
+
+## Integrated HWID upgrade
+
+- Update the existing 0.4.0 HY2 development install with the unified APK/portable ZIP from one CI run. Keep the existing data directory and Android application ID; do not reset or re-import subscriptions.
+- Confirm existing VLESS/HY2 nodes, authentication, selection, settings and custom HWIDs survive. Missing HWIDs must be different per subscription and unchanged after restart.
+- Give A and B distinct HWIDs; refresh A with B selected, then test Windows startup/scheduled refresh. Capture requests at the provider and confirm the requested subscription's identity.
+- Paste a case-sensitive custom value, Copy it, regenerate A with confirmation and save, then restart. B must remain unchanged. Cancel regeneration/edit once and confirm the stored identity is retained.
+- Confirm VLESS-only, HY2-only and mixed imports/refetches use the same saved identity. Verify all four identity headers are stripped on a different-origin redirect and preserved on same-origin redirects.

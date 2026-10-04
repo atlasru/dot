@@ -1,5 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::blocking::Client;
+use crate::subscription_identity::SubscriptionIdentity;
 use std::{time::Duration, io::Read};
 pub const MAX_SUBSCRIPTION_BYTES: usize = 4 * 1024 * 1024;
 
@@ -16,6 +17,7 @@ fn parse_node(line: &str) -> Result<ProxyNode, String> {
 
 pub struct SubscriptionClient {
     http: Client,
+    os_version: String,
 }
 
 impl SubscriptionClient {
@@ -24,18 +26,45 @@ impl SubscriptionClient {
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(20))
             .user_agent(concat!("dot-desktop/", env!("CARGO_PKG_VERSION")))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| "failed to initialize subscription HTTP client".to_string())?;
-        Ok(Self { http })
+        Ok(Self { http, os_version: crate::subscription_identity::os_version() })
     }
 
-    pub fn fetch(&self, url: &str) -> Result<Vec<ProxyNode>, String> {
-        let response = self
-            .http
-            .get(url)
+    pub(crate) fn request(&self, url: &str, hwid: &SubscriptionIdentity) -> Result<reqwest::blocking::RequestBuilder, String> {
+        hwid.validate()?;
+        Ok(self.http.get(url)
             .header("Accept", "*/*")
-            .send()
-            .map_err(format_request_error)?;
+            .header("x-hwid", hwid.as_str())
+            .header("x-device-os", "Windows")
+            .header("x-ver-os", &self.os_version)
+            .header("x-device-model", "dot Windows"))
+    }
+
+    pub fn fetch(&self, url: &str, hwid: &SubscriptionIdentity) -> Result<Vec<ProxyNode>, String> {
+        hwid.validate()?;
+        let origin = url::Url::parse(url).map_err(|_| "invalid subscription URL".to_string())?;
+        let mut target = origin.clone();
+        let mut hops = 0;
+        let response = loop {
+            let request = if target.origin() == origin.origin() {
+                self.request(target.as_str(), hwid)?
+            } else {
+                self.http.get(target.clone()).header("Accept", "*/*")
+            };
+            let response = request.send().map_err(format_request_error)?;
+            if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+                let Some(location) = response.headers().get(reqwest::header::LOCATION) else { break response; };
+                if hops >= 10 { return Err("the subscription server returned too many redirects".into()); }
+                target = target.join(location.to_str().map_err(|_| "invalid subscription redirect".to_string())?)
+                    .map_err(|_| "invalid subscription redirect".to_string())?;
+                if !matches!(target.scheme(), "http" | "https") { return Err("unsupported subscription redirect".into()); }
+                hops += 1;
+                continue;
+            }
+            break response;
+        };
 
         let status = response.status();
         if !status.is_success() {
@@ -130,7 +159,7 @@ mod tests {
     use super::*;
     use base64::engine::general_purpose::STANDARD;
 
-    const LINK: &str = "vless://11111111-1111-4111-8111-111111111111@example.com:443?security=tls&type=ws&path=%2Fdot#node";
+    pub(super) const LINK: &str = "vless://11111111-1111-4111-8111-111111111111@example.com:443?security=tls&type=ws&path=%2Fdot#node";
 
     #[test]
     fn accepts_plaintext() {
@@ -175,5 +204,84 @@ mod import_tests {
     fn rejects_empty_and_oversized_input() {
         assert!(decode_subscription(" ").is_err());
         assert!(decode_subscription(&"x".repeat(MAX_SUBSCRIPTION_BYTES + 1)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    use std::{io::{Read, Write}, net::TcpListener, thread};
+
+    fn read_request(socket: &mut std::net::TcpStream) -> String {
+        socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut bytes = Vec::new();
+        while !bytes.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            if socket.read(&mut byte).unwrap() == 0 { break; }
+            bytes.push(byte[0]);
+        }
+        String::from_utf8(bytes).unwrap()
+    }
+
+    #[test]
+    fn builder_preserves_exact_hwid_and_metadata_without_global_identity_headers() {
+        let client = SubscriptionClient { http: Client::new(), os_version: "10.0.26100".into() };
+        let identity = SubscriptionIdentity::parse("ABC123-existing-Value==".into()).unwrap();
+        let request = client.request("https://example.invalid/sub", &identity).unwrap().header("X-Provider-Custom", "preserved").build().unwrap();
+        for (header, value) in [("x-hwid", identity.as_str()), ("x-device-os", "Windows"), ("x-ver-os", "10.0.26100"), ("x-device-model", "dot Windows"), ("Accept", "*/*"), ("X-Provider-Custom", "preserved")] {
+            assert_eq!(request.headers().get(header).unwrap().to_str().unwrap(), value);
+        }
+        assert!(client.http.get("https://example.invalid/update-check").build().unwrap().headers().get("x-hwid").is_none());
+    }
+
+    #[test]
+    fn initial_fetch_and_retry_identity_is_the_one_saved_with_imported_subscription() {
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/import", server.local_addr().unwrap());
+        let identity = SubscriptionIdentity::generate().unwrap();
+        let expected = identity.clone();
+        let worker = thread::spawn(move || {
+            for status in ["503 Service Unavailable", "200 OK"] {
+                let (mut socket, _) = server.accept().unwrap();
+                let request = read_request(&mut socket);
+                assert!(request.contains(&format!("x-hwid: {}\r\n", expected.as_str())));
+                assert!(request.contains("user-agent: dot-desktop/"));
+                let body = super::tests::LINK;
+                write!(socket, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        let client = SubscriptionClient::new().unwrap();
+        assert!(client.fetch(&url, &identity).is_err());
+        let nodes = client.fetch(&url, &identity).unwrap();
+        let dir = std::env::temp_dir().join(format!("dot-identity-import-{}-{}", std::process::id(), crate::refresh::now_ms()));
+        let store = crate::storage::Store::open(dir.join("state.json")).unwrap();
+        store.upsert_group(crate::model::SubscriptionGroup { id: "import".into(), name: "import".into(), url, updated_at_ms: 1, nodes, hwid: Some(identity.clone()) }).unwrap();
+        assert_eq!(crate::storage::Store::open(dir.join("state.json")).unwrap().subscription_source("import").unwrap().1, identity);
+        worker.join().unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn redirects_keep_same_origin_identity_and_strip_metadata_at_other_origins() {
+        let first = TcpListener::bind("127.0.0.1:0").unwrap();
+        let second = TcpListener::bind("127.0.0.1:0").unwrap();
+        let start = format!("http://{}/start", first.local_addr().unwrap());
+        let end = format!("http://{}/cdn", second.local_addr().unwrap());
+        let identity = SubscriptionIdentity::generate().unwrap();
+        let expected = identity.clone();
+        let worker = thread::spawn(move || {
+            for location in ["/same-origin".to_string(), end] {
+                let (mut socket, _) = first.accept().unwrap();
+                assert!(read_request(&mut socket).contains(&format!("x-hwid: {}\r\n", expected.as_str())));
+                write!(socket, "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+            }
+            let (mut socket, _) = second.accept().unwrap();
+            let request = read_request(&mut socket);
+            for header in ["x-hwid:", "x-device-os:", "x-ver-os:", "x-device-model:"] { assert!(!request.contains(header)); }
+            let body = super::tests::LINK;
+            write!(socket, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        });
+        assert_eq!(SubscriptionClient::new().unwrap().fetch(&start, &identity).unwrap().len(), 1);
+        worker.join().unwrap();
     }
 }

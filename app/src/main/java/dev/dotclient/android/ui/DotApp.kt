@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -53,6 +54,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,6 +66,7 @@ import dev.dotclient.android.BuildConfig
 import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.model.ProxyNode
+import dev.dotclient.android.core.subscription.SubscriptionIdentity
 import dev.dotclient.android.core.splittunnel.SplitTunnelConfig
 import dev.dotclient.android.core.splittunnel.SplitTunnelMode
 import dev.dotclient.android.core.splittunnel.SplitTunnelStore
@@ -771,11 +775,15 @@ private fun SettingsScreen(
     var editingId by remember { mutableStateOf<String?>(null) }
     var draftName by remember { mutableStateOf("") }
     var draftUrl by remember { mutableStateOf("") }
+    var draftHwid by remember { mutableStateOf("") }
+    var confirmRegenerate by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
 
     fun openNewEditor() {
         editingId = null
         draftName = "vpn${state.subscriptions.size + 1}"
         draftUrl = ""
+        draftHwid = SubscriptionIdentity.generate()
         editorOpen = true
     }
 
@@ -783,10 +791,21 @@ private fun SettingsScreen(
         editingId = subscription.id
         draftName = subscription.name
         draftUrl = subscription.url
+        draftHwid = subscription.hwid
         editorOpen = true
     }
 
     BackHandler(enabled = editorOpen) { editorOpen = false }
+
+    if (confirmRegenerate) {
+        AlertDialog(
+            onDismissRequest = { confirmRegenerate = false },
+            title = { Text("Generate a new HWID?") },
+            text = { Text("The previous value will be replaced for this subscription when you save.") },
+            confirmButton = { TextButton(onClick = { draftHwid = SubscriptionIdentity.generate(); confirmRegenerate = false }) { Text("Generate new") } },
+            dismissButton = { TextButton(onClick = { confirmRegenerate = false }) { Text("Cancel") } },
+        )
+    }
 
     LazyColumn(
         modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp),
@@ -806,16 +825,29 @@ private fun SettingsScreen(
                 Spacer(Modifier.height(14.dp))
                 FieldLabel("url")
                 DotTextField(draftUrl, { draftUrl = it }, "https://.../sub/user/...", KeyboardType.Uri)
+                Spacer(Modifier.height(14.dp))
+                FieldLabel("device identity · HWID")
+                DotTextField(draftHwid, { draftHwid = it }, "dot-…", KeyboardType.Ascii)
+                if (!SubscriptionIdentity.isValid(draftHwid)) {
+                    Text(SubscriptionIdentity.VALIDATION_ERROR, color = DotRed, style = MaterialTheme.typography.bodySmall)
+                }
+                Row {
+                    TextButton(onClick = { clipboard.setText(AnnotatedString(draftHwid)) }) { Text("Copy") }
+                    TextButton(onClick = { confirmRegenerate = true }) { Text("Generate new") }
+                }
                 Spacer(Modifier.height(18.dp))
                 Button(
                     onClick = {
-                        viewModel.saveSubscription(editingId, draftName, draftUrl)
-                        editorOpen = false
+                        if (viewModel.saveSubscription(editingId, draftName, draftUrl, draftHwid)) editorOpen = false
                     },
+                    enabled = SubscriptionIdentity.isValid(draftHwid) && draftUrl.isNotBlank() && state.loadingSubscriptionId == null,
                     colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
                     shape = RoundedCornerShape(2.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("SAVE", style = MaterialTheme.typography.labelLarge) }
+                state.message?.takeUnless { it.equals("connected", true) }?.let {
+                    Text(it, color = DotRed, style = MaterialTheme.typography.bodySmall)
+                }
                 TextButton(
                     onClick = { editorOpen = false },
                     modifier = Modifier.fillMaxWidth(),

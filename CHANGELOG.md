@@ -6,6 +6,13 @@
 - Keep v0.3.0 VLESS state, selection, favorites, latency and preferences readable; no stable 0.4.0 release has been published.
 - Real provider links and device testing remain required before release.
 
+- Add persistent, independently configurable per-subscription device identity (X-HWID) on Android and Windows.
+- Generate `dot-` + 32 lowercase hexadecimal characters locally from 128 cryptographically random bits; never derive it from hardware.
+- Add HWID edit/paste, copy and confirmed manual regeneration to existing subscription forms.
+- Persist legacy subscription identities once before requests; preserve subscription URLs, nodes, credentials and selection.
+- Centralize subscription request headers, including OS/version/client metadata; keep background refresh independent of selected subscriptions and remove identity headers across origins.
+- Add shared Android/Rust/frontend validation fixtures, persistence/failure tests and captured HTTP request tests.
+
 ## 0.3.0 — unified Android and Windows
 
 ### Windows

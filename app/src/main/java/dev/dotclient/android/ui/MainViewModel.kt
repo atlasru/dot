@@ -12,6 +12,7 @@ import dev.dotclient.android.core.parser.SubscriptionDecoder
 import dev.dotclient.android.core.reliability.AutoNodeSelector
 import dev.dotclient.android.core.subscription.SecretRedactor
 import dev.dotclient.android.core.subscription.SubscriptionClient
+import dev.dotclient.android.core.subscription.SubscriptionIdentity
 import dev.dotclient.android.core.subscription.SubscriptionContentException
 import dev.dotclient.android.core.subscription.SubscriptionDiffer
 import dev.dotclient.android.core.subscription.SubscriptionStore
@@ -86,51 +87,40 @@ class MainViewModel(
         )
     }
 
-    fun saveSubscription(existingId: String?, name: String, url: String) {
+    fun saveSubscription(existingId: String?, name: String, url: String, hwid: String): Boolean {
+        if (!SubscriptionIdentity.isValid(hwid)) {
+            mutableState.update { it.copy(message = SubscriptionIdentity.VALIDATION_ERROR) }
+            return false
+        }
+        if (state.value.loadingSubscriptionId != null) {
+            mutableState.update { it.copy(message = "wait for subscription refresh to finish") }
+            return false
+        }
         val cleanUrl = url.trim()
         if (cleanUrl.isBlank()) {
             mutableState.update { it.copy(message = "subscription url is required") }
-            return
+            return false
         }
 
         val current = state.value
         val fallbackName = "vpn${current.subscriptions.size + 1}"
         val cleanName = name.trim().ifBlank { fallbackName }
 
-        if (existingId == null) {
-            val subscription = Subscription(name = cleanName, url = cleanUrl)
-            mutableState.update {
-                it.copy(
-                    subscriptions = it.subscriptions + subscription,
-                    selectedSubscriptionId = subscription.id,
-                    message = null,
-                    subscriptionUpdateResult = null,
-                )
-            }
-            persist()
-            refreshSubscription(subscription.id)
-            return
+        val subscription = if (existingId == null) {
+            Subscription(name = cleanName, url = cleanUrl, hwid = hwid)
+        } else {
+            current.subscriptions.firstOrNull { it.id == existingId }
+                ?.copy(name = cleanName, url = cleanUrl, hwid = hwid) ?: return false
         }
-
-        mutableState.update { old ->
-            old.copy(
-                subscriptions = old.subscriptions.map { subscription ->
-                    if (subscription.id == existingId) {
-                        subscription.copy(
-                            name = cleanName,
-                            url = cleanUrl,
-                        )
-                    } else {
-                        subscription
-                    }
-                },
-                selectedSubscriptionId = existingId,
-                message = null,
-                subscriptionUpdateResult = null,
-            )
+        val subscriptions = if (existingId == null) current.subscriptions + subscription
+        else current.subscriptions.map { if (it.id == existingId) subscription else it }
+        runCatching { subscriptionStore.save(subscriptions, subscription.id) }.getOrElse {
+            mutableState.update { it.copy(message = "could not save subscription; check storage and retry") }
+            return false
         }
-        persist()
-        refreshSubscription(existingId)
+        mutableState.update { it.copy(subscriptions = subscriptions, selectedSubscriptionId = subscription.id, message = null, subscriptionUpdateResult = null) }
+        refreshSubscription(subscription.id)
+        return true
     }
 
     fun refreshSubscription(id: String) {
@@ -150,7 +140,7 @@ class MainViewModel(
                 )
             }
 
-            val decoded = subscriptionClient.fetch(subscription.url).getOrElse { error ->
+            val decoded = subscriptionClient.fetch(subscription).getOrElse { error ->
                 showSubscriptionUpdateError(subscription, error)
                 return@launch
             }

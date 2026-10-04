@@ -88,6 +88,8 @@ pub struct SubscriptionGroup {
     pub url: String,
     pub updated_at_ms: u64,
     pub nodes: Vec<ProxyNode>,
+    #[serde(default)]
+    pub hwid: Option<crate::subscription_identity::SubscriptionIdentity>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -165,6 +167,7 @@ pub struct GroupView {
     pub sort_mode: NodeSortMode,
     pub remote: bool,
     pub nodes: Vec<NodeView>,
+    pub hwid: Option<crate::subscription_identity::SubscriptionIdentity>,
 }
 
 impl From<&ProxyNode> for NodeView {
@@ -192,6 +195,7 @@ impl From<&SubscriptionGroup> for GroupView {
             sort_mode: NodeSortMode::Origin,
             remote: !v.url.is_empty(),
             nodes: v.nodes.iter().map(NodeView::from).collect(),
+            hwid: v.hwid.clone(),
         }
     }
 }

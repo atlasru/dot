@@ -65,6 +65,9 @@ jobs:
       - name: Frontend build
         run: npm run build
 
+      - name: Frontend identity validation tests
+        run: npm test
+
       - name: Compile Tauri executable
         run: npm run tauri -- build --no-bundle
 
