@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "value": "dot-a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "valid": true
+    },
+    {
+      "value": "ABC123-existing-Value==",
+      "valid": true
+    },
+    {
+      "value": "0123456789",
+      "valid": true
+    },
+    {
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": true
+    },
+    {
+      "value": "==========",
+      "valid": true
+    },
+    {
+      "value": "aaaaaaaaa",
+      "valid": false
+    },
+    {
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "value": "",
+      "valid": false
+    },
+    {
+      "value": " ABC123456789",
+      "valid": false
+    },
+    {
+      "value": "ABC123456789 ",
+      "valid": false
+    },
+    {
+      "value": "ABC123456789\n",
+      "valid": false
+    },
+    {
+      "value": "ABC123456789\r\nx-hwid:evil",
+      "valid": false
+    },
+    {
+      "value": "ABC123_56789",
+      "valid": false
+    },
+    {
+      "value": "ABC123/56789",
+      "valid": false
+    },
+    {
+      "value": "ABC123+56789",
+      "valid": false
+    },
+    {
+      "value": "ABC123.56789",
+      "valid": false
+    },
+    {
+      "value": "ABC123\t56789",
+      "valid": false
+    },
+    {
+      "value": "\u0410BC123456789",
+      "valid": false
+    },
+    {
+      "value": "ABC123456789\u007f",
+      "valid": false
+    },
+    {
+      "value": "ABC123456789\u0000",
+      "valid": false
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 package dev.dotclient.android.core.parser
 
-import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.core.model.ProxyNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -14,8 +14,8 @@ class VlessUriParserTest {
         assertEquals("Paris 01", result.name)
         assertEquals("example.com", result.host)
         assertEquals(443, result.port)
-        assertEquals(VlessProfile.Security.REALITY, result.security)
-        assertEquals(VlessProfile.Transport.TCP, result.transport)
+        assertEquals(ProxyNode.Security.REALITY, result.security)
+        assertEquals(ProxyNode.Transport.TCP, result.transport)
         assertEquals("xtls-rprx-vision", result.flow)
         assertEquals("chrome", result.fingerprint)
         assertEquals("PUBLIC", result.publicKey)

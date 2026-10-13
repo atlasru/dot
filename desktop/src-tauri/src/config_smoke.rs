@@ -2,7 +2,7 @@
 mod tests {
     use std::{env, fs, path::PathBuf, process::Command};
 
-    use crate::{config::{build_url_test_config, build_xray_config}, vless::parse_vless};
+    use crate::{config::{build_url_test_config, build_xray_config}, hysteria2::parse_hysteria2, vless::parse_vless};
 
     #[test]
     fn generated_configs_are_accepted_by_pinned_xray() {
@@ -21,6 +21,14 @@ mod tests {
 
         assert_xray_accepts(&xray, "tun", &build_xray_config(&node).expect("TUN config should build"));
         assert_xray_accepts(&xray, "url-test", &build_url_test_config(&node, 18080).expect("URL test config should build"));
+        for (name, uri) in [
+            ("hy2-basic", "hy2://password@example.com:443?sni=example.com&alpn=h3#basic"),
+            ("hy2-mask", "hysteria2://password@example.com:443?sni=example.com&obfs=salamander&obfs-password=mask&packetSize=512-1200&congestion=bbr#mask"),
+        ] {
+            let node = parse_hysteria2(uri).expect("Hysteria2 fixture should parse");
+            assert_xray_accepts(&xray, name, &build_xray_config(&node).expect("HY2 TUN config should build"));
+            assert_xray_accepts(&xray, &format!("{name}-url"), &build_url_test_config(&node, 18081).expect("HY2 URL test should build"));
+        }
     }
 
     fn assert_xray_accepts(xray: &PathBuf, name: &str, config: &serde_json::Value) {

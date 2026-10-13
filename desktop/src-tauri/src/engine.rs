@@ -12,7 +12,7 @@ use reqwest::blocking::Client;
 use crate::{
     config::build_xray_config,
     job::ProcessJob,
-    model::{EnginePhase, EngineSnapshot, VlessNode},
+    model::{EnginePhase, EngineSnapshot, ProxyNode},
     session::SessionJournal,
 };
 
@@ -41,7 +41,7 @@ impl VpnEngine {
         Ok(engine)
     }
 
-    pub fn start(&mut self, node: &VlessNode) -> Result<EngineSnapshot, String> {
+    pub fn start(&mut self, node: &ProxyNode) -> Result<EngineSnapshot, String> {
         self.stop_internal();
         self.cancel.store(false, Ordering::SeqCst);
         self.set_starting(node, "validating Xray configuration");
@@ -61,7 +61,7 @@ impl VpnEngine {
             .map_err(|e| self.publish_error(node, format!("failed to test Xray config: {e}")))?;
         if !tested.status.success() {
             let stderr = String::from_utf8_lossy(&tested.stderr).trim().to_string();
-            return Err(self.publish_error(node, if stderr.is_empty() { "Xray rejected the generated config".into() } else { stderr }));
+            return Err(self.publish_error(node, if stderr.is_empty() { "Xray rejected the generated config".into() } else { node.redact(&stderr) }));
         }
         if self.is_cancelled() { return Ok(self.cancelled()); }
 
@@ -170,11 +170,12 @@ impl VpnEngine {
         }
     }
 
-    fn set_starting(&self, node: &VlessNode, message: &str) {
+    fn set_starting(&self, node: &ProxyNode, message: &str) {
         self.publish(EngineSnapshot { phase: EnginePhase::Starting, node_name: Some(node.name.clone()), node_id: Some(node.id.clone()), message: Some(message.into()) });
     }
 
-    fn publish_error(&self, node: &VlessNode, message: String) -> String {
+    fn publish_error(&self, node: &ProxyNode, message: String) -> String {
+        let message = node.redact(&message);
         self.publish(EngineSnapshot { phase: EnginePhase::Error, node_name: Some(node.name.clone()), node_id: Some(node.id.clone()), message: Some(message.clone()) });
         message
     }

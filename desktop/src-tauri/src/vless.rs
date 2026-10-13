@@ -4,9 +4,9 @@ use percent_encoding::percent_decode_str;
 use url::Url;
 use uuid::Uuid;
 
-use crate::model::{Security, Transport, VlessNode};
+use crate::model::{ProxyConfig, Security, Transport, ProxyNode};
 
-pub fn parse_vless(raw: &str) -> Result<VlessNode, String> {
+pub fn parse_vless(raw: &str) -> Result<ProxyNode, String> {
     let raw = raw.trim();
     if !raw.to_ascii_lowercase().starts_with("vless://") {
         return Err("not a VLESS URI".into());
@@ -67,7 +67,7 @@ pub fn parse_vless(raw: &str) -> Result<VlessNode, String> {
         .map(|v| v.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect())
         .unwrap_or_default();
 
-    Ok(VlessNode {
+    Ok(ProxyNode {
         id: stable_id,
         name,
         host,
@@ -89,6 +89,7 @@ pub fn parse_vless(raw: &str) -> Result<VlessNode, String> {
         mode: non_empty(&query, "mode"),
         alpn,
         raw_uri: raw.to_string(),
+        proxy_config: ProxyConfig::Vless,
     })
 }
 

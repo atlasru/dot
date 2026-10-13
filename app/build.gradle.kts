@@ -22,8 +22,8 @@ android {
         applicationId = "dev.dotclient.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 300
-        versionName = "0.3.0"
+        versionCode = 400
+        versionName = "0.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -32,6 +32,8 @@ android {
         compose = true
         buildConfig = true
     }
+
+    sourceSets.getByName("test").resources.srcDir(rootProject.file("tests/fixtures"))
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -79,4 +81,7 @@ dependencies {
     implementation(files("libs/libXray.aar"))
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20250517")
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.1.0")
+    testImplementation("com.squareup.okhttp3:okhttp-tls:5.1.0")
 }

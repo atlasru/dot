@@ -87,7 +87,7 @@ mod tests {
 
     fn node(id: &str, name: &str, latency_ms: Option<u64>, latency_failed: bool) -> NodeView {
         NodeView {
-            id: id.into(), name: name.into(), host: "example.com".into(), port: 443,
+            id: id.into(), name: name.into(), host: "example.com".into(), port: 443, protocol: "VLESS",
             security: Security::Tls, transport: Transport::Raw, latency_ms, latency_failed, favorite: false,
         }
     }

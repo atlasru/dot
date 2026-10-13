@@ -9,6 +9,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
+import dev.dotclient.android.vpn.Hysteria2XrayConfig
 
 class NodeLatencyTester(private val context: Context) {
     suspend fun test(rawUri: String): Result<Long> = withContext(Dispatchers.IO) {
@@ -45,6 +46,9 @@ class NodeLatencyTester(private val context: Context) {
     }
 
     private fun convertProfile(rawUri: String): JSONObject {
+        if (rawUri.startsWith("hy2://", true) || rawUri.startsWith("hysteria2://", true)) {
+            return Hysteria2XrayConfig.fromUri(rawUri)
+        }
         val request = JSONObject()
             .put("apiVersion", 1)
             .put("method", "convertShareLinksToXrayJson")

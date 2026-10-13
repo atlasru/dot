@@ -3,7 +3,7 @@ package dev.dotclient.android.ui
 import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.NodeSorter
 import dev.dotclient.android.core.model.Subscription
-import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.core.model.ProxyNode
 import dev.dotclient.android.ui.theme.DotThemeMode
 import dev.dotclient.android.vpn.VpnConnectionState
 import dev.dotclient.android.vpn.VpnFailureCategory
@@ -38,13 +38,13 @@ data class DotUiState(
     val selectedSubscription: Subscription?
         get() = subscriptions.firstOrNull { it.id == selectedSubscriptionId }
 
-    val profiles: List<VlessProfile>
+    val profiles: List<ProxyNode>
         get() = selectedSubscription?.profiles.orEmpty()
 
     val selectedSortMode: NodeSortMode
         get() = selectedSubscription?.sortMode ?: NodeSortMode.ORIGIN
 
-    val sortedProfiles: List<VlessProfile>
+    val sortedProfiles: List<ProxyNode>
         get() = if (
             selectedSortMode == NodeSortMode.DELAY &&
             pendingDelaySortSubscriptionId == selectedSubscriptionId
@@ -57,7 +57,7 @@ data class DotUiState(
     val selectedProfileId: String?
         get() = selectedSubscription?.selectedProfileId
 
-    val selectedProfile: VlessProfile?
+    val selectedProfile: ProxyNode?
         get() = selectedSubscription?.profiles?.firstOrNull { it.id == selectedSubscription?.selectedProfileId }
 
     val loading: Boolean

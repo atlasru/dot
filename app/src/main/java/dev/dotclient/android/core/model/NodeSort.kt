@@ -8,11 +8,11 @@ enum class NodeSortMode {
 
 object NodeSorter {
     fun sort(
-        profiles: List<VlessProfile>,
+        profiles: List<ProxyNode>,
         mode: NodeSortMode,
         latenciesMs: Map<String, Long>,
         failedIds: Set<String> = emptySet(),
-    ): List<VlessProfile> = when (mode) {
+    ): List<ProxyNode> = when (mode) {
         NodeSortMode.ORIGIN -> profiles
         NodeSortMode.NAME -> profiles.sortedWith(naturalProfileComparator)
         NodeSortMode.DELAY -> {
@@ -40,7 +40,7 @@ object NodeSorter {
         }
     }
 
-    internal val naturalProfileComparator = Comparator<VlessProfile> { left, right ->
+    internal val naturalProfileComparator = Comparator<ProxyNode> { left, right ->
         naturalCompare(left.name, right.name)
     }
 

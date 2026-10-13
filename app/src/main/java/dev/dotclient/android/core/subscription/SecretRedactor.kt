@@ -10,7 +10,9 @@ object SecretRedactor {
     }
 
     fun vless(value: String): String =
-        value.replace(Regex("vless://[^@\\s]+@", RegexOption.IGNORE_CASE), "vless://***@")
+        value.replace(Regex("(vless|hy2|hysteria2)://[^@\\s]+@", RegexOption.IGNORE_CASE)) {
+            "${it.groupValues[1]}://***@"
+        }.replace(Regex("([?&](?:obfs-password|obfsPassword|salamanderPassword|password|auth|token|key)=)[^&#\\s]+", RegexOption.IGNORE_CASE), "$1***")
 
     fun raw(value: String, subscriptionUrl: String): String {
         var redacted = value.replace(subscriptionUrl, url(subscriptionUrl))

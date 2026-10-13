@@ -1,8 +1,8 @@
 use serde_json::{json, Map, Value};
 
-use crate::model::{Security, Transport, VlessNode};
+use crate::model::{ProxyConfig, Security, Transport, ProxyNode};
 
-pub fn build_xray_config(node: &VlessNode) -> Result<Value, String> {
+pub fn build_xray_config(node: &ProxyNode) -> Result<Value, String> {
     let proxy = build_proxy_outbound(node)?;
 
     Ok(json!({
@@ -46,7 +46,7 @@ pub fn build_xray_config(node: &VlessNode) -> Result<Value, String> {
     }))
 }
 
-pub fn build_url_test_config(node: &VlessNode, port: u16) -> Result<Value, String> {
+pub fn build_url_test_config(node: &ProxyNode, port: u16) -> Result<Value, String> {
     let proxy = build_proxy_outbound(node)?;
 
     Ok(json!({
@@ -80,7 +80,43 @@ pub fn build_url_test_config(node: &VlessNode, port: u16) -> Result<Value, Strin
     }))
 }
 
-fn build_proxy_outbound(node: &VlessNode) -> Result<Value, String> {
+fn build_proxy_outbound(node: &ProxyNode) -> Result<Value, String> {
+    if let ProxyConfig::Hysteria2(hy2) = &node.proxy_config {
+        if hy2.auth.is_empty() { return Err("Hysteria2 authentication is missing".into()); }
+        if hy2.packet_size.is_some() && hy2.salamander_password.is_none() {
+            return Err("Salamander packet size requires a password".into());
+        }
+        let mut tls = Map::new();
+        if let Some(sni) = &hy2.sni { tls.insert("serverName".into(), json!(sni)); }
+        if hy2.insecure { tls.insert("allowInsecure".into(), json!(true)); }
+        if !hy2.alpn.is_empty() { tls.insert("alpn".into(), json!(hy2.alpn)); }
+        let mut hysteria = Map::new();
+        hysteria.insert("version".into(), json!(2));
+        hysteria.insert("auth".into(), json!(hy2.auth));
+        if let Some(up) = &hy2.up { hysteria.insert("up".into(), json!(up)); }
+        if let Some(down) = &hy2.down { hysteria.insert("down".into(), json!(down)); }
+        let mut stream = Map::new();
+        stream.insert("method".into(), json!("hysteria"));
+        stream.insert("security".into(), json!("tls"));
+        stream.insert("tlsSettings".into(), Value::Object(tls));
+        stream.insert("hysteriaSettings".into(), Value::Object(hysteria));
+        let mut finalmask = Map::new();
+        if let Some(congestion) = &hy2.congestion {
+            finalmask.insert("quicParams".into(), json!({"congestion": congestion}));
+        }
+        if let Some(password) = &hy2.salamander_password {
+            let mut settings = Map::new();
+            settings.insert("password".into(), json!(password));
+            if let Some(size) = &hy2.packet_size { settings.insert("packetSize".into(), json!(size)); }
+            finalmask.insert("udp".into(), json!([{"type": "salamander", "settings": settings}]));
+        }
+        if !finalmask.is_empty() { stream.insert("finalmask".into(), Value::Object(finalmask)); }
+        return Ok(json!({
+            "tag": "proxy", "protocol": "hysteria",
+            "settings": {"version": 2, "address": node.host, "port": node.port},
+            "streamSettings": stream,
+        }));
+    }
     validate_node(node)?;
 
     let mut settings = Map::new();
@@ -176,7 +212,7 @@ fn build_proxy_outbound(node: &VlessNode) -> Result<Value, String> {
     }))
 }
 
-fn validate_node(node: &VlessNode) -> Result<(), String> {
+fn validate_node(node: &ProxyNode) -> Result<(), String> {
     if node.security == Security::Reality {
         if node.sni.as_deref().unwrap_or("").is_empty() {
             return Err("REALITY node is missing SNI/serverName".into());
@@ -211,7 +247,7 @@ mod tests {
     use super::*;
     use crate::vless::parse_vless;
 
-    fn reality_node() -> VlessNode {
+    fn reality_node() -> ProxyNode {
         parse_vless("vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=reality&sni=example.org&fp=chrome&pbk=password&sid=0123456789abcdef&type=tcp&flow=xtls-rprx-vision#node").unwrap()
     }
 

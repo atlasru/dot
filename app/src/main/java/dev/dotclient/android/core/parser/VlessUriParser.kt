@@ -1,13 +1,13 @@
 package dev.dotclient.android.core.parser
 
-import dev.dotclient.android.core.model.VlessProfile
+import dev.dotclient.android.core.model.ProxyNode
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 object VlessUriParser {
-    fun parse(raw: String): Result<VlessProfile> = runCatching {
+    fun parse(raw: String): Result<ProxyNode> = runCatching {
         require(raw.startsWith("vless://", ignoreCase = true)) { "Not a VLESS URI" }
 
         val uri = URI(raw.trim())
@@ -22,21 +22,21 @@ object VlessUriParser {
         val query = parseQuery(uri.rawQuery)
 
         val security = when (query["security"]?.lowercase()) {
-            "reality" -> VlessProfile.Security.REALITY
-            "tls" -> VlessProfile.Security.TLS
-            else -> VlessProfile.Security.NONE
+            "reality" -> ProxyNode.Security.REALITY
+            "tls" -> ProxyNode.Security.TLS
+            else -> ProxyNode.Security.NONE
         }
 
         val transport = when ((query["type"] ?: "tcp").lowercase()) {
-            "tcp", "raw" -> VlessProfile.Transport.TCP
-            "ws" -> VlessProfile.Transport.WS
-            "grpc" -> VlessProfile.Transport.GRPC
-            "xhttp", "splithttp" -> VlessProfile.Transport.XHTTP
-            "httpupgrade" -> VlessProfile.Transport.HTTPUPGRADE
-            else -> VlessProfile.Transport.UNKNOWN
+            "tcp", "raw" -> ProxyNode.Transport.TCP
+            "ws" -> ProxyNode.Transport.WS
+            "grpc" -> ProxyNode.Transport.GRPC
+            "xhttp", "splithttp" -> ProxyNode.Transport.XHTTP
+            "httpupgrade" -> ProxyNode.Transport.HTTPUPGRADE
+            else -> ProxyNode.Transport.UNKNOWN
         }
 
-        VlessProfile(
+        ProxyNode(
             name = uri.rawFragment?.decode()?.ifBlank { null } ?: "$host:$port",
             host = host,
             port = port,
