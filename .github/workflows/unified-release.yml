@@ -98,17 +98,29 @@ jobs:
           tag=$(python3 -c 'import json; print(json.load(open(".github/release-request.json"))["tag"])')
           version=$(python3 -c 'import json; print(json.load(open("desktop/package.json"))["version"])')
           test "$tag" = "v$version"
-          # A consumed request must never move or replace an existing tag/release.
+          # One-time recovery of the unpublished v0.4.0 tag whose Windows test
+          # server inherited nonblocking mode. Never replace any other tag.
+          repair_from=""
           gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/" --jq '.[].ref' > tags.txt
           if grep -Fx "refs/tags/$tag" tags.txt; then
-            echo 'Requested tag already exists; no automatic changes.'
-            exit 0
+            current=$(git rev-parse "refs/tags/$tag")
+            if test "$tag" = "v0.4.0" && test "$current" = "e6fb58ea7525a6154e54aef51f89b1ce64ee42e1"; then
+              repair_from="$current"
+            else
+              echo 'Requested tag already exists; no automatic changes.'
+              exit 0
+            fi
           fi
           gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name' > releases.txt
           if grep -Fx "$tag" releases.txt; then exit 1; fi
           git fetch origin main
           test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
-          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$tag" -f "sha=$GITHUB_SHA"
+          if test -n "$repair_from"; then
+            git merge-base --is-ancestor "$repair_from" "$GITHUB_SHA"
+            git push --force-with-lease="refs/tags/$tag:$repair_from" origin "$GITHUB_SHA:refs/tags/$tag"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$tag" -f "sha=$GITHUB_SHA"
+          fi
           # GITHUB_TOKEN tag pushes do not trigger push workflows; dispatch explicitly.
           gh workflow run unified-release.yml --ref "$tag"
 
