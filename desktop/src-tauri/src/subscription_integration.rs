@@ -244,7 +244,12 @@ pub(crate) fn accept(listener: &TcpListener) -> TcpStream {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match listener.accept() {
-            Ok((socket, _)) => return socket,
+            Ok((socket, _)) => {
+                // Windows inherits the listener's nonblocking mode on accepted sockets.
+                socket.set_nonblocking(false).unwrap();
+                socket.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+                return socket;
+            }
             Err(error)
                 if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline =>
             {
