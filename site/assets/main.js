@@ -1,5 +1,6 @@
 const repo = 'atlasru/dot';
 const releasePage = `https://github.com/${repo}/releases/latest`;
+const allReleasesPage = `https://github.com/${repo}/releases`;
 const androidFallback = `https://github.com/${repo}/releases/download/v0.4.0/dot-android-0.4.0-dev-debug.apk`;
 const desktopFallback = `https://github.com/${repo}/releases/download/v0.4.0/dot-desktop-0.4.0-windows-x64.zip`;
 
@@ -83,6 +84,10 @@ const applyPlatform = () => {
 const setDownloadFallbacks = () => {
   $('androidDownload').href = androidFallback;
   $('desktopDownload').href = desktopFallback;
+  $('androidVersion').textContent = 'v0.4.0-dev-debug';
+  $('desktopVersion').textContent = 'v0.4.0';
+  $('androidHash').textContent = 'SHA-256: f06bf1dd124d1583f9f4418b9cf2035ab782f2188541c466e9843a41220a541e';
+  $('desktopHash').textContent = 'SHA-256: 91aa313f0c121116440cc22c9bd7b0f69f6026208cbec358bd306220487a7dda';
 };
 
 const loadRelease = async () => {
@@ -101,24 +106,25 @@ const loadRelease = async () => {
     releaseAssets.android = assets.find((asset) => /^dot-android-.+\.apk$/i.test(asset.name)) || null;
     releaseAssets.desktop = assets.find((asset) => /^dot-desktop-.+-windows-x64\.zip$/i.test(asset.name)) || null;
 
-    if (displayVersion) {
-      $('androidVersion').textContent = `${displayVersion}-dev-debug`;
-      $('desktopVersion').textContent = displayVersion;
-    }
-
     if (releaseAssets.android) {
+      if (displayVersion) $('androidVersion').textContent = displayVersion + (/-dev-debug\.apk$/i.test(releaseAssets.android.name) ? '-dev-debug' : '');
       $('androidDownload').href = releaseAssets.android.browser_download_url;
       $('androidSize').textContent = formatBytes(releaseAssets.android.size) || 'APK';
-      if (releaseAssets.android.digest) $('androidHash').textContent = releaseAssets.android.digest.replace(/^sha256:/i, 'SHA-256: ');
+      $('androidHash').textContent = /^sha256:[a-f0-9]{64}$/i.test(releaseAssets.android.digest || '')
+        ? releaseAssets.android.digest.replace(/^sha256:/i, 'SHA-256: ')
+        : 'See SHA256SUMS in the selected GitHub release';
     }
 
     if (releaseAssets.desktop) {
+      if (displayVersion) $('desktopVersion').textContent = displayVersion;
       $('desktopDownload').href = releaseAssets.desktop.browser_download_url;
       $('desktopSize').textContent = formatBytes(releaseAssets.desktop.size) || 'ZIP';
-      if (releaseAssets.desktop.digest) $('desktopHash').textContent = releaseAssets.desktop.digest.replace(/^sha256:/i, 'SHA-256: ');
+      $('desktopHash').textContent = /^sha256:[a-f0-9]{64}$/i.test(releaseAssets.desktop.digest || '')
+        ? releaseAssets.desktop.digest.replace(/^sha256:/i, 'SHA-256: ')
+        : 'See SHA256SUMS in the selected GitHub release';
     }
 
-    $('allReleases').href = release.html_url || releasePage;
+    $('allReleases').href = allReleasesPage;
   } catch {
     setDownloadFallbacks();
   } finally {
@@ -202,6 +208,7 @@ const observer = new IntersectionObserver((entries) => {
 
 document.querySelectorAll('.reveal').forEach((element) => observer.observe(element));
 
+$('allReleases').href = allReleasesPage;
 setDownloadFallbacks();
 applyPlatform();
 loadRelease();
