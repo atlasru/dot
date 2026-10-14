@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#050505">
   <meta name="color-scheme" content="dark">
-  <meta name="description" content="dot. — a minimal VLESS client for Android and Windows.">
-  <title>dot. — minimal VLESS client</title>
+  <meta name="description" content="dot. — a minimal VPN client with VLESS and Hysteria 2 for Android and Windows.">
+  <title>dot. — VPN client for Android and Windows</title>
   <link rel="preconnect" href="https://api.github.com">
   <link rel="preconnect" href="https://ipwho.is">
   <link rel="stylesheet" href="assets/style.css">
@@ -26,9 +26,9 @@
   <main id="top">
     <section class="hero shell section">
       <div class="hero-copy reveal">
-        <p class="eyebrow">VLESS / REALITY / TLS</p>
+        <p class="eyebrow">VLESS / HYSTERIA 2 / REALITY / TLS</p>
         <h1>your route.<br><span>your choice.</span></h1>
-        <p class="hero-lead" id="heroLead">Minimal VLESS client for Android &amp; Windows.</p>
+        <p class="hero-lead" id="heroLead">Minimal VLESS and Hysteria 2 client for Android &amp; Windows.</p>
         <div class="hero-actions">
           <a class="button button-primary" id="primaryDownload" href="https://github.com/atlasru/dot/releases/latest">view releases</a>
           <a class="button" href="https://github.com/atlasru/dot">github</a>
@@ -63,8 +63,8 @@
       </div>
       <div class="download-grid">
         <article class="download-card reveal">
-          <div class="download-title"><span>ANDROID</span><span class="badge">STABLE</span></div>
-          <p class="version" id="androidVersion">v0.3.0-dev-debug</p>
+          <div class="download-title"><span>ANDROID</span><span class="badge">DEBUG APK</span></div>
+          <p class="version" id="androidVersion">v0.4.0-dev-debug</p>
           <p>Kotlin · Jetpack Compose · Android VpnService · libXray</p>
           <div class="download-meta"><span>Android 8.0+</span><span id="androidSize">APK</span></div>
           <a class="button button-primary full" id="androidDownload" href="https://github.com/atlasru/dot/releases/latest">download apk</a>
@@ -72,7 +72,7 @@
         </article>
         <article class="download-card reveal" data-delay="80">
           <div class="download-title"><span>WINDOWS</span><span class="badge">PORTABLE</span></div>
-          <p class="version" id="desktopVersion">v0.3.0</p>
+          <p class="version" id="desktopVersion">v0.4.0</p>
           <p>Rust · Xray-core · Wintun</p>
           <div class="download-meta"><span>Windows x64 · portable</span><span id="desktopSize">ZIP</span></div>
           <a class="button button-primary full" id="desktopDownload" href="https://github.com/atlasru/dot/releases/latest">download zip</a>
@@ -126,7 +126,7 @@
         <h2>Small surface.<br>Useful internals.</h2>
       </div>
       <div class="feature-lines">
-        <article class="feature-line reveal"><span class="feature-index">01</span><div><h3>CONNECTION</h3><p>VLESS · REALITY / TLS · Xray-core · live node switching</p></div></article>
+        <article class="feature-line reveal"><span class="feature-index">01</span><div><h3>CONNECTION</h3><p>VLESS · Hysteria 2 · REALITY / TLS · Xray-core · live node switching</p></div></article>
         <article class="feature-line reveal"><span class="feature-index">02</span><div><h3>NODES</h3><p>URL testing · delay sorting · natural name sorting · provider order</p></div></article>
         <article class="feature-line reveal"><span class="feature-index">03</span><div><h3>SUBSCRIPTIONS</h3><p>Multiple groups · safe refresh · structured changes · failure rollback</p></div></article>
         <article class="feature-line reveal"><span class="feature-index">04</span><div><h3>MAP</h3><p>IP geolocation · country fallback · node clustering · pan and zoom</p></div></article>
@@ -171,9 +171,9 @@
     <section class="faq shell section">
       <div class="section-heading reveal"><p class="eyebrow">FAQ</p><h2>Short answers.</h2></div>
       <div class="faq-list reveal">
-        <details><summary>What is dot.?</summary><p>An open-source VLESS client for Android and Windows built around subscriptions, node testing, map view and a minimal interface.</p></details>
-        <details><summary>Does dot. provide VPN servers?</summary><p>No. dot. is a client. You need your own compatible VLESS subscription.</p></details>
-        <details><summary>Which transports are supported?</summary><p>The current Android release focuses on VLESS with REALITY and TLS through Xray-core.</p></details>
+        <details><summary>What is dot.?</summary><p>An open-source VPN client for Android and Windows with VLESS, Hysteria 2, subscriptions, node testing, map view and a minimal interface.</p></details>
+        <details><summary>Does dot. provide VPN servers?</summary><p>No. dot. is a client. You need your own compatible VLESS or Hysteria 2 subscription.</p></details>
+        <details><summary>Which transports are supported?</summary><p>Android and Windows support VLESS and Hysteria 2 subscriptions through Xray/libXray.</p></details>
         <details><summary>Why is the Windows build unsigned?</summary><p>The Windows executable is unsigned. Extract the complete portable ZIP, including its runtime folder. Microsoft Edge WebView2 Runtime is required.</p></details>
         <details><summary>Does the website track visitors?</summary><p>No analytics or advertising scripts are included. The network-status card optionally requests your public IP metadata from a third-party lookup service in your browser.</p></details>
       </div>
