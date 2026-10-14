@@ -1,7 +1,7 @@
 const repo = 'atlasru/dot';
 const releasePage = `https://github.com/${repo}/releases/latest`;
-const androidFallback = `https://github.com/${repo}/releases/download/v0.3.0/dot-android-0.3.0-dev-debug.apk`;
-const desktopFallback = `https://github.com/${repo}/releases/download/v0.3.0/dot-desktop-0.3.0-windows-x64.zip`;
+const androidFallback = `https://github.com/${repo}/releases/download/v0.4.0/dot-android-0.4.0-dev-debug.apk`;
+const desktopFallback = `https://github.com/${repo}/releases/download/v0.4.0/dot-desktop-0.4.0-windows-x64.zip`;
 
 const $ = (id) => document.getElementById(id);
 const formatBytes = (bytes) => {
@@ -41,21 +41,21 @@ const applyPlatform = () => {
   };
 
   if (kind === 'android') {
-    lead.textContent = 'Minimal VLESS client for Android.';
-    note.textContent = 'Android detected · APK build available';
+    lead.textContent = 'Minimal VLESS and Hysteria 2 client for Android.';
+    note.textContent = 'Android detected · debug APK available';
     setPrimary('download for android', releaseAssets.android?.browser_download_url || androidFallback);
     return;
   }
 
   if (kind === 'windows') {
-    lead.textContent = 'Minimal VLESS client for Windows.';
+    lead.textContent = 'Minimal VLESS and Hysteria 2 client for Windows.';
     note.textContent = 'Windows detected · portable x64 build available';
     setPrimary('download for windows', releaseAssets.desktop?.browser_download_url || desktopFallback);
     return;
   }
 
   if (kind === 'ios') {
-    lead.textContent = 'Minimal VLESS client for Android & Windows.';
+    lead.textContent = 'Minimal VLESS and Hysteria 2 client for Android & Windows.';
     note.textContent = 'No iOS build currently available';
     setPrimary('view releases', releasePage);
     return;
@@ -102,7 +102,7 @@ const loadRelease = async () => {
     releaseAssets.desktop = assets.find((asset) => /^dot-desktop-.+-windows-x64\.zip$/i.test(asset.name)) || null;
 
     if (displayVersion) {
-      $('androidVersion').textContent = displayVersion;
+      $('androidVersion').textContent = `${displayVersion}-dev-debug`;
       $('desktopVersion').textContent = displayVersion;
     }
 
