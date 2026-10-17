@@ -200,6 +200,11 @@ class DotVpnService : VpnService() {
                         failure,
                     )
                     notifyStatus("waiting for network", nodeName)
+                } else if (failure.category == VpnFailureCategory.CONFIG) {
+                    publishState(VpnConnectionState.ERROR, nodeName, failure.userMessage, failure)
+                    notifyStatus("error", nodeName)
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
                 } else {
                     scheduleReconnect(failure)
                 }
