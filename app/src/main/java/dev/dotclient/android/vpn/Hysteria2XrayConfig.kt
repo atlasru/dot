@@ -26,7 +26,10 @@ object Hysteria2XrayConfig {
         }
         hy2.salamanderPassword?.let { password ->
             val maskSettings = JSONObject().put("password", password)
-            hy2.packetSize?.let { maskSettings.put("packetSize", it) }
+            hy2.packetSize?.let { size ->
+                val range = size.split("-").map(String::toInt)
+                maskSettings.put("packetSize", JSONObject().put("from", range.first()).put("to", range.last()))
+            }
             finalmask.put("udp", JSONArray().put(JSONObject()
                 .put("type", "salamander").put("settings", maskSettings)))
         }
@@ -36,7 +39,6 @@ object Hysteria2XrayConfig {
         return JSONObject().put("log", JSONObject().put("loglevel", "warning"))
             .put("outbounds", JSONArray().put(outbound).put(JSONObject()
                 .put("tag", "direct").put("protocol", "freedom")))
-            .put("routing", JSONObject().put("rules", JSONArray().put(JSONObject()
-                .put("type", "field").put("outboundTag", "proxy"))))
+
     }
 }
