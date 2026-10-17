@@ -46,6 +46,7 @@ object VpnErrorClassifier {
             "hysteria" in normalized || "quic" in normalized -> VpnFailureCategory.HYSTERIA
             "tls" in normalized || "certificate" in normalized || "handshake" in normalized -> VpnFailureCategory.TLS
             "tun" in normalized || "establish" in normalized -> VpnFailureCategory.TUN
+            "this rule has no effective fields" in normalized -> VpnFailureCategory.CONFIG
             "config" in normalized || "invalid" in normalized || "convertsharelinks" in normalized -> VpnFailureCategory.CONFIG
             "xray" in normalized || "runxray" in normalized -> VpnFailureCategory.XRAY
             else -> VpnFailureCategory.UNKNOWN
