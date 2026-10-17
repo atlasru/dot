@@ -23,6 +23,14 @@ class VpnErrorClassifierTest {
     }
 
     @Test
+    fun `classifies invalid xray routing as configuration failure`() {
+        val failure = VpnErrorClassifier.classify(
+            IllegalStateException("this rule has no effective fields")
+        )
+        assertEquals(VpnFailureCategory.CONFIG, failure.category)
+    }
+
+    @Test
     fun `falls back to unknown`() {
         val failure = VpnErrorClassifier.classify(IllegalStateException("something unexpected"))
         assertEquals(VpnFailureCategory.UNKNOWN, failure.category)
