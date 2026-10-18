@@ -4,6 +4,18 @@
 
 Current published version is **v0.4.0** (Android `0.4.0-debug` / versionCode **401**, Windows `0.4.0`), using Xray/libXray **v26.7.28**. The `v0.4.0` release assets were updated independently of the original tag; see [release provenance](docs/releases/0.4.0.md).
 
+## Licensing contributions
+
+The original dot. code is offered under **GPL-3.0-or-later**. By submitting
+your own changes for inclusion, you must have the right to contribute them
+under that license; do not copy incompatible or proprietary source into dot.
+Preserve copyright notices and third-party license texts. A pull request does
+**not** transfer your copyright to the maintainer.
+
+See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
+The pre-adoption v0.4.0 binary artifacts are a separate historical release
+and have not been replaced by this license update.
+
 ## Before opening a pull request
 
 - keep the UI minimal and consistent with the existing AMOLED/monospace direction

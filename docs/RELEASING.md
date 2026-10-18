@@ -27,3 +27,28 @@ The recovered Android build is `0.4.0-debug` with **versionCode 401** (previousl
 - Check the current [GitHub release](https://github.com/atlasru/dot/releases/latest) and [website](https://atlasru.github.io/dot/). The website queries `releases/latest`, with pinned v0.4.0 fallbacks and matching hashes when the API is unavailable.
 - Check full asset SHA-256 digests against published `SHA256SUMS`, not just file names.
 - Never assume the `v0.4.0` tag equals its replaced downloadable binaries.
+
+## License and source distribution (for builds after GPL adoption)
+
+Original dot. code is **GPL-3.0-or-later**, with the complete text in
+[`LICENSE`](../LICENSE). [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)
+lists separately licensed components and their source locations. A new
+GPL-covered source/binary release must retain notices and satisfy the
+GPL's corresponding-source requirements: publishing an unrelated tag or
+a later development snapshot is not sufficient for the downloaded binary.
+
+- The Android APK embeds the GPL text, notices and the original libXray
+  MIT / Xray-core MPL 2.0 licenses in its `assets/` directory.
+- The Windows portable ZIP includes `LICENSE`,
+  `THIRD_PARTY_NOTICES.md`, and `licenses/` copies of the core/wrapper
+  notices plus the **Wintun prebuilt DLL's original PBL license**.
+- The pinned Xray Windows ZIP contains an original `LICENSE` (MPL-2.0)
+  and `LICENSE-Wintun`. The workflow checks their presence and packages
+  those upstream documents next to `xray.exe` and `wintun.dll`.
+- Versions, source SHA, license artifacts, checksums and actual ZIP/APK
+  contents are verified by the release workflows. Changes to third-party
+  components require an updated license review and attribution.
+
+The pre-existing `v0.4.0` public binaries precede this licensing commit,
+were not rebuilt for it, and still use the provenance described above.
+Do not claim they already include the post-adoption packaged notices.

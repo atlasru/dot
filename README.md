@@ -192,4 +192,23 @@ Kotlin · Jetpack Compose · Android VpnService · OkHttp · libXray / Xray-core
 
 ## License
 
-A project license has not been selected yet.
+**Copyright (C) 2026 atlasru and contributors.** Original dot. source code
+is licensed under the **[GNU General Public License v3.0 or later](LICENSE)**
+(`GPL-3.0-or-later`).
+
+You may use, study, modify and redistribute dot., including for commercial
+purposes. When redistributing a GPL-covered modified version, you must comply
+with the GPL's corresponding-source and license obligations: distributing a
+proprietary/closed-source derivative is not permitted under the GPL.
+
+The Xray/libXray/Wintun runtimes and other third-party packages retain
+**their own copyright and license terms**. See
+[third-party notices](THIRD_PARTY_NOTICES.md) and original license texts in
+[`third_party_licenses/`](third_party_licenses/).
+
+**Important release distinction:** This licensing change applies to the
+repository from the commit that introduced `LICENSE`. The already published
+v0.4.0 binaries were built from an **earlier** source revision; their bytes and
+checksums have not been modified or retrospectively rebuilt with the new
+notices. New GPL-distributed binaries should carry the GPL and third-party
+notices and point to their **exact corresponding source**.

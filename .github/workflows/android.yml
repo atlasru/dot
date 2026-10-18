@@ -61,6 +61,10 @@ jobs:
           keytool -exportcert -keystore app/build/signing/dot-dev.jks -alias dotdev -storepass dot-debug -file dev-cert.der
           fingerprint=$(sha256sum dev-cert.der | cut -d' ' -f1)
           grep -F "Signer #1 certificate SHA-256 digest: $fingerprint" apk-signing.txt
+          # Ship the GPL, upstream licenses and notices inside every new APK.
+          for asset in LICENSE THIRD_PARTY_NOTICES.md licenses/Xray-core-MPL-2.0.txt licenses/libXray-MIT.txt; do
+            unzip -Z1 "$apk" | grep -Fx "assets/$asset"
+          done
           mkdir -p release-assets
           cp "$apk" "release-assets/dot-android-$version-dev-debug.apk"
           printf '%s\n' "$GITHUB_SHA" > release-assets/android-source.txt

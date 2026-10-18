@@ -22,3 +22,11 @@ On Android and Windows, `x-hwid` and basic client/OS metadata are sent to the su
 ## Reporting a security issue
 
 For issues that would expose another user's credentials or private infrastructure, avoid publishing exploit details or secrets in a public issue. Contact the repository owner privately first.
+
+## Licensing / redistribution
+
+The original dot. repository code is licensed under
+[GPL-3.0-or-later](LICENSE). The bundled Xray/libXray/Wintun runtimes
+have separate obligations described in
+[third-party notices](THIRD_PARTY_NOTICES.md). A GPL notice does not grant
+permission to ignore the third-party conditions.

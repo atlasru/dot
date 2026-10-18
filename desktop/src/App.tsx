@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import NodeBrowser from "./NodeBrowser";
 import SubscriptionManager from "./SubscriptionManager";
 import { getVersion } from "@tauri-apps/api/app";
@@ -364,7 +365,13 @@ function SettingsPanel({ version, vpn, notices, onChange, groups, prefs, busy, o
       <SubscriptionManager groups={groups} prefs={prefs} vpn={vpn} notices={notices} onChange={onChange} />
 
       <SettingsSection title="ABOUT">
-        <div className="about"><span>dot. Desktop</span><small>{version}</small><span>Xray Core</span><small>{XRAY_VERSION}</small><span>protocol</span><small>VLESS / REALITY</small></div>
+        <div className="about">
+          <span>dot. Desktop</span><small>{version}</small>
+          <span>Xray Core</span><small>{XRAY_VERSION}</small>
+          <span>protocols</span><small>VLESS / REALITY / HY2</small>
+          <span>license</span><small><a href="https://github.com/atlasru/dot/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GPL-3.0-or-later ↗</a></small>
+          <span>third-party</span><small><a href="https://github.com/atlasru/dot/blob/main/THIRD_PARTY_NOTICES.md" target="_blank" rel="noopener noreferrer">view notices ↗</a></small>
+        </div>
       </SettingsSection>
     </div>
   </div>;

@@ -5,7 +5,19 @@ import subprocess
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-version = json.loads((root / 'desktop/package.json').read_text())['version']
+package = json.loads((root / 'desktop/package.json').read_text())
+version = package['version']
+assert package.get('license') == 'GPL-3.0-or-later'
+assert json.loads((root / 'desktop/package-lock.json').read_text())['packages']['']['license'] == 'GPL-3.0-or-later'
+assert 'license = "GPL-3.0-or-later"' in (root / 'desktop/src-tauri/Cargo.toml').read_text()
+assert (root / 'LICENSE').read_text().startswith('GNU GENERAL PUBLIC LICENSE')
+assert 'GPL-3.0-or-later' in (root / 'THIRD_PARTY_NOTICES.md').read_text()
+assert (root / 'app/src/main/assets/LICENSE').read_bytes() == (root / 'LICENSE').read_bytes()
+assert (root / 'app/src/main/assets/THIRD_PARTY_NOTICES.md').read_bytes() == (root / 'THIRD_PARTY_NOTICES.md').read_bytes()
+for name in ['Xray-core-MPL-2.0.txt', 'libXray-MIT.txt']:
+    assert (root / 'third_party_licenses' / name).read_bytes() == (
+        root / 'app/src/main/assets/licenses' / name
+    ).read_bytes()
 assert re.fullmatch(r'\d+\.\d+\.\d+', version), f'Not a stable version: {version}'
 android = (root / 'app/build.gradle.kts').read_text()
 assert re.search(r'versionName\s*=\s*"' + re.escape(version) + '"', android)

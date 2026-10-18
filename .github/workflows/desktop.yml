@@ -53,6 +53,12 @@ jobs:
           if (-not $xray -or -not $wintun) { throw 'Xray runtime archive is missing xray.exe or wintun.dll' }
           Copy-Item $xray.FullName src-tauri/runtime/xray.exe -Force
           Copy-Item $wintun.FullName src-tauri/runtime/wintun.dll -Force
+          # Keep the exact upstream licenses shipped alongside these binaries.
+          $xrayLicense = Get-ChildItem -Path $out -Recurse -File | Where-Object { $_.Name -eq 'LICENSE' } | Select-Object -First 1
+          $wintunLicense = Get-ChildItem -Path $out -Recurse -File | Where-Object { $_.Name -eq 'LICENSE-Wintun' } | Select-Object -First 1
+          if (-not $xrayLicense -or -not $wintunLicense) { throw 'Pinned Xray archive is missing Xray MPL or Wintun PBL license text' }
+          Copy-Item $xrayLicense.FullName src-tauri/runtime/LICENSE-Xray-core.txt -Force
+          Copy-Item $wintunLicense.FullName src-tauri/runtime/LICENSE-Wintun.txt -Force
 
       - name: Generate Windows icons
         run: npm run icons
@@ -80,6 +86,11 @@ jobs:
           Copy-Item 'src-tauri/target/release/dot-desktop.exe' "$portable/dot-desktop.exe" -Force
           Copy-Item 'src-tauri/runtime/xray.exe' "$portable/runtime/xray.exe" -Force
           Copy-Item 'src-tauri/runtime/wintun.dll' "$portable/runtime/wintun.dll" -Force
+          Copy-Item '../LICENSE' "$portable/LICENSE" -Force
+          Copy-Item '../THIRD_PARTY_NOTICES.md' "$portable/THIRD_PARTY_NOTICES.md" -Force
+          New-Item -ItemType Directory -Force "$portable/licenses" | Out-Null
+          Copy-Item 'src-tauri/runtime/LICENSE-Xray-core.txt' "$portable/licenses/Xray-core-MPL-2.0.txt" -Force
+          Copy-Item 'src-tauri/runtime/LICENSE-Wintun.txt' "$portable/licenses/Wintun-PBL.txt" -Force
           Get-ChildItem $portable -Recurse | Format-Table FullName, Length
 
       - name: Verify portable release archive

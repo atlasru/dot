@@ -14,12 +14,24 @@ names = [f'dot-android-{version}-dev-debug.apk', f'dot-desktop-{version}-windows
 assert sorted(p.name for p in folder.iterdir()) == sorted(names + ['android-source.txt', 'desktop-source.txt'])
 with zipfile.ZipFile(folder / names[1]) as z:
     assert z.testzip() is None
-    assert {n for n in z.namelist() if not n.endswith('/')} == {'dot-desktop.exe', 'runtime/xray.exe', 'runtime/wintun.dll', 'BUILD.json'}
+    assert {n for n in z.namelist() if not n.endswith('/')} == {
+        'dot-desktop.exe', 'runtime/xray.exe', 'runtime/wintun.dll', 'BUILD.json',
+        'LICENSE', 'THIRD_PARTY_NOTICES.md',
+        'licenses/Xray-core-MPL-2.0.txt', 'licenses/Wintun-PBL.txt',
+    }
+    assert z.read('LICENSE') == Path('LICENSE').read_bytes()
+    assert z.read('THIRD_PARTY_NOTICES.md') == Path('THIRD_PARTY_NOTICES.md').read_bytes()
+    assert b'Mozilla Public License Version 2.0' in z.read('licenses/Xray-core-MPL-2.0.txt')
+    assert b'Prebuilt Binaries License' in z.read('licenses/Wintun-PBL.txt')
     metadata = json.loads(z.read('BUILD.json').decode('utf-8-sig'))
     assert metadata == dict(version=version, source=sha, configuration='release', signing='unsigned')
 with zipfile.ZipFile(folder / names[0]) as z:
     assert z.testzip() is None
     assert 'AndroidManifest.xml' in z.namelist()
+    for name in ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/Xray-core-MPL-2.0.txt', 'licenses/libXray-MIT.txt']:
+        assert f'assets/{name}' in z.namelist(), f'Missing Android license: {name}'
+    assert z.read('assets/LICENSE') == Path('LICENSE').read_bytes()
+    assert z.read('assets/THIRD_PARTY_NOTICES.md') == Path('THIRD_PARTY_NOTICES.md').read_bytes()
 hashes = {}
 for name in names:
     binary = folder / name

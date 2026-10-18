@@ -301,6 +301,8 @@ input::placeholder { color: var(--muted); }
 .about { display: grid; grid-template-columns: 1fr auto; gap: 8px 18px; }
 .about span { font-size: 10px; }
 .about small { color: var(--muted); font-size: 9px; text-align: right; }
+.about a { color: var(--red); text-decoration: none; }
+.about a:hover, .about a:focus-visible { text-decoration: underline; }
 
 .error-toast { position: fixed; z-index: 20; left: 50%; bottom: 18px; max-width: min(620px, calc(100vw - 40px)); transform: translateX(-50%); padding: 11px 14px; border: 1px solid color-mix(in srgb, var(--red) 55%, var(--line)); border-radius: 2px; background: var(--panel-2); color: var(--red); font-size: 10px; text-align: left; box-shadow: 0 12px 40px #0008; }
 

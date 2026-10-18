@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 package dev.dotclient.android.ui
 
 import android.Manifest
@@ -964,10 +965,13 @@ private fun AboutScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         AboutValue("core", "libXray v26.7.28")
         AboutValue("protocol", "VLESS / REALITY / HY2")
         AboutValue("android", "API 26+")
-        Spacer(Modifier.height(28.dp))
+        AboutValue("license", "GPL-3.0-or-later")
+        Spacer(Modifier.height(22.dp))
         Text("project", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(8.dp))
         AboutLink("github", "atlasru/dot") { openUrl("https://github.com/atlasru/dot") }
+        AboutLink("license", "read GPLv3") { openUrl("https://github.com/atlasru/dot/blob/main/LICENSE") }
+        AboutLink("third-party", "notices") { openUrl("https://github.com/atlasru/dot/blob/main/THIRD_PARTY_NOTICES.md") }
         Spacer(Modifier.weight(1f))
         Text("built around Xray-core · no accounts · no analytics", color = Color(0xFF666666), style = MaterialTheme.typography.labelMedium)
         Spacer(Modifier.height(6.dp))
