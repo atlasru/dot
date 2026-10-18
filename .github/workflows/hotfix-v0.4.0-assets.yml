@@ -8,6 +8,10 @@ on:
     paths:
       - .github/workflows/hotfix-v0.4.0-assets.yml
 
+concurrency:
+  group: v040-release-hotfix
+  cancel-in-progress: true
+
 permissions:
   contents: write
   actions: read
@@ -119,7 +123,7 @@ jobs:
               'Android uses versionCode 401 for updating existing installations. '
               'Development APK signature and package ID are unchanged. '
               'The original v0.4.0 Git tag still points to the earlier source commit.'
-              chr(10) * 2
+              + chr(10) * 2
           )
           title = '# dot. v0.4.0' + chr(10) * 2
           assert title in notes
