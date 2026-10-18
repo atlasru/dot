@@ -86,8 +86,8 @@ const setDownloadFallbacks = () => {
   $('desktopDownload').href = desktopFallback;
   $('androidVersion').textContent = 'v0.4.0-dev-debug';
   $('desktopVersion').textContent = 'v0.4.0';
-  $('androidHash').textContent = 'SHA-256: f06bf1dd124d1583f9f4418b9cf2035ab782f2188541c466e9843a41220a541e';
-  $('desktopHash').textContent = 'SHA-256: 91aa313f0c121116440cc22c9bd7b0f69f6026208cbec358bd306220487a7dda';
+  $('androidHash').textContent = 'SHA-256: 9c56aad2124e2b45acf54893e76fe44548fa3818dea55502a372925a106774c1';
+  $('desktopHash').textContent = 'SHA-256: 88e71c0eeb109a12b2fa9fb5bcb295fa6f6f0e56d7bcf01004f391a29f7596a3';
 };
 
 const loadRelease = async () => {
