@@ -1,0 +1,138 @@
+name: hotfix-v0.4.0-assets
+
+# One-shot recovery of v0.4.0 release binaries from a proven successful CI run.
+# Trigger only when this workflow file is first added/changed on main.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/hotfix-v0.4.0-assets.yml
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  replace-assets:
+    if: github.repository == 'atlasru/dot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: 9d7064c3fd83f340f787e6656c2d6f0c915cfcce
+      SOURCE_RUN: '39111580483'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact successful source run and existing release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" --jq .head_sha)" = "$SOURCE_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" --jq .conclusion)" = "success"
+          test "$(gh release view v0.4.0 --json tagName --jq .tagName)" = "v0.4.0"
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+
+      - name: Download the exact CI release candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: unified-release-candidate
+          run-id: 39111580483
+          github-token: ${{ github.token }}
+          path: candidate
+
+      - name: Verify both binaries, checksums and build provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd candidate/release-assets
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 3
+          sha256sum --check SHA256SUMS
+          python3 - <<'PY'
+          import json, os, pathlib, zipfile
+          p = pathlib.Path('.')
+          names = {'dot-android-0.4.0-dev-debug.apk', 'dot-desktop-0.4.0-windows-x64.zip', 'SHA256SUMS'}
+          assert {f.name for f in p.iterdir() if f.is_file()} == names
+          with zipfile.ZipFile('dot-android-0.4.0-dev-debug.apk') as apk:
+              assert apk.testzip() is None
+              assert 'AndroidManifest.xml' in apk.namelist()
+          with zipfile.ZipFile('dot-desktop-0.4.0-windows-x64.zip') as portable:
+              assert portable.testzip() is None
+              assert {n for n in portable.namelist() if not n.endswith('/')} == {
+                  'dot-desktop.exe', 'runtime/xray.exe', 'runtime/wintun.dll', 'BUILD.json'}
+              build = json.loads(portable.read('BUILD.json').decode('utf-8-sig'))
+              assert build == {
+                  'version': '0.4.0',
+                  'source': os.environ['SOURCE_SHA'],
+                  'configuration': 'release',
+                  'signing': 'unsigned'
+              }
+          notes = pathlib.Path('../release-notes.md').read_text()
+          assert os.environ['SOURCE_SHA'] in notes
+          assert 'SHA-256' in notes
+          print('Validated release assets from', os.environ['SOURCE_SHA'])
+          PY
+
+      - name: Replace v0.4.0 binary assets and SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd candidate/release-assets
+          gh release upload v0.4.0 \
+            dot-android-0.4.0-dev-debug.apk \
+            dot-desktop-0.4.0-windows-x64.zip \
+            SHA256SUMS --clobber
+
+      - name: Update release notes with exact source and current hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view v0.4.0 --json body --jq .body > old-release-notes.md
+          python3 - <<'PY'
+          import hashlib, os, pathlib, re
+          p = pathlib.Path('candidate/release-assets')
+          notes = pathlib.Path('old-release-notes.md').read_text()
+          notes = notes.replace('versionCode 400', 'versionCode 401')
+          for name in ['dot-android-0.4.0-dev-debug.apk', 'dot-desktop-0.4.0-windows-x64.zip']:
+              digest = hashlib.sha256((p / name).read_bytes()).hexdigest()
+              pattern = r'(' + re.escape('\\u0060' + name + '\\u0060') + r'\\s+SHA-256:\\s*\\u0060)[0-9a-f]{64}(\\u0060)'
+              # The release notes have a one-line hash immediately following each filename.
+              notes, num = re.subn(pattern, lambda m: m.group(1) + digest + m.group(2), notes)
+              assert num == 1, f'Unable to update checksum for {name}: {num}'
+          notes = re.sub(
+              r'Source revision: \\u0060[0-9a-f]{40}\\u0060\\. Both builds were produced from this revision\\.',
+              'Hotfix binary source revision: ' + chr(96) + os.environ['SOURCE_SHA'] + chr(96) +
+              '. Both replacement builds were produced from this revision ('
+              'Actions run #39111580483). The original v0.4.0 Git tag remains unchanged.',
+              notes,
+          )
+          assert os.environ['SOURCE_SHA'] in notes
+          header = (
+              '> **Hysteria2 compatibility hotfix (18 October 2026):** Android and Windows '
+              'download assets have been replaced with successful builds from '
+              '[Actions #39111580483](https://github.com/atlasru/dot/actions/runs/39111580483). '
+              'Fixes invalid Hysteria2 Xray routing and Salamander packet-size output; '
+              'Android uses versionCode 401 for updating existing installations. '
+              'Development APK signature and package ID are unchanged. '
+              'The original v0.4.0 Git tag still points to the earlier source commit.'
+              '\\n\\n'
+          )
+          notes = notes.replace('# dot. v0.4.0\\n\\n', '# dot. v0.4.0\\n\\n' + header, 1)
+          pathlib.Path('updated-release-notes.md').write_text(notes)
+          PY
+          gh release edit v0.4.0 --notes-file updated-release-notes.md
+
+      - name: Verify the published bytes and notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p published
+          gh release download v0.4.0 --dir published --clobber
+          (cd published && sha256sum --check SHA256SUMS)
+          cmp candidate/release-assets/SHA256SUMS published/SHA256SUMS
+          cmp candidate/release-assets/dot-android-0.4.0-dev-debug.apk published/dot-android-0.4.0-dev-debug.apk
+          cmp candidate/release-assets/dot-desktop-0.4.0-windows-x64.zip published/dot-desktop-0.4.0-windows-x64.zip
+          gh release view v0.4.0 --json body --jq .body | grep -F "$SOURCE_SHA"
+          echo 'Successfully replaced and verified v0.4.0 release assets.'
