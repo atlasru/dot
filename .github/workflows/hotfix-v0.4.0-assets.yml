@@ -97,17 +97,19 @@ jobs:
           notes = notes.replace('versionCode 400', 'versionCode 401')
           for name in ['dot-android-0.4.0-dev-debug.apk', 'dot-desktop-0.4.0-windows-x64.zip']:
               digest = hashlib.sha256((p / name).read_bytes()).hexdigest()
-              pattern = r'(' + re.escape('\\u0060' + name + '\\u0060') + r'\\s+SHA-256:\\s*\\u0060)[0-9a-f]{64}(\\u0060)'
+              bt = chr(96)
+              pattern = r'(' + re.escape(bt + name + bt) + r'\s+SHA-256:\s*' + re.escape(bt) + r')[0-9a-f]{64}(' + re.escape(bt) + ')'
               # The release notes have a one-line hash immediately following each filename.
               notes, num = re.subn(pattern, lambda m: m.group(1) + digest + m.group(2), notes)
               assert num == 1, f'Unable to update checksum for {name}: {num}'
-          notes = re.sub(
-              r'Source revision: \\u0060[0-9a-f]{40}\\u0060\\. Both builds were produced from this revision\\.',
+          notes, count = re.subn(
+              r'Source revision: `[0-9a-f]{40}`\. Both builds were produced from this revision\.',
               'Hotfix binary source revision: ' + chr(96) + os.environ['SOURCE_SHA'] + chr(96) +
-              '. Both replacement builds were produced from this revision ('
-              'Actions run #39111580483). The original v0.4.0 Git tag remains unchanged.',
+              '. Both replacement builds were produced from this revision '
+              '(Actions run #39111580483). The original v0.4.0 Git tag remains unchanged.',
               notes,
           )
+          assert count == 1, 'Unable to update source revision'
           assert os.environ['SOURCE_SHA'] in notes
           header = (
               '> **Hysteria2 compatibility hotfix (18 October 2026):** Android and Windows '
@@ -117,9 +119,11 @@ jobs:
               'Android uses versionCode 401 for updating existing installations. '
               'Development APK signature and package ID are unchanged. '
               'The original v0.4.0 Git tag still points to the earlier source commit.'
-              '\\n\\n'
+              chr(10) * 2
           )
-          notes = notes.replace('# dot. v0.4.0\\n\\n', '# dot. v0.4.0\\n\\n' + header, 1)
+          title = '# dot. v0.4.0' + chr(10) * 2
+          assert title in notes
+          notes = notes.replace(title, title + header, 1)
           pathlib.Path('updated-release-notes.md').write_text(notes)
           PY
           gh release edit v0.4.0 --notes-file updated-release-notes.md
