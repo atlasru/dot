@@ -54,7 +54,7 @@ Both migrations are restart-safe: interruption leaves the previous or new comple
 Tests cover generation, persistence/reload, two independent subscriptions, custom edit/regeneration, legacy migration, failed writes, unchanged nodes/credentials/URLs, request headers, retries, initial import identity, non-subscription clients, redirect scoping and the actual Windows refresh scheduler with B selected while A refreshes.
 
 ```sh
-gradle testDebugUnitTest assembleDebug lintDebug
+gradle testDebugUnitTest assembleDebug
 cd desktop
 npm ci
 npm test
@@ -63,9 +63,9 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri -- build --no-bundle
 ```
 
-The GitHub Actions unified workflow builds Android and Windows from the same source revision, runs both unit suites and the frontend fixture test, and verifies packaged assets. The integrated 0.4.0 development line combines Hysteria2 PR #38 and HWID PR #39 without changing either source branch. Integration tests cover the persisted states above, mixed-protocol credentials and metadata, initial fetches through redirects, and startup/scheduled refresh after migration and regeneration.
+The [v0.4.0 release](releases/0.4.0.md) includes this feature on both platforms. Unified CI builds Android and Windows from the same source revision, runs identity validation and persistence tests, and verifies packaged artifacts. The published **18 October 2026** hotfix APK and portable ZIP were built from source `9d7064c3` (Actions run [#39111580483](https://github.com/atlasru/dot/actions/runs/39111580483)); the historical `v0.4.0` tag remains on an older commit.
 
-At this baseline, `lintDebug` reports the existing `StartActivityAndCollapseDeprecated` error in `DotQuickTileService.kt`. That file is unchanged by this feature. Android unit tests and APK compilation pass independently of that lint result.
+CI's standard Android checks are `gradle testDebugUnitTest` and `gradle assembleDebug`. Optional Android lint is separate from this tested release gate; a prior development snapshot reported a `StartActivityAndCollapseDeprecated` lint finding in `DotQuickTileService.kt`. Do not claim that the complete lint suite passed based only on the green release workflow.
 
 ## Remaining device checks
 

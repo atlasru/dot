@@ -1,41 +1,39 @@
 # VPN engine
 
-`dot.` uses Android `VpnService` for the system TUN interface and the official XTLS `libXray` Android artifact for Xray-core.
+dot. v0.4.0 uses pinned **Xray/libXray v26.7.28**. Android uses `VpnService`, a system TUN interface and the upstream libXray AAR. Windows uses an independently configured Xray-core executable with Wintun. Both platforms support VLESS with REALITY/TLS and Hysteria2 over UDP/QUIC.
 
-## Core version
+## Android startup
 
-CI currently pins `libXray` **v26.7.28** and downloads the Android AAR before Gradle compilation.
+1. Request VPN permission with `VpnService.prepare()`.
+2. Create a TUN interface through `DotVpnService` and apply the saved split-tunnel policy.
+3. Configure protected outbound sockets with `VpnService.protect()` and a protected DNS resolver.
+4. Construct a client outbound for the selected URI:
+   - **VLESS:** libXray share-link conversion followed by normalization of invalid `sendThrough` and server-only REALITY data, preserving the client's SNI/fingerprint/public key/short ID.
+   - **Hysteria2:** `Hysteria2UriParser` + `Hysteria2XrayConfig` generate a native Hysteria v2 outbound (TLS/SNI/ALPN; optional congestion, Salamander and packet-size parameters).
+5. Insert the root `env` key `xray.tun.fd` and the `dot-tun` inbound into the JSON.
+6. Invoke libXray `runXrayFromJson` and publish `VpnRuntime` state to the app, notification and Quick Settings tile.
 
-## Startup
+## Reliability and network handoff
 
-1. Android grants VPN permission through `VpnService.prepare()`.
-2. `DotVpnService` creates the TUN interface.
-3. The TUN file descriptor is injected into Xray config root `env` as `xray.tun.fd`.
-4. libXray converts the selected `vless://` share link to Xray JSON.
-5. `dot.` normalizes fields that are incompatible with current Xray behavior.
-6. Xray is started through libXray `runXrayFromJson`.
-7. `VpnRuntime` publishes the real connection state to the UI and Quick Settings tile.
+Android observes default-network changes. A lost Wi-Fi/mobile connection becomes waiting-for-network rather than an immediate permanent error. Reconnect attempts use a capped **1, 2, 5, 10, 30-second** backoff (30 seconds thereafter); disconnect cancels retries. The selected VLESS/HY2 URI and split-tunnel policy are retained. Configuration errors can stop reconnecting rather than retrying an invalid config.
 
-## Socket protection
+## Windows backend
 
-The service registers libXray dialer/listener controllers and forwards file descriptors to `VpnService.protect()`. This prevents Xray's own outbound sockets from being routed back into its VPN TUN.
+The Rust backend builds protocol-specific TUN and URL-test Xray configurations. CI invokes the **real pinned `xray.exe run -test`** against representative VLESS and Hysteria2 configurations. Portable Windows ZIPs include `dot-desktop.exe`, `runtime/xray.exe`, `runtime/wintun.dll` and `BUILD.json`. Windows requires WebView2 Runtime and administrator privileges for routing/TUN. Automatic reconnect on network handoff, Android-style AUTO NODE and split tunneling are not currently Windows features.
 
-A protected DNS resolver is also configured before the core starts.
+## Network and identity boundaries
 
-## libXray normalization
+Subscription HTTP(S) fetches may send `x-hwid`, `x-device-os`, `x-ver-os` and `x-device-model` to the subscription origin. They are **not** included in tunneled VPN traffic, node URL tests or geolocation requests. Redirects crossing origins remove all four identity headers. See [subscription identity](SUBSCRIPTION_IDENTITY.md).
 
-The pinned libXray release has a few serialization behaviors that `dot.` corrects at runtime:
+## Traffic and shutdown
 
-- removes outbound `sendThrough` when it contains the display name instead of a local IP
-- removes server-only REALITY fields from client outbounds
-- restores client REALITY values such as SNI, fingerprint, public key/password and short ID directly from the original VLESS URI when needed
+Android samples UID traffic counters for Home and its foreground notification. Disconnect stops traffic reporting, calls libXray `stopXray`, resets DNS, closes the TUN descriptor and clears the runtime notification/state. Windows handles Xray child processes and routing through the native backend/Job Object.
 
-These fixes are intentionally kept close to the libXray integration layer so the rest of the application can continue using normalized `VlessProfile` models.
+## Compatibility / testing
 
-## Traffic
+- Only Hysteria **version 2** is supported; not Hysteria v1.
+- For HY2, QUIC/UDP must be allowed by the network and server.
+- CI validates configuration and compilation; real-world provider auth, routing, QUIC behavior and network handoff still need representative manual testing.
+- Download **the patched [v0.4.0 release assets](releases/0.4.0.md)**, not old assets cached from 14 October 2026.
 
-While connected, the service samples Android UID traffic counters once per second. The calculated upload/download rates are exposed to both the Home UI and foreground VPN notification.
-
-## Shutdown
-
-Disconnect stops the traffic meter, invokes libXray `stopXray`, resets DNS, closes the TUN descriptor, clears runtime state and removes the foreground notification.
+See [architecture](../ARCHITECTURE.md) and [Hysteria2 manual tests](hysteria2-manual-test.md).

@@ -1,17 +1,18 @@
 # Changelog
 
-## 0.4.0 — in development
+## 0.4.0 — released 14 October 2026; binary hotfix 18 October 2026
 
-- Add Hysteria2/HY2 parsing, mixed subscriptions and protocol-aware Xray client configuration on Android and Windows.
-- Keep v0.3.0 VLESS state, selection, favorites, latency and preferences readable; no stable 0.4.0 release has been published.
-- Real provider links and device testing remain required before release.
+- Add Hysteria2/HY2 link parsing, mixed VLESS/HY2 subscriptions, import and protocol-specific Xray client configurations on Android and Windows.
+- Support Hysteria2 TLS/SNI/ALPN, congestion control, optional Salamander obfuscation and packet-size settings. Hysteria v1 and other finalmask types remain unsupported.
+- Preserve existing 0.3.0 VLESS state, favorites, selection, credentials, latency and preferences when moving to 0.4.0.
+- Add persistent, independently configurable per-subscription device identity (X-HWID) for Android and Windows. Generate each value locally from 128 random bits, with copy, edit and confirmed manual regeneration.
+- Send `x-hwid` and OS/client headers on subscription fetch/refresh (not VPN or node traffic). Keep the correct per-subscription identity during retry and scheduled refresh; strip identity headers on cross-origin redirects.
+- Expand Android, Windows and frontend unit/integration tests and validate generated Xray configurations with the pinned v26.7.28 Windows runtime.
+- **18 October Hysteria2 hotfix:** replace the original v0.4.0 APK and Windows ZIP with the passing [unified CI run #39111580483](https://github.com/atlasru/dot/actions/runs/39111580483) artifacts built from [`9d7064c3`](https://github.com/atlasru/dot/commit/9d7064c3fd83f340f787e6656c2d6f0c915cfcce). Correct incompatible Hysteria2 Xray routing and Salamander packet-size handling.
+- Bump Android `versionCode` **400 → 401**, retaining `0.4.0-debug`, the package ID and development signing key so existing compatible installs can update.
+- Refresh the [release's SHA-256 checksums](docs/releases/0.4.0.md), site download metadata and pixel-art site favicon. **The tag `v0.4.0` remains on its original source revision**; the downloadable hotfix binaries have different provenance.
 
-- Add persistent, independently configurable per-subscription device identity (X-HWID) on Android and Windows.
-- Generate `dot-` + 32 lowercase hexadecimal characters locally from 128 cryptographically random bits; never derive it from hardware.
-- Add HWID edit/paste, copy and confirmed manual regeneration to existing subscription forms.
-- Persist legacy subscription identities once before requests; preserve subscription URLs, nodes, credentials and selection.
-- Centralize subscription request headers, including OS/version/client metadata; keep background refresh independent of selected subscriptions and remove identity headers across origins.
-- Add shared Android/Rust/frontend validation fixtures, persistence/failure tests and captured HTTP request tests.
+Provider-specific manual scenarios remain in [the test checklist](docs/hysteria2-manual-test.md). This change log distinguishes the published release from broad compatibility guarantees.
 
 ## 0.3.0 — unified Android and Windows
 

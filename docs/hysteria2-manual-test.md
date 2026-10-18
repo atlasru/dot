@@ -1,10 +1,10 @@
 # Hysteria2 0.4.0 validation
 
-Development milestone only. Xray-core/libXray remains pinned to **v26.7.28** on both platforms. The Windows CI validates generated VLESS and HY2 TUN and URL-test configurations with the pinned `xray.exe run -test`. Android needs a device test with the pinned AAR. UDP/QUIC must be permitted by the current network.
+**Current status (18 October 2026):** Hysteria2 is included in the published [v0.4.0 release](releases/0.4.0.md). The original 14 October APK and Windows ZIP were replaced following Hysteria2 Xray routing/Salamander fixes by verified artifacts from [Actions #39111580483](https://github.com/atlasru/dot/actions/runs/39111580483), source `9d7064c3`. The original Git tag is not the hotfix source. Xray-core/libXray remains pinned to **v26.7.28** on both platforms. Windows CI checks generated VLESS/HY2 TUN and URL-test configs against the real pinned `xray.exe run -test`; Android CI compiles and runs unit tests. Successful real-device usage was reported for the updated builds, but all the scenarios below still need representative per-provider validation. HY2 requires working UDP/QUIC.
 
 Supported URI schemes: `hy2://` and `hysteria2://`; both map to Hysteria version 2. URI options: `sni`/`serverName`/`peer`, `insecure`/`allowInsecure`, comma-separated `alpn`, `congestion` (`bbr`, `reno`, `brutal`, `force-brutal`), `up`, `down`, `obfs=salamander`, `obfs-password`, `packetSize` (single integer or range up to 2048). Unknown options are ignored. Other finalmask types and Hysteria v1 are unsupported. Server inbound fields are never copied to the client.
 
-Existing Android subscriptions are stored as raw URIs and re-parsed, so old VLESS entries remain readable. Desktop persisted VLESS nodes lacking `proxy_config` default to VLESS. A corrupt Android state is retained rather than overwritten by an empty state; Desktop reports deserialization errors without writing a replacement. Keep a backup of production state before installing a development build.
+Existing Android subscriptions are stored as raw URIs and re-parsed, so old VLESS entries remain readable. Desktop persisted VLESS nodes lacking `proxy_config` default to VLESS. A corrupt Android state is retained rather than overwritten by an empty state; Desktop reports deserialization errors without writing a replacement. Keep a backup of important state before upgrading; the Android APK remains a debug/development-signed distribution, even though v0.4.0 is the published GitHub release.
 
 ## Provider fixtures needed
 

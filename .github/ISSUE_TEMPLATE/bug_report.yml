@@ -11,16 +11,39 @@ body:
     id: version
     attributes:
       label: dot. version
-      placeholder: 0.0.14
+      placeholder: 0.4.0 / 0.4.0-debug
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Android
+        - Windows
+        - Website
+        - Other
     validations:
       required: true
   - type: input
-    id: android
+    id: os
     attributes:
-      label: Android version / device
-      placeholder: Android 16 / Nothing Phone 3
+      label: OS version / device
+      placeholder: Android 16 / Nothing Phone 3 or Windows 11 x64
     validations:
-      required: true
+      required: false
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: VPN protocol (when applicable)
+      options:
+        - Not applicable
+        - VLESS
+        - Hysteria2
+        - Mixed subscription
+        - Unknown
+    validations:
+      required: false
   - type: textarea
     id: problem
     attributes:

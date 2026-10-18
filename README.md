@@ -2,7 +2,7 @@
 
 Minimal VLESS and Hysteria2 client for Android and Windows with an AMOLED-first, Nothing-inspired interface.
 
-Current stable Android / Windows release: **0.3.0**. The 0.4.0 branch is in development.
+**Latest published release: [v0.4.0](https://github.com/atlasru/dot/releases/tag/v0.4.0)** (18 October 2026 Hysteria2 compatibility hotfix). Android is a development-signed debug APK; Windows is an unsigned portable x64 build. Both release downloads have been tested by their maintainer on real devices, but support still depends on the provider and network. [Website](https://atlasru.github.io/dot/) · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/0.4.0.md).
 
 ## Features
 
@@ -63,7 +63,7 @@ When a tunnel is already active, AUTO NODE can switch immediately when usable la
 
 The Android VPN service observes default-network changes through `ConnectivityManager`.
 
-If Wi-Fi or mobile data disappears while a tunnel is active, dot. moves to **waiting for network** instead of treating the interruption as a permanent failure. When connectivity returns, the same VLESS profile and split-tunnel configuration are re-established automatically.
+If Wi-Fi or mobile data disappears while a tunnel is active, dot. moves to **waiting for network** instead of treating the interruption as a permanent failure. When connectivity returns, the same selected VLESS or Hysteria2 node and split-tunnel configuration are re-established automatically.
 
 Failed reconnects use capped backoff intervals of 1, 2, 5, 10 and 30 seconds; further retries stay at 30 seconds. A manual disconnect cancels the reconnect loop immediately.
 
@@ -91,9 +91,9 @@ Change, paste, copy or regenerate it in **Settings → Subscriptions → Add/Edi
 
 Subscription downloads send `x-hwid`, `x-device-os`, `x-ver-os` and `x-device-model` alongside the existing User-Agent. Identity headers are scoped to the subscription origin and removed on redirects to a different origin. They are never added to VPN traffic, node tests, GeoIP or other requests. See [device identity details and validation](docs/SUBSCRIPTION_IDENTITY.md).
 
-Refreshing a subscription now compares the newly parsed VLESS profiles with the currently stored profiles before replacing them. `dot.` reports added, edited and deleted nodes, preserves the selected node when the same logical endpoint was edited, and carries matching latency results across the refresh.
+Refreshing a subscription compares the newly parsed VLESS and Hysteria2 nodes with the currently stored nodes before replacing them. `dot.` reports added, edited and deleted nodes, preserves the selected node when the same logical endpoint was edited, and carries matching latency results across the refresh.
 
-If downloading or parsing fails, the previous working node list is retained. The error dialog presents a readable explanation and an optional raw error view; subscription credentials and VLESS user IDs are redacted before raw errors reach the UI.
+If downloading or parsing fails, the previous working node list is retained. The error dialog presents a readable explanation and an optional raw error view; subscription credentials, VLESS user IDs, Hysteria2 authentication and obfuscation passwords are redacted before raw errors reach the UI.
 
 ## Node sorting
 
@@ -123,14 +123,25 @@ Only the resolved node IP is sent to the geolocation provider; subscription URLs
 
 ## Installation
 
-Download Android and Windows from the [unified v0.3.0 release](https://github.com/atlasru/dot/releases/tag/v0.3.0).
+Download from the **[current v0.4.0 release](https://github.com/atlasru/dot/releases/tag/v0.4.0)** (or from the [dot. website](https://atlasru.github.io/dot/)):
 
-- Android 8.0+: `dot-android-0.3.0-dev-debug.apk` is the debug variant, signed with the public development key, not a production signing key. Installed version: `0.3.0-debug` / code `300`.
-- Windows x64: `dot-desktop-0.3.0-windows-x64.zip` contains the unsigned release-mode executable and Xray/Wintun runtime. Extract everything together. Requires Microsoft Edge WebView2 Runtime and administrator privileges for VPN routing.
+| Platform | Download | Notes |
+| --- | --- | --- |
+| Android 8.0+ (API 26) | [`dot-android-0.4.0-dev-debug.apk`](https://github.com/atlasru/dot/releases/download/v0.4.0/dot-android-0.4.0-dev-debug.apk) | `0.4.0-debug`, versionCode **401**, package `dev.dotclient.android.debug`; signed using the **public development key**, not production-signed |
+| Windows x64 | [`dot-desktop-0.4.0-windows-x64.zip`](https://github.com/atlasru/dot/releases/download/v0.4.0/dot-desktop-0.4.0-windows-x64.zip) | Unsigned release-mode portable executable; extract the complete ZIP and keep `runtime/` next to `dot-desktop.exe` |
 
-See [Desktop](docs/DESKTOP.md) for its workspace, subscriptions, map, tests and tray support, and [Release process](docs/RELEASING.md) for build/signing details.
+On Windows, Microsoft Edge WebView2 Runtime and administrator privileges are required for VPN routing. Android upgrades preserve existing application data **only if** the package ID and signing certificate match. The 401 build can replace an earlier development-signed `0.4.0-debug` build with versionCode 400 without uninstalling. No iOS, macOS or Linux binary is currently distributed.
 
-Debug builds use the same development signing key, so newer versions can be installed over previous builds without deleting app data.
+**Verify the exact current release assets (SHA-256):**
+
+```text
+9c56aad2124e2b45acf54893e76fe44548fa3818dea55502a372925a106774c1  dot-android-0.4.0-dev-debug.apk
+88e71c0eeb109a12b2fa9fb5bcb295fa6f6f0e56d7bcf01004f391a29f7596a3  dot-desktop-0.4.0-windows-x64.zip
+```
+
+The release also provides [`SHA256SUMS`](https://github.com/atlasru/dot/releases/download/v0.4.0/SHA256SUMS). On **18 October 2026**, both initial `v0.4.0` download assets were replaced with the verified Hysteria2-fix binaries from [Actions run #39111580483](https://github.com/atlasru/dot/actions/runs/39111580483), source commit [`9d7064c3`](https://github.com/atlasru/dot/commit/9d7064c3fd83f340f787e6656c2d6f0c915cfcce). **The original `v0.4.0` Git tag has not moved** and points to an earlier revision; use the release download assets above to get the patched binaries.
+
+See [Desktop](docs/DESKTOP.md), [Hysteria2 validation](docs/hysteria2-manual-test.md) and [Release process](docs/RELEASING.md) for limitations, tests and provenance.
 
 ## Build from source
 
@@ -140,7 +151,7 @@ Requirements:
 - Android SDK 36 / Build Tools 36.0.0
 - Gradle 9.5.0
 
-The CI downloads the pinned libXray Android AAR before compilation.
+CI downloads the pinned libXray Android AAR (v26.7.28) into `app/libs/libXray.aar` before compilation. For local Android builds, provide that AAR first using the same pinned upstream release.
 
 ```bash
 gradle testDebugUnitTest
@@ -153,9 +164,13 @@ APK output:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
+## Windows development
+
+The Windows client uses Tauri 2, Rust, React and TypeScript. From `desktop/`, run `npm ci`, `npm test`, and `npm run build`. Building or running the Tauri VPN backend requires a Windows environment with Rust and the pinned `xray.exe` / `wintun.dll` placed in `desktop/src-tauri/runtime/`. See [Desktop](docs/DESKTOP.md).
+
 ## Privacy
 
-Treat subscription URLs containing user IDs or tokens as credentials. Do not publish real subscription links, UUIDs or unredacted runtime logs.
+Treat subscription URLs, VLESS UUIDs, Hysteria2 authentication/obfuscation passwords and subscription access tokens as credentials. Do not publish private links or unredacted runtime logs.
 
 Split tunneling stores only Android package names selected by the user. dot. does not need broad installed-package visibility and does not send the app selection anywhere.
 
@@ -163,13 +178,16 @@ AUTO NODE selection and reconnect diagnostics remain local to the device. dot. d
 
 ## Stack
 
-Kotlin · Jetpack Compose · Android VpnService · OkHttp · libXray / Xray-core · GitHub Actions
+Kotlin · Jetpack Compose · Android VpnService · OkHttp · libXray / Xray-core · Rust · Tauri 2 · React · TypeScript · GitHub Actions
 
 ## Documentation
 
 - [Architecture](ARCHITECTURE.md)
 - [VPN engine](docs/VPN_ENGINE.md)
 - [Changelog](CHANGELOG.md)
+- [Desktop](docs/DESKTOP.md)
+- [Subscription identity / HWID](docs/SUBSCRIPTION_IDENTITY.md)
+- [Release and checksums](docs/releases/0.4.0.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## License

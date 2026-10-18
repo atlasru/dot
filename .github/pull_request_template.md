@@ -4,9 +4,11 @@ Describe the change and why it is needed.
 
 ## Testing
 
-- [ ] `gradle testDebugUnitTest`
-- [ ] `gradle assembleDebug`
-- [ ] Tested on Android device/emulator when runtime behavior changed
+- [ ] Android: `gradle testDebugUnitTest` and `gradle assembleDebug` (if Android changed)
+- [ ] Windows/frontend: `npm test`, `npm run build`, Rust tests (if Desktop changed)
+- [ ] Tested on an Android device/Windows machine when VPN/runtime behavior changed
+- [ ] Tested VLESS and Hysteria2 where protocol-sensitive code changed
+- [ ] Updated README/changelog/release docs for public-facing or versioned changes
 
 ## VPN / privacy checklist
 

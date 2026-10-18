@@ -10,4 +10,20 @@ Android currently distributes the established debug variant, signed with the rep
 
 Windows distributes `dot-desktop-X.Y.Z-windows-x64.zip`: release-mode unsigned `dot-desktop.exe`, `runtime/xray.exe`, `runtime/wintun.dll` and source metadata `BUILD.json`. WebView2 Runtime and administrator privileges are required. NSIS exists in Tauri configuration but is not shipped without installer validation.
 
-Pinned runtime: libXray / Xray-core v26.7.28. Neither platform imports binaries from an older dot. release. Only the unified workflow has release-write permission; Android CI cannot race it to publish a separate release.
+Pinned runtime: libXray / Xray-core v26.7.28. Neither platform imports binaries from an older dot. release. The normal tag-publish job owns release publication permissions. Android CI cannot publish a separate release; the exceptional one-time v0.4.0 asset-recovery workflow has been removed.
+
+## Published v0.4.0 binary recovery (historical exception)
+
+The first published `v0.4.0` files (14 October 2026) had broken Hysteria2 behavior. On **18 October 2026** their asset filenames were kept but APK, Windows ZIP and `SHA256SUMS` were explicitly replaced **once** with the validated [Actions run #39111580483](https://github.com/atlasru/dot/actions/runs/39111580483) outputs. That source is `9d7064c3fd83f340f787e6656c2d6f0c915cfcce`; the `v0.4.0` tag still points to `52a7dd01b989b26047fa3d36ef08ff3cab795945`. Release notes and checksums were updated, and the one-time recovery workflow was removed afterward.
+
+The recovered Android build is `0.4.0-debug` with **versionCode 401** (previously 400); its package name and dev signing certificate are unchanged. The verified binaries are [listed here](releases/0.4.0.md). Do **not** describe the patched release assets as a reproducible build of the old tag.
+
+**Future releases:** prefer a new version/tag and immutable artifact names over replacing public release bytes. Existing release assets still remain protected from accidental overwrite by the standard unified workflow; the historical v0.4.0 recovery was a deliberate manual exception. Remove a completed `.github/release-request.json` so an old release request cannot be interpreted as a new release action.
+
+## Version / publication sanity checks
+
+- Cross-check `desktop/package.json`, `desktop/src-tauri/Cargo.toml`, `desktop/src-tauri/tauri.conf.json` and Android `versionName` (all currently **0.4.0**).
+- Cross-check the Android `versionCode` (currently **401**), installed package `dev.dotclient.android.debug` and the dev signing certificate.
+- Check the current [GitHub release](https://github.com/atlasru/dot/releases/latest) and [website](https://atlasru.github.io/dot/). The website queries `releases/latest`, with pinned v0.4.0 fallbacks and matching hashes when the API is unavailable.
+- Check full asset SHA-256 digests against published `SHA256SUMS`, not just file names.
+- Never assume the `v0.4.0` tag equals its replaced downloadable binaries.
