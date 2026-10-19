@@ -3,6 +3,7 @@ package dev.dotclient.android.core.subscription
 import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.ProxyConfig
+import dev.dotclient.android.core.model.ProxyNode
 import dev.dotclient.android.core.parser.SubscriptionDecoder
 import org.json.JSONArray
 import org.json.JSONObject
@@ -10,6 +11,51 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SubscriptionStoreIdentityTest {
+    @Test fun legacyHysteria2ReloadAndRoundTripRestoreUdpWithoutMigrationOrLostSelection() {
+        val vless = "vless://11111111-1111-4111-8111-111111111111@vless.example:443?security=reality&type=tcp&pbk=TEST&sid=abcd#VLESS"
+        val hy2 = "hy2://test-auth@hy2.example:8443?sni=tls.example&obfs=salamander&obfs-password=test-mask#HY2"
+        val hwid = "existing-test-hwid"
+        // This is the existing on-disk format: URIs, never serialized transport enums.
+        val original = JSONObject().put("selectedSubscriptionId", "existing-group")
+            .put("subscriptions", JSONArray().put(JSONObject()
+                .put("id", "existing-group").put("name", "test")
+                .put("url", "https://provider.example/test-subscription")
+                .put("hwid", hwid).put("profiles", JSONArray().put(vless).put(hy2))
+                .put("selectedProfileUri", hy2).put("sortMode", "NAME")
+                .put("lastUpdatedEpochMs", 1234L))).toString()
+        val disk = Disk(original)
+        val loaded = disk.open().load()
+        assertNull(loaded.loadError)
+        assertEquals(original, disk.raw)
+        assertEquals(0, disk.writes)
+        val group = loaded.subscriptions.single()
+        assertEquals("existing-group", loaded.selectedSubscriptionId)
+        assertEquals(hwid, group.hwid)
+        assertEquals(listOf(vless, hy2), group.profiles.map { it.rawUri })
+        assertEquals(listOf(ProxyNode.Transport.TCP, ProxyNode.Transport.UDP), group.profiles.map { it.transport })
+        assertEquals(ProxyNode.Security.REALITY, group.profiles[0].security)
+        assertEquals(ProxyNode.Security.TLS, group.profiles[1].security)
+        assertEquals(hy2, group.profiles.single { it.id == group.selectedProfileId }.rawUri)
+        val config = group.profiles[1].config as ProxyConfig.Hysteria2
+        assertEquals("test-auth", config.auth)
+        assertEquals("test-mask", config.salamanderPassword)
+        assertEquals("tls.example", config.sni)
+
+        disk.open().save(loaded.subscriptions, loaded.selectedSubscriptionId)
+        assertEquals(jsonTree(JSONObject(original)), jsonTree(JSONObject(disk.raw!!)))
+        val restarted = disk.open().load()
+        assertNull(restarted.loadError)
+        val restored = restarted.subscriptions.single()
+        assertEquals(group.id, restored.id)
+        assertEquals(group.hwid, restored.hwid)
+        assertEquals(group.sortMode, restored.sortMode)
+        assertEquals(group.lastUpdatedEpochMs, restored.lastUpdatedEpochMs)
+        assertEquals(group.profiles.map { it.copy(id = "ignored-runtime-id") },
+            restored.profiles.map { it.copy(id = "ignored-runtime-id") })
+        assertEquals(hy2, restored.profiles.single { it.id == restored.selectedProfileId }.rawUri)
+        assertEquals(1, disk.writes)
+    }
+
     private fun jsonTree(value: Any?): Any? = when (value) {
         is JSONObject -> value.keys().asSequence().associateWith { jsonTree(value.get(it)) }
         is JSONArray -> (0 until value.length()).map { jsonTree(value.get(it)) }

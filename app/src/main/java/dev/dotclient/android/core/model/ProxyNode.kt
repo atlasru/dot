@@ -23,7 +23,7 @@ data class ProxyNode(
     val config: ProxyConfig = ProxyConfig.Vless,
 ) {
     enum class Security { NONE, TLS, REALITY }
-    enum class Transport { TCP, WS, GRPC, XHTTP, HTTPUPGRADE, UNKNOWN }
+    enum class Transport { TCP, WS, GRPC, XHTTP, HTTPUPGRADE, UNKNOWN, UDP }
     val protocol: String get() = when (config) {
         ProxyConfig.Vless -> "VLESS"
         is ProxyConfig.Hysteria2 -> "HY2"

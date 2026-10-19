@@ -56,6 +56,7 @@ object Hysteria2UriParser {
         ProxyNode(
             name = uri.rawFragment?.decode()?.ifBlank { null } ?: "$host:$port",
             host = host, port = port, userId = "", security = ProxyNode.Security.TLS,
+            transport = ProxyNode.Transport.UDP,
             rawUri = value,
             config = ProxyConfig.Hysteria2(auth, sni, insecure, alpn, congestion,
                 option("up", "upmbps"), option("down", "downmbps"), password, packetSize),
