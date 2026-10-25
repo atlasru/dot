@@ -59,10 +59,23 @@ internal fun mergeSettings(current: AppSettings, base: AppSettings, next: AppSet
     return AppSettings.from(current.json().also { merge(it,base.json(),next.json()) })
 }
 
-class SettingsRepository(context: Context) {
-    companion object { private val lock=Any() }
-    private val prefs=context.getSharedPreferences("dot_settings",Context.MODE_PRIVATE)
-    fun load(): AppSettings = AppSettings.from(JSONObject(prefs.getString("settings","{}")!!))
+class SettingsRepository internal constructor(
+    private val readSettings: () -> String?,
+    private val writeSettings: (String?) -> Boolean,
+    private val readResults: () -> String?,
+    private val writeResults: (String) -> Unit,
+) {
+    companion object {
+        private val lock=Any()
+        private fun preferences(context: Context) = context.getSharedPreferences("dot_settings",Context.MODE_PRIVATE)
+    }
+    constructor(context: Context): this(
+        { preferences(context).getString("settings",null) },
+        { raw -> preferences(context).edit().putString("settings",raw).commit() },
+        { preferences(context).getString("diagnostics",null) },
+        { raw -> preferences(context).edit().putString("diagnostics",raw).apply() },
+    )
+    fun load(): AppSettings = AppSettings.from(JSONObject(readSettings() ?: "{}"))
     fun update(base: AppSettings?, next: AppSettings): AppSettings = synchronized(lock) {
         val updated=if(base==null) next else mergeSettings(load(),base,next)
         save(updated)
@@ -70,12 +83,12 @@ class SettingsRepository(context: Context) {
     }
     fun save(settings: AppSettings) = synchronized(lock) {
         settings.validate()
-        val previous=prefs.getString("settings",null)
-        if(!prefs.edit().putString("settings",settings.json().toString()).commit()) {
-            prefs.edit().putString("settings",previous).commit()
+        val previous=readSettings()
+        if(!writeSettings(settings.json().toString())) {
+            writeSettings(previous)
             error("Could not save settings")
         }
     }
-    fun results(): Map<String,PingResult> = runCatching { val j=JSONObject(prefs.getString("diagnostics","{}")!!); j.keys().asSequence().associateWith { PingResult.from(j.getJSONObject(it)) } }.getOrDefault(emptyMap())
-    fun saveResults(results: Map<String,PingResult>) { val j=JSONObject(); results.forEach { (id,r)->j.put(id,r.json()) }; prefs.edit().putString("diagnostics",j.toString()).apply() }
+    fun results(): Map<String,PingResult> = runCatching { val j=JSONObject(readResults() ?: "{}"); j.keys().asSequence().associateWith { PingResult.from(j.getJSONObject(it)) } }.getOrDefault(emptyMap())
+    fun saveResults(results: Map<String,PingResult>) { val j=JSONObject(); results.forEach { (id,r)->j.put(id,r.json()) }; writeResults(j.toString()) }
 }
