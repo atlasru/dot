@@ -76,7 +76,11 @@ export default function AdvancedSettingsPanel({ prefs, groups, onChange }: { pre
     {notice && <p role="status" className="muted">{notice}</p>}{error && <p role="alert" className="inline-error">{error}</p>}
   </div>;
 }
-function Pick({ label, value, options, disabled, change }: { label: string; value: string | number; options: (string | number | [string, string])[]; disabled: boolean; change: (s: string) => void }) { return <label>{label}<select value={value} disabled={disabled} onChange={e => change(e.target.value)}>{options.map(o => { const [v, text] = Array.isArray(o) ? o : [o, o]; return <option key={v} value={v}>{text}</option>; })}</select></label>; }
+function Pick({ label, value, options, disabled, change }: { label: string; value: string | number; options: (string | number | [string, string])[]; disabled: boolean; change: (s: string) => void }) {
+  const currentPresent = options.some(o => String(Array.isArray(o) ? o[0] : o) === String(value));
+  const displayed = currentPresent ? options : [value, ...options];
+  return <label>{label}<select value={value} disabled={disabled} onChange={e => change(e.target.value)}>{displayed.map(o => { const [v, text] = Array.isArray(o) ? o : [o, o]; return <option key={v} value={v}>{text}</option>; })}</select></label>;
+}
 function Check({ label, checked, disabled, change }: { label: string; checked: boolean; disabled: boolean; change: (v: boolean) => void }) { return <label className="advanced-check"><input type="checkbox" checked={checked} disabled={disabled} onChange={e => change(e.target.checked)} />{label}</label>; }
 function TextSetting({ label, value, disabled, save }: { label: string; value: string; disabled: boolean; save: (v: string) => void }) {
   const [text, setText] = useState(value);

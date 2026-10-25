@@ -107,6 +107,7 @@ class MainViewModel(
     }
 
     fun saveSubscription(existingId: String?, name: String, url: String, hwid: String): Boolean {
+        if(state.value.testingNodeIds.isNotEmpty()) { mutableState.update { it.copy(message="Wait for diagnostics before editing subscriptions") }; return false }
         if (!SubscriptionIdentity.isValid(hwid)) {
             mutableState.update { it.copy(message = SubscriptionIdentity.VALIDATION_ERROR) }
             return false
@@ -239,6 +240,7 @@ class MainViewModel(
     }
 
     fun deleteSubscription(id: String) {
+        if(state.value.subscriptions.firstOrNull { it.id==id }?.profiles?.any { it.id in state.value.testingNodeIds }==true) { mutableState.update { it.copy(message="Cancel diagnostics before deleting this subscription") }; return }
         mutableState.update { old ->
             val removedProfileIds = old.subscriptions
                 .firstOrNull { it.id == id }

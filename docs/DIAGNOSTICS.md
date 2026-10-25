@@ -23,7 +23,7 @@ Android diagnostics use a private `:diagnostics` service process. It owns **one 
 
 Windows uses at most the configured number of isolated Xray processes. Job Objects terminate their process trees; temporary configs are removed on all normal error/cancellation paths. HTTP clients explicitly bypass environment/system proxy settings and use the test node's loopback proxy for both HTTP and HTTPS.
 
-While dot VPN is connected, only GET/HEAD through the **currently active tunnel** are permitted. Other-node, TCP/ICMP and subscription-wide tests require disconnecting first. Android also checks whether dot itself is included in the applied app split tunnel. Testing does not launch a second TUN. Offline tests follow OS routing; third-party VPNs and administrator routing policies can affect that path.
+While dot VPN is connected, only GET/HEAD through the **currently active tunnel**, using the default public HTTPS endpoint, are permitted. Custom URLs require disconnecting first so that loopback/LAN exceptions cannot be mistaken for proxy operation. Other-node, TCP/ICMP and subscription-wide tests also require disconnecting. Android checks whether dot itself is included in the applied app split tunnel. Testing does not launch a second TUN. Offline tests follow OS routing; third-party VPNs and administrator routing policies can affect that path.
 
 Cancellation on Android cancels HTTP calls, closes sockets and stops the temporary core. Windows cancellation prevents further attempts/batches; an in-flight blocking HTTP/TCP request can finish up to the configured per-attempt timeout later. ICMP is polled and terminated on cancellation. Cancelled tests do not overwrite previous cached results. DNS lookup cancellation is limited by the system resolver.
 

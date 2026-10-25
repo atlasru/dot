@@ -251,7 +251,7 @@ pub fn cancel_diagnostics(state: State<'_, SharedState>) { state.ping_cancel.sto
 #[tauri::command]
 pub fn auto_select(group_id:String, state:State<'_,SharedState>) -> Result<SelectionView,String> {
     let _operation=crate::operation::Operation::acquire(&state.operation)?;
-    if read_snapshot(&state.snapshot).phase==EnginePhase::Connected { return Err("disconnect before AUTO selection".into()); }
+    if !matches!(read_snapshot(&state.snapshot).phase,EnginePhase::Offline|EnginePhase::Error) { return Err("disconnect before AUTO selection".into()); }
     let selected=state.store.auto_selection(&group_id)?;
     let mut settings=state.store.preferences().advanced; settings.auto_node=true; state.store.set_advanced(settings)?;
     Ok(selected)
@@ -265,6 +265,7 @@ pub async fn url_test(group_id: String, node_id: String, state: State<'_, Shared
     if !matches!(current.phase,EnginePhase::Offline|EnginePhase::Error) && !active { return Err("disconnect before diagnosing another node".into()); }
     let settings=state.store.preferences().advanced.ping;
     if active && !settings.method.proxy() { return Err("disconnect for direct TCP/ICMP diagnostics".into()); }
+    if active && settings.url != crate::settings::PingSettings::default().url { return Err("disconnect to diagnose custom URLs; active-tunnel tests use the default public HTTPS endpoint to avoid direct/LAN routes".into()); }
     state.ping_cancel.store(false,Ordering::SeqCst);
     let cancel=Arc::clone(&state.ping_cancel); let runtime=state.runtime_source.clone(); let dir=state.url_test_dir.clone(); let id=node.id.clone();
     let result=tauri::async_runtime::spawn_blocking(move || if active { url_test::test_active_connection(&settings,&cancel) } else { url_test::test_node(&runtime,&dir,&node,&settings,&cancel) }).await.map_err(|_|"diagnostics worker failed")?;
@@ -281,16 +282,8 @@ pub async fn url_test_group(group_id:String, state:State<'_,SharedState>) -> Res
     let settings=state.store.preferences().advanced.ping;
     state.ping_cancel.store(false,Ordering::SeqCst); let cancel=Arc::clone(&state.ping_cancel);
     let outcomes=tauri::async_runtime::spawn_blocking(move || {
-        let mut outcomes=Vec::new();
-        for batch in nodes.chunks(settings.parallelism) {
-            if cancel.load(Ordering::SeqCst) { break; }
-            std::thread::scope(|scope| {
-                let handles:Vec<_>=batch.iter().map(|node| { let runtime=&runtime; let dir=&dir; let settings=&settings; let cancel=&cancel; scope.spawn(move || (node.id.clone(),url_test::test_node(runtime,dir,node,settings,cancel))) }).collect();
-                for handle in handles { if let Ok(result)=handle.join() { outcomes.push(result); } }
-            });
-        }
-        outcomes
-    }).await.map_err(|_|"diagnostics worker failed")?;
+        crate::diagnostics::run_bounded(&nodes,settings.parallelism,&cancel,|node| (node.id.clone(),url_test::test_node(&runtime,&dir,node,&settings,&cancel)))
+    }).await.map_err(|_|"diagnostics task failed")??;
     if state.ping_cancel.load(Ordering::SeqCst) { return Err("diagnostics cancelled".into()); }
     let mut results=Vec::new(); let mut failed_node_ids=Vec::new();
     for (id,result) in outcomes {

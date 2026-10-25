@@ -28,6 +28,9 @@ class SettingsAndTransportTest {
         assertTrue(settings.reconnect)
         assertEquals("1.1.1.1",settings.dns)
         assertTrue(runCatching { settings.copy(dns="not a numeric resolver").validate() }.isFailure)
+        assertTrue(runCatching { settings.copy(dns="deadbeef").validate() }.isFailure)
+        assertTrue(runCatching { settings.copy(dns="999.1.1.1").validate() }.isFailure)
+        settings.copy(dns="2001:4860:4860::8888").validate()
         assertTrue(runCatching { settings.copy(subscriptionUserAgent="bad\r\nheader").validate() }.isFailure)
         assertTrue(runCatching { AppSettings.from(JSONObject().put("schema_version",2)) }.isFailure)
     }

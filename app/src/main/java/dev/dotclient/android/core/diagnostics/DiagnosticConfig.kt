@@ -1,4 +1,4 @@
-package dev.dotclient.android.ui
+package dev.dotclient.android.core.diagnostics
 
 import android.net.Uri
 import libXray.LibXray
@@ -45,9 +45,9 @@ internal object DiagnosticConfig {
         return config
     }
 
-        private val SERVER_ONLY_REALITY_KEYS = listOf(
-            "target", "dest", "type", "xver", "serverNames", "privateKey",
-            "minClientVer", "maxClientVer", "maxTimeDiff", "shortIds", "mldsa65Seed",
-            "limitFallbackUpload", "limitFallbackDownload",
-        )
+    private val SERVER_ONLY_REALITY_KEYS = listOf(
+        "target", "dest", "type", "xver", "serverNames", "privateKey",
+        "minClientVer", "maxClientVer", "maxTimeDiff", "shortIds", "mldsa65Seed",
+        "limitFallbackUpload", "limitFallbackDownload",
+    )
 }

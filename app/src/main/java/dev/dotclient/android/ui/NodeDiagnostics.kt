@@ -22,6 +22,7 @@ internal class NodeDiagnostics(context: Context, private val state: MutableState
             state.update { it.copy(message="Disconnect before diagnosing other nodes or using TCP/ICMP") }; return
         }
         if(active && !VpnRuntime.state.value.appInTunnel) { state.update { it.copy(message="dot is outside the active split tunnel; disconnect for reliable diagnostics") }; return }
+        if(active && settings.url!=dev.dotclient.android.core.diagnostics.PingSettings().url) { state.update { it.copy(message="Disconnect to diagnose custom URLs; active-tunnel tests use the default public HTTPS endpoint to avoid direct/LAN routes") }; return }
         val ids=nodes.map {it.id}.toSet()
         job=currentCoroutineContext()[Job]
         state.update { it.copy(testingNodeIds=ids,connectionTestRunning=connection,message=null) }

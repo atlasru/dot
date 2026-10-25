@@ -39,6 +39,35 @@ pub fn now_ms() -> u64 {
         .unwrap_or_default()
         .as_millis() as u64
 }
+
+/// Shared connection-operation gate surrounds this bounded worker pool at call sites.
+pub fn run_bounded<T: Sync, R: Send>(
+    items: &[T],
+    parallelism: usize,
+    cancel: &AtomicBool,
+    worker: impl Fn(&T) -> R + Sync,
+) -> Result<Vec<R>, String> {
+    let mut results = Vec::new();
+    for batch in items.chunks(parallelism.clamp(1, 8)) {
+        if cancel.load(Ordering::SeqCst) {
+            break;
+        }
+        std::thread::scope(|scope| -> Result<(), String> {
+            let handles: Vec<_> = batch
+                .iter()
+                .map(|item| {
+                    let worker = &worker;
+                    scope.spawn(move || worker(item))
+                })
+                .collect();
+            for handle in handles {
+                results.push(handle.join().map_err(|_| "diagnostics worker failed")?);
+            }
+            Ok(())
+        })?;
+    }
+    Ok(results)
+}
 pub fn cancelled(cancel: &AtomicBool) -> Result<(), String> {
     if cancel.load(Ordering::SeqCst) {
         Err("diagnostics cancelled".into())
@@ -182,36 +211,22 @@ pub fn spawn_scheduler(
                                 .and_then(|id| store.group_nodes(id))
                         };
                         if let Ok(nodes) = nodes {
-                            for batch in nodes.chunks(settings.parallelism) {
-                                if cancel.load(Ordering::SeqCst) || exiting.load(Ordering::SeqCst) {
-                                    break;
-                                }
-                                std::thread::scope(|scope| {
-                                    let handles: Vec<_> = batch
-                                        .iter()
-                                        .map(|node| {
-                                            let runtime = &runtime;
-                                            let dir = &dir;
-                                            let settings = &settings;
-                                            let cancel = &cancel;
-                                            scope.spawn(move || {
-                                                (
-                                                    node.id.clone(),
-                                                    crate::url_test::test_node(
-                                                        runtime, dir, node, settings, cancel,
-                                                    ),
-                                                )
-                                            })
-                                        })
-                                        .collect();
-                                    for handle in handles {
-                                        if let Ok((id, result)) = handle.join() {
-                                            if !cancel.load(Ordering::SeqCst) {
-                                                let _ = store.record_diagnostic(&id, result);
-                                            }
-                                        }
+                            if let Ok(results) =
+                                run_bounded(&nodes, settings.parallelism, &cancel, |node| {
+                                    (
+                                        node.id.clone(),
+                                        crate::url_test::test_node(
+                                            &runtime, &dir, node, &settings, &cancel,
+                                        ),
+                                    )
+                                })
+                            {
+                                if !cancel.load(Ordering::SeqCst) && !exiting.load(Ordering::SeqCst)
+                                {
+                                    for (id, result) in results {
+                                        let _ = store.record_diagnostic(&id, result);
                                     }
-                                });
+                                }
                             }
                         }
                     }
@@ -270,5 +285,40 @@ mod tests {
         assert!(direct(&n, &s, &AtomicBool::new(false)).success);
         let h = crate::hysteria2::parse_hysteria2("hy2://secret@127.0.0.1:443").unwrap();
         assert!(!direct(&h, &s, &AtomicBool::new(false)).success);
+    }
+}
+
+#[cfg(test)]
+mod worker_tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+    #[test]
+    #[cfg(windows)]
+    fn system_icmp_loopback_is_an_actual_icmp_probe() {
+        let latency=icmp(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),3,&AtomicBool::new(false)).unwrap();
+        assert!(latency>=1);
+    }
+    #[test]
+    fn worker_pool_is_bounded_and_cancellation_stops_new_work() {
+        let active = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        let cancel = AtomicBool::new(false);
+        let items: Vec<_> = (0..12).collect();
+        let results = run_bounded(&items, 2, &cancel, |n| {
+            let count = active.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(count, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(10));
+            active.fetch_sub(1, Ordering::SeqCst);
+            *n
+        })
+        .unwrap();
+        assert_eq!(results, items);
+        assert!(peak.load(Ordering::SeqCst) <= 2);
+        let results = run_bounded(&items, 1, &cancel, |n| {
+            cancel.store(true, Ordering::SeqCst);
+            *n
+        })
+        .unwrap();
+        assert_eq!(results, vec![0]);
     }
 }

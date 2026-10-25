@@ -3,7 +3,6 @@ package dev.dotclient.android.core.diagnostics
 import android.app.Service
 import android.content.Intent
 import android.os.*
-import dev.dotclient.android.ui.DiagnosticConfig
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
