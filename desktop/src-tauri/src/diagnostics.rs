@@ -154,7 +154,10 @@ fn icmp(address: std::net::IpAddr, timeout: u64, cancel: &AtomicBool) -> Result<
         .map_err(|_| "ICMP unavailable: Windows PowerShell / ICMP API required")?;
     let start = Instant::now();
     loop {
-        if cancel.load(Ordering::SeqCst) || start.elapsed() > Duration::from_secs(timeout + 5) {
+        // Cold PowerShell startup can exceed several seconds on loaded machines.
+        // This preparation budget is independent of Ping.Send's network timeout
+        // and never contributes to the returned ICMP RoundtripTime.
+        if cancel.load(Ordering::SeqCst) || start.elapsed() > Duration::from_secs(timeout + 30) {
             let _ = child.kill();
             let _ = child.wait();
             return Err("ICMP cancelled or timed out".into());
