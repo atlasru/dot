@@ -43,7 +43,7 @@ internal fun AdvancedSettingsPanel(state: DotUiState, viewModel: MainViewModel) 
         val ping=settings.ping
         ChoiceSetting("Method",ping.method,PingMethod.entries.toList(),{it.label}) { update(settings.copy(ping=ping.copy(method=it))) }
         Text(when(ping.method) { PingMethod.PROXY_GET->"Complete HTTP response via proxy; confirms proxy operation."; PingMethod.PROXY_HEAD->"Response headers via proxy. HTTP 405 means the URL does not support HEAD."; PingMethod.TCP->"Server TCP connect only. Does not confirm proxy health; unavailable for HY2."; PingMethod.ICMP->"Real system ICMP. May be blocked by device permissions or the server." },color=Color.Gray,style=MaterialTheme.typography.labelMedium)
-        if(ping.method.proxy) ActionSetting("Test URL",ping.url) { edit("URL",ping.url) }
+        if(ping.method.proxy) ActionSetting("Test URL (HTTPS on Android)",ping.url) { edit("URL",ping.url) }
         ChoiceSetting("Timeout",ping.timeoutSeconds,listOf(3,5,10,15),{"${it}s"}) { update(settings.copy(ping=ping.copy(timeoutSeconds=it))) }
         ChoiceSetting("Attempts",ping.attempts,listOf(1,2,3,5),{it.toString()}) { update(settings.copy(ping=ping.copy(attempts=it))) }
         ChoiceSetting("Aggregation",ping.aggregation,Aggregation.entries.toList(),{it.key}) { update(settings.copy(ping=ping.copy(aggregation=it))) }

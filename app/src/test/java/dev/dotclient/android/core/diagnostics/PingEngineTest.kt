@@ -18,6 +18,7 @@ class PingEngineTest {
         assertFalse(defaults.onStart)
         assertEquals(defaults,PingSettings.from(defaults.json()))
         assertTrue(runCatching { defaults.copy(url="https://user:secret@example.com").validate() }.isFailure)
+        assertTrue(runCatching { defaults.copy(url="http://example.com/").validate() }.isFailure)
         assertTrue(runCatching { defaults.copy(parallelism=100).validate() }.isFailure)
     }
     @Test fun `aggregation uses real samples without subtracting overhead`() {

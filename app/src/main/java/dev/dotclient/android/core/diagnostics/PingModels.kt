@@ -20,7 +20,7 @@ data class PingSettings(
     fun validate() {
         require(timeoutSeconds in listOf(3,5,10,15) && attempts in listOf(1,2,3,5) && parallelism in listOf(1,2,4,8) && repeatMinutes in listOf(0,1,5,15,30,60)) { "Invalid diagnostics limits" }
         val uri = runCatching { URI(url) }.getOrNull()
-        require(uri != null && uri.scheme in listOf("http", "https") && uri.host != null && uri.userInfo == null && uri.fragment == null && url.length <= 2048) { "Test URL must be HTTP(S), without credentials or fragment" }
+        require(uri != null && uri.scheme == "https" && uri.host != null && uri.userInfo == null && uri.fragment == null && url.length <= 2048) { "Android diagnostics require HTTPS under the app network security policy; URL must have no credentials or fragment" }
     }
     fun json() = JSONObject().put("method",method.key).put("url",url).put("timeout_seconds",timeoutSeconds).put("attempts",attempts).put("aggregation",aggregation.key).put("parallelism",parallelism).put("on_start",onStart).put("repeat_minutes",repeatMinutes).put("selected_only",selectedOnly)
     companion object {

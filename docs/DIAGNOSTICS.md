@@ -2,6 +2,8 @@
 
 The default is **Via Proxy GET**, `https://cp.cloudflare.com/generate_204`, **5 seconds per attempt**, **3 attempts**, **median**, **4 concurrent nodes**. Startup testing and repeat testing are off. Each HTTP attempt opens a fresh client connection. Timing uses `System.nanoTime()` on Android and `Instant` on Windows. Config conversion, core startup, client construction and process startup are outside the timer. GET includes response body transfer (maximum 1 MiB); HEAD ends at response headers. Only HTTP 2xx responses pass; redirects are not followed.
 
+Android diagnostic URLs are HTTPS-only under the existing app-wide network security policy; Windows also accepts plain HTTP. Android validation rejects HTTP URLs with an explicit explanation rather than accepting a setting that its HTTP client cannot use. The app's cleartext policy is not weakened for diagnostics.
+
 Different methods measure different operations. A TCP or ICMP value can be much lower than an HTTP request involving proxy negotiation and TLS. Results must not be adjusted to match another client's number.
 
 | Method | Measurement | Confirms proxy operation? |

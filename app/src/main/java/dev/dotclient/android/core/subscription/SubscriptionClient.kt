@@ -20,7 +20,7 @@ class SubscriptionClient(
         .build(),
     private val osVersion: () -> String = { Build.VERSION.RELEASE },
 ) {
-    private val http = client.newBuilder().addNetworkInterceptor { chain ->
+    private val http = client.newBuilder().followSslRedirects(false).addNetworkInterceptor { chain ->
         val original = chain.call().request().url
         val redirected = chain.request().url
         val request = if (original.scheme == redirected.scheme && original.host == redirected.host && original.port == redirected.port) {

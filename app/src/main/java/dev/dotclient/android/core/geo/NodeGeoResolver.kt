@@ -35,6 +35,7 @@ data class NodeGeoLocation(
 class NodeGeoResolver(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences("dot_node_geo", Context.MODE_PRIVATE)
     private val client = OkHttpClient.Builder()
+        .followSslRedirects(false)
         .connectTimeout(4, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
         .callTimeout(7, TimeUnit.SECONDS)
