@@ -81,7 +81,7 @@ class MainViewModel(
         viewModelScope.launch {
             val initial=state.value.settings
             if(initial.autoConnect && android.net.VpnService.prepare(application)==null && !state.value.vpnConnected && requestVpnPermission()) onVpnPermissionGranted()
-            if(initial.refreshOnStart) refreshAllSubscriptions()
+            if(initial.refreshOnStart) refreshAllSubscriptions().join()
             if(initial.ping.onStart) runScheduledDiagnostics()
             var lastPing=System.nanoTime(); var lastRefresh=System.nanoTime()
             while(true) {
@@ -533,9 +533,13 @@ class MainViewModel(
         } }
     }
     fun clearDiagnostics() { if(state.value.testingNodeIds.isNotEmpty()) return; settingsRepository.saveResults(emptyMap()); mutableState.update { it.copy(pingResults=emptyMap(),nodeLatenciesMs=emptyMap(),nodeLatencyFailedIds=emptySet()) } }
-    fun refreshAllSubscriptions() { viewModelScope.launch {
-        for(group in state.value.subscriptions.toList()) { if(state.value.loadingSubscriptionId!=null) break; refreshSubscription(group.id); state.first { it.loadingSubscriptionId==null } }
-    } }
+    fun refreshAllSubscriptions() = viewModelScope.launch {
+        for(group in state.value.subscriptions.toList()) {
+            state.first { it.loadingSubscriptionId==null && it.testingNodeIds.isEmpty() }
+            refreshSubscription(group.id)
+            state.first { it.loadingSubscriptionId==null }
+        }
+    }
 
     fun switchProfile(id: String) {
         if(state.value.testingNodeIds.isNotEmpty()) return
