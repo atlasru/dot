@@ -83,12 +83,12 @@ pub fn natural_compare(left: &str, right: &str) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Security, Transport};
+    use crate::model::Security;
 
     fn node(id: &str, name: &str, latency_ms: Option<u64>, latency_failed: bool) -> NodeView {
         NodeView {
             id: id.into(), name: name.into(), host: "example.com".into(), port: 443, protocol: "VLESS",
-            security: Security::Tls, transport: Transport::Raw, latency_ms, latency_failed, favorite: false,
+            security: Security::Tls, transport: "tcp", diagnostic: None, latency_ms, latency_failed, favorite: false,
         }
     }
 

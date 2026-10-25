@@ -1,3 +1,9 @@
+# 0.5.0 publication gate
+
+Build the branch/PR with unified-release Actions or manually dispatch with `publish=false`. Review both platform artifacts and checksums in `unified-release-candidate`. **Do not create/push a 0.5.0 tag or publish its Release until the repository owner explicitly confirms.** After approval, create the immutable matching version tag from the validated main commit and manually dispatch unified-release on that tag with `publish=true`. Tag pushes alone cannot publish. Existing 0.3.0/0.4.0 releases and assets must never be overwritten.
+
+The notes below describe the earlier release procedure; automatic main-branch promotion has been removed for 0.5.0.
+
 # Unified releases
 
 1. Finalize the versions on a branch. Android `versionName` and Desktop `package.json` must match a stable `X.Y.Z`. Keep Android's intended versionCode; v0.3.0 uses 300. Run `node desktop/scripts/sync-version.mjs` after changing Desktop's version.

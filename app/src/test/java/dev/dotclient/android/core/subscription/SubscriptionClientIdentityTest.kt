@@ -18,6 +18,16 @@ import java.util.concurrent.TimeUnit
 import java.util.Base64
 
 class SubscriptionClientIdentityTest {
+    @Test
+    fun `subscription redirects never downgrade to HTTP`() = runBlocking {
+        server().use { origin -> MockWebServer().use { plain ->
+            plain.start()
+            origin.enqueue(MockResponse().setResponseCode(302).addHeader("Location",plain.url("/insecure")))
+            val result=SubscriptionClient(http(),osVersion={"16"}).fetch(sub(origin.url("/secure").toString(),"CUSTOM123456789"))
+            assertTrue(result.isFailure)
+            assertNull(plain.takeRequest(200,TimeUnit.MILLISECONDS))
+        } }
+    }
     private val link = "vless://11111111-1111-4111-8111-111111111111@example.test:443?security=tls#node"
     private val certificate = HeldCertificate.Builder().addSubjectAlternativeName("localhost").build()
     private val serverTls = HandshakeCertificates.Builder().heldCertificate(certificate).build()

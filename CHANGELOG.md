@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0 — unreleased candidate
+
+- Categorized advanced settings for Android and Windows.
+- GET/HEAD/TCP/real ICMP diagnostics, configurable attempts/timeout/aggregation/concurrency, isolated Android core, cancellation, metadata/cache compatibility and scheduling.
+- Verified-proxy AUTO, exclusions/threshold, manual priority; TCP/ICMP cannot verify a proxy or HY2 operation.
+- Numeric DNS and LAN bypass, subscription request controls, reconnect policy on Android, saved list appearance, settings JSON and redacted diagnostic metrics.
+- Includes Android HY2 UDP display fix `852e5a7` and Windows legacy HY2 display regression coverage.
+- VersionCode 500; pinned Xray/libXray unchanged. Candidate builds are separate from manually approved publication.
+- See [platform support and limitations](docs/DIAGNOSTICS.md) and [candidate notes](docs/releases/0.5.0.md).
+
+
 ## 0.4.0 — released 14 October 2026; binary hotfix 18 October 2026
 
 - Add Hysteria2/HY2 link parsing, mixed VLESS/HY2 subscriptions, import and protocol-specific Xray client configurations on Android and Windows.

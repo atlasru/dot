@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import AdvancedSettingsPanel, { DEFAULT_ADVANCED } from "./AdvancedSettings";
 import NodeBrowser from "./NodeBrowser";
 import SubscriptionManager from "./SubscriptionManager";
 import { getVersion } from "@tauri-apps/api/app";
@@ -24,7 +25,7 @@ type View = "home" | "nodes" | "settings";
 const XRAY_VERSION = "v26.7.28";
 const OFFLINE: EngineSnapshot = { phase: "offline", node_name: null, node_id: null, message: null };
 const ZERO_TRAFFIC: TrafficSnapshot = { download_bytes_per_second: 0, upload_bytes_per_second: 0, session_download_bytes: 0, session_upload_bytes: 0, connected_seconds: 0 };
-const DEFAULT_PREFS: AppPreferences = { theme: "amoled", close_to_tray: true, refresh_on_start: false, refresh_interval_hours: 0 };
+const DEFAULT_PREFS: AppPreferences = { advanced: DEFAULT_ADVANCED, theme: "amoled", close_to_tray: true, refresh_on_start: false, refresh_interval_hours: 0 };
 
 export default function App() {
   const [version, setVersion] = useState("");
@@ -79,6 +80,11 @@ export default function App() {
   }, []);
 
   useEffect(() => { document.documentElement.dataset.theme = prefs.theme; }, [prefs.theme]);
+  useEffect(() => {
+    document.documentElement.dataset.compact = String(prefs.advanced.compact_nodes);
+    document.documentElement.dataset.latency = String(prefs.advanced.show_latency);
+    document.documentElement.dataset.transport = String(prefs.advanced.show_transport);
+  }, [prefs.advanced]);
 
   async function chooseNode(groupId: string, nodeId: string) {
     if (busy || testingNodeId || groupTestingId || vpn.phase === "stopping") return;
@@ -250,6 +256,7 @@ export default function App() {
       />}
     </section>
 
+    {(testingNodeId || groupTestingId) && <button className="cancel-tests" onClick={() => invoke("cancel_diagnostics").catch(e => setError(String(e)))}>CANCEL DIAGNOSTICS</button>}
     {error && <button className="error-toast" onClick={() => setError("")}>{error}</button>}
   </main>;
 }
@@ -354,6 +361,7 @@ function SettingsPanel({ version, vpn, notices, onChange, groups, prefs, busy, o
     <div className="workspace-head"><div><div className="view-kicker">SETTINGS</div><h2>settings.</h2></div></div>
 
     <div className="settings-scroll">
+      <AdvancedSettingsPanel prefs={prefs} groups={groups} onChange={onChange} />
       <SettingsSection title="APPEARANCE">
         <div className="theme-row">{(["amoled", "graphite", "matrix"] as AppTheme[]).map(theme => <button key={theme} className={prefs.theme === theme ? "choice selected" : "choice"} onClick={() => onTheme(theme)}>{theme.toUpperCase()}</button>)}</div>
       </SettingsSection>

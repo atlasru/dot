@@ -121,9 +121,11 @@ pub struct AppPreferences {
     pub refresh_on_start: bool,
     #[serde(default)]
     pub refresh_interval_hours: u32,
+    #[serde(default)]
+    pub advanced: crate::settings::AdvancedSettings,
 }
 impl Default for AppPreferences {
-    fn default() -> Self { Self { theme: AppTheme::Amoled, close_to_tray: true, refresh_on_start: false, refresh_interval_hours: 0 } }
+    fn default() -> Self { Self { theme: AppTheme::Amoled, close_to_tray: true, refresh_on_start: false, refresh_interval_hours: 0, advanced: Default::default() } }
 }
 fn default_true() -> bool { true }
 
@@ -140,6 +142,8 @@ pub struct PersistedState {
     #[serde(default)]
     pub latencies: HashMap<String, NodeLatency>,
     #[serde(default)]
+    pub diagnostics: HashMap<String, crate::diagnostics::PingResult>,
+    #[serde(default)]
     pub sort_modes: HashMap<String, NodeSortMode>,
     #[serde(default)]
     pub favorites: std::collections::HashSet<String>,
@@ -153,7 +157,8 @@ pub struct NodeView {
     pub port: u16,
     pub protocol: &'static str,
     pub security: Security,
-    pub transport: Transport,
+    pub transport: &'static str,
+    pub diagnostic: Option<crate::diagnostics::PingResult>,
     pub latency_ms: Option<u64>,
     pub latency_failed: bool,
     pub favorite: bool,
@@ -179,7 +184,8 @@ impl From<&ProxyNode> for NodeView {
             port: v.port,
             protocol: v.protocol(),
             security: v.security,
-            transport: v.transport,
+            transport: if matches!(v.proxy_config, ProxyConfig::Hysteria2(_)) { "udp" } else { match v.transport { Transport::Raw=>"tcp", Transport::Websocket=>"websocket", Transport::Grpc=>"grpc", Transport::Xhttp=>"xhttp", Transport::Httpupgrade=>"httpupgrade" } },
+            diagnostic: None,
             latency_ms: None,
             latency_failed: false,
             favorite: false,
@@ -270,4 +276,18 @@ pub struct SubscriptionRefreshResult {
     pub edited: Vec<NodeEditView>,
     pub unchanged: usize,
     pub selected_node_removed: bool,
+}
+
+#[cfg(test)] mod transport_tests {
+    use super::*;
+    #[test] fn legacy_hy2_transport_is_udp_without_changing_vless() {
+        let hy2=crate::hysteria2::parse_hysteria2("hy2://password@example.com#saved").unwrap();
+        let mut saved=serde_json::to_value(&hy2).unwrap(); saved["transport"]=serde_json::json!("raw");
+        let restored:ProxyNode=serde_json::from_value(saved).unwrap();
+        assert_eq!(NodeView::from(&restored).transport,"udp");
+        assert_eq!(NodeView::from(&restored).protocol,"HY2");
+        let vless=crate::vless::parse_vless("vless://test@example.com:443?type=tcp").unwrap();
+        assert_eq!(NodeView::from(&vless).transport,"tcp");
+        assert_eq!(serde_json::to_value(restored).unwrap()["transport"],"raw");
+    }
 }

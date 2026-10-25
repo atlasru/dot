@@ -2,6 +2,17 @@ use serde_json::{json, Map, Value};
 
 use crate::model::{ProxyConfig, Security, Transport, ProxyNode};
 
+pub fn apply_settings(config: &mut Value, settings: &crate::settings::AdvancedSettings) {
+    config["log"]["loglevel"] = json!(settings.log_level);
+    config["dns"] = json!({"servers":[settings.dns]});
+    config["inbounds"][0]["settings"]["dns"] = json!([settings.dns]);
+    if settings.bypass_lan {
+        if let Some(rules) = config["routing"]["rules"].as_array_mut() {
+            rules.insert(0,json!({"type":"field","ip":["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","127.0.0.0/8","169.254.0.0/16","fc00::/7","fe80::/10","::1/128"],"outboundTag":"direct"}));
+        }
+    }
+}
+
 pub fn build_xray_config(node: &ProxyNode) -> Result<Value, String> {
     let proxy = build_proxy_outbound(node)?;
 

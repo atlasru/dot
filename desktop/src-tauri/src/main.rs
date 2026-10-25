@@ -2,6 +2,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod commands;
+mod settings;
+mod diagnostics;
 mod config;
 #[cfg(test)] mod config_smoke;
 mod engine;
@@ -43,12 +45,16 @@ fn main() {
             let traffic = Arc::new(RwLock::new(TrafficSnapshot::default()));
             let cancel = Arc::new(AtomicBool::new(false));
             let exiting = Arc::new(AtomicBool::new(false));
+            let ping_cancel = Arc::new(AtomicBool::new(false));
             let operation = Arc::new(AtomicBool::new(false));
-            let engine = Arc::new(Mutex::new(VpnEngine::new(runtime_source.clone(), data_dir.join("vpn"), Arc::clone(&snapshot), Arc::clone(&cancel)).map_err(std::io::Error::other)?));
+            let engine = Arc::new(Mutex::new(VpnEngine::new(Arc::clone(&store), runtime_source.clone(), data_dir.join("vpn"), Arc::clone(&snapshot), Arc::clone(&cancel)).map_err(std::io::Error::other)?));
             spawn_watchdog(&engine);
             traffic::spawn_traffic_sampler(&snapshot, &traffic);
-            app.manage(SharedState { store, refresh, operation, engine, snapshot, traffic, cancel, exiting, runtime_source, url_test_dir });
+            app.manage(SharedState { ping_cancel, store, refresh, operation, engine, snapshot, traffic, cancel, exiting, runtime_source, url_test_dir });
             tray::setup(app)?;
+            let state=app.state::<SharedState>();
+            if state.store.preferences().advanced.auto_connect { if let Err(message)=commands::start_selected_background(&state) { if let Ok(mut snapshot)=state.snapshot.write() { snapshot.phase=model::EnginePhase::Error; snapshot.message=Some(message); } } }
+            diagnostics::spawn_scheduler(Arc::clone(&state.store), Arc::clone(&state.operation), Arc::clone(&state.snapshot), Arc::clone(&state.ping_cancel), Arc::clone(&state.exiting), state.runtime_source.clone(), state.url_test_dir.clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -84,6 +90,10 @@ fn main() {
             commands::connect,
             commands::disconnect,
             commands::vpn_status,
+            commands::set_advanced,
+            commands::clear_diagnostics,
+            commands::cancel_diagnostics,
+            commands::auto_select,
             commands::url_test,
             commands::url_test_group,
         ])
