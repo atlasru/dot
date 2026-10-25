@@ -32,6 +32,8 @@ jobs:
           node-version: '24'
       - name: Verify unified source
         run: python3 scripts/verify-release.py
+      - name: Release packaging regression tests
+        run: python3 -m unittest discover -s scripts/tests -v
       - name: Validate production tag
         if: startsWith(github.ref, 'refs/tags/') || inputs.publish == true
         env:

@@ -32,3 +32,4 @@ desktop/portable/
 
 # Local verification tools
 .local/
+__pycache__/

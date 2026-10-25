@@ -345,7 +345,7 @@ class MainViewModel(
             resolveAutoProfile(group)?.let { selected ->
                 selectProfileInternal(selected.id)
                 mutableState.update { it.copy(message = "AUTO · ${selected.name}") }
-            }
+            } ?: mutableState.update { it.copy(message="AUTO has no eligible verified proxy; run GET/HEAD diagnostics or choose a node manually") }
             return
         }
         viewModelScope.launch { runAllNodeTests(subscriptionId, activateDelaySort = false, selectAutoAfter = true) }
@@ -413,7 +413,7 @@ class MainViewModel(
 
         val profile = resolvedConnectionProfile()
         if (profile == null) {
-            mutableState.update { it.copy(message = "select a node first") }
+            mutableState.update { it.copy(message = if(it.autoNodeEnabled) "AUTO has no eligible verified proxy; run GET/HEAD diagnostics or choose a node manually" else "select a node first") }
             return false
         }
 
@@ -430,7 +430,7 @@ class MainViewModel(
         if(state.value.testingNodeIds.isNotEmpty()) { mutableState.update { it.copy(message="Wait for diagnostics to finish") }; return }
         val profile = resolvedConnectionProfile()
         if (profile == null) {
-            mutableState.update { it.copy(requestingVpnPermission = false, message = "select a node first") }
+            mutableState.update { it.copy(requestingVpnPermission = false, message = if(it.autoNodeEnabled) "AUTO has no eligible verified proxy; run GET/HEAD diagnostics or choose a node manually" else "select a node first") }
             return
         }
 
@@ -509,6 +509,7 @@ class MainViewModel(
         if(activateDelaySort) updateSubscriptionSortMode(subscriptionId,NodeSortMode.DELAY)
         if(selectAutoAfter && state.value.autoNodeEnabled && state.value.selectedSubscriptionId==subscriptionId) {
             resolveAutoProfile()?.let { selectProfileInternal(it.id); mutableState.update { old -> old.copy(message="AUTO · ${it.name}") } }
+                ?: mutableState.update { it.copy(message="AUTO has no eligible verified proxy; check exclusions/threshold or choose a node manually") }
         }
     }
     fun testConnection() {
