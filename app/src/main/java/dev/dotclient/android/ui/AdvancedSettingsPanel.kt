@@ -23,7 +23,7 @@ internal fun AdvancedSettingsPanel(state: DotUiState, viewModel: MainViewModel) 
     var editor by remember { mutableStateOf<String?>(null) }
     var text by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
-    fun update(next: AppSettings) = viewModel.updateSettings(next)
+    fun update(next: AppSettings) = viewModel.updateSettings(next,settings)
     fun edit(name: String, value: String) { editor=name; text=value; error=null }
     @Composable fun category(name: String, body: @Composable () -> Unit) {
         Text("${if(section==name) "−" else "+"}  $name",Modifier.fillMaxWidth().clickable { section=if(section==name) null else name }.padding(vertical=13.dp),style=MaterialTheme.typography.titleSmall)
@@ -94,7 +94,9 @@ internal fun AdvancedSettingsPanel(state: DotUiState, viewModel: MainViewModel) 
     if(editor!=null) AlertDialog(onDismissRequest={editor=null},title={Text(editor!!)},text={Column { OutlinedTextField(value=text,onValueChange={text=it},label={Text(if(editor=="Reset") "Type RESET" else editor!!)},maxLines=8); error?.let { Text(it,color=MaterialTheme.colorScheme.error) } }},confirmButton={TextButton(onClick={
         try {
             val next=when(editor) { "URL"->settings.copy(ping=settings.ping.copy(url=text.trim())); "DNS"->settings.copy(dns=text.trim()); "User-Agent"->settings.copy(subscriptionUserAgent=text); "Import"->AppSettings.from(JSONObject(text)); "Reset"->{ require(text=="RESET") { "Type RESET to confirm" }; AppSettings() }; else->settings }
-            next.validate(); update(next); editor=null
+            next.validate()
+            if(editor=="Import" || editor=="Reset") viewModel.updateSettings(next) else update(next)
+            editor=null
         } catch(e: Exception) { error=e.message ?: "Invalid settings" }
     }) {Text("save")}},dismissButton={TextButton(onClick={editor=null}) {Text("cancel")}})
 }

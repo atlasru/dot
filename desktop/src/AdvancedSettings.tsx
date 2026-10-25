@@ -17,7 +17,7 @@ export default function AdvancedSettingsPanel({ prefs, groups, onChange }: { pre
     try { await work(); await onChange(); setNotice("Saved. DNS, routing and core logging changes apply after reconnect."); }
     catch (e) { setError(String(e)); } finally { setBusy(false); }
   }
-  const save = (value: Partial<AdvancedSettings>) => action(() => invoke("set_advanced", { settings: { ...s, ...value } }));
+  const save = (value: Partial<AdvancedSettings>, replace = false) => action(() => invoke("set_advanced", { settings: { ...s, ...value }, base: replace ? null : s }));
   const ping = (value: Partial<PingSettings>) => save({ ping: { ...s.ping, ...value } });
   function download(name: string, data: unknown) {
     const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
@@ -71,7 +71,7 @@ export default function AdvancedSettingsPanel({ prefs, groups, onChange }: { pre
       <button className="quiet" onClick={() => download("dot-settings-0.5.0.json", s)}>EXPORT SETTINGS</button>
       <label>IMPORT SETTINGS<input type="file" accept="application/json,.json" disabled={busy} onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file) action(async () => { if (file.size > 1_048_576) throw new Error("Settings file exceeds 1 MiB"); const settings = JSON.parse(await file.text()); await invoke("set_advanced", { settings }); }); }} /></label>
       <button className="quiet" onClick={() => download("dot-diagnostics.json", groups.flatMap(g => g.nodes).flatMap(n => n.diagnostic ? [{ method: n.diagnostic.method, latency_ms: n.diagnostic.latency_ms, tested_at_ms: n.diagnostic.tested_at_ms, success: n.diagnostic.success, samples: n.diagnostic.samples }] : []))}>EXPORT REDACTED DIAGNOSTICS</button>
-      <button className="quiet" disabled={busy} onClick={() => { if (window.confirm("Reset advanced settings? Subscriptions and credentials are retained.")) save(DEFAULT_ADVANCED); }}>RESET SETTINGS</button>
+      <button className="quiet" disabled={busy} onClick={() => { if (window.confirm("Reset advanced settings? Subscriptions and credentials are retained.")) save(DEFAULT_ADVANCED, true); }}>RESET SETTINGS</button>
     </details>
     {notice && <p role="status" className="muted">{notice}</p>}{error && <p role="alert" className="inline-error">{error}</p>}
   </div>;

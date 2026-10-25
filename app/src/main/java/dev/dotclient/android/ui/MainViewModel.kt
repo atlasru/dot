@@ -27,6 +27,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class MainViewModel(
     application: Application,
@@ -35,6 +37,7 @@ class MainViewModel(
     private val subscriptionStore = SubscriptionStore(application)
     private val uiPreferences = application.getSharedPreferences("dot_ui", Application.MODE_PRIVATE)
     private val settingsRepository = dev.dotclient.android.core.settings.SettingsRepository(application)
+    private val settingsMutex = Mutex()
 
     private val mutableState = MutableStateFlow(loadInitialState())
     val state: StateFlow<DotUiState> = mutableState.asStateFlow()
@@ -216,6 +219,16 @@ class MainViewModel(
                 )
             }
             persist()
+            settingsMutex.withLock {
+                val base=state.value.settings
+                val validIds=state.value.subscriptions.flatMap { it.profiles }.map {it.id}.toSet()
+                val updated=base.remapExclusions(diff,validIds)
+                if(updated!=base) {
+                    runCatching { withContext(kotlinx.coroutines.Dispatchers.IO) { settingsRepository.update(base,updated) } }
+                        .onSuccess { saved -> mutableState.update { it.copy(settings=saved) } }
+                        .onFailure { mutableState.update { it.copy(message="Could not persist AUTO exclusions; retry saving settings") } }
+                }
+            }
             if (state.value.autoNodeEnabled && state.value.selectedSubscriptionId == id) ensureAutoNodeData(id)
         }
     }
@@ -301,6 +314,7 @@ class MainViewModel(
     }
 
     fun setAutoNodeEnabled(enabled: Boolean) {
+        if(enabled && (state.value.vpnConnected || state.value.vpnBusy)) { mutableState.update { it.copy(message="Disconnect before AUTO selection") }; return }
         if(enabled && !state.value.settings.ping.method.proxy) { mutableState.update { it.copy(message="AUTO requires Via Proxy GET/HEAD diagnostics") }; return }
         uiPreferences.edit().putBoolean("auto_node", enabled).apply()
         mutableState.update { it.copy(autoNodeEnabled = enabled, message = null) }
@@ -505,14 +519,17 @@ class MainViewModel(
         if(state.value.vpnConnected || state.value.vpnBusy || state.value.testingNodeIds.isNotEmpty()) return
         if(state.value.settings.ping.selectedOnly) state.value.selectedProfile?.let(::testNode) else testAllNodes()
     }
-    fun updateSettings(settings: dev.dotclient.android.core.settings.AppSettings) {
+    fun updateSettings(settings: dev.dotclient.android.core.settings.AppSettings, base: dev.dotclient.android.core.settings.AppSettings? = null) {
         if(state.value.testingNodeIds.isNotEmpty()) { mutableState.update { it.copy(message="Cancel diagnostics before changing settings") }; return }
-        viewModelScope.launch {
+        viewModelScope.launch { settingsMutex.withLock {
             try {
-                withContext(kotlinx.coroutines.Dispatchers.IO) { settingsRepository.save(settings) }
-                mutableState.update { old -> val results=old.pingResults.filterValues { it.settings==settings.ping }; old.copy(settings=settings,pingResults=results,nodeLatenciesMs=results.mapNotNull { (id,r)->r.latencyMs?.let {id to it} }.toMap(),nodeLatencyFailedIds=results.filterValues {!it.success && it.error?.startsWith("HEAD unsupported")!=true}.keys,message=if(old.vpnConnected) "Saved · DNS/routing/log changes apply after reconnect" else "Settings saved") }
+                val saved=withContext(kotlinx.coroutines.Dispatchers.IO) { settingsRepository.update(base,settings) }
+                mutableState.update { old ->
+                    val results=old.pingResults.filterValues { it.settings==saved.ping }
+                    old.copy(settings=saved,pingResults=results,nodeLatenciesMs=results.mapNotNull { (id,r)->r.latencyMs?.let {id to it} }.toMap(),nodeLatencyFailedIds=results.filterValues {!it.success && it.error?.startsWith("HEAD unsupported")!=true}.keys,message=if(old.vpnConnected) "Saved · DNS/routing/log changes apply after reconnect" else "Settings saved")
+                }
             } catch(e: Exception) { mutableState.update { it.copy(message=e.message ?: "Could not save settings") } }
-        }
+        } }
     }
     fun clearDiagnostics() { if(state.value.testingNodeIds.isNotEmpty()) return; settingsRepository.saveResults(emptyMap()); mutableState.update { it.copy(pingResults=emptyMap(),nodeLatenciesMs=emptyMap(),nodeLatencyFailedIds=emptySet()) } }
     fun refreshAllSubscriptions() { viewModelScope.launch {

@@ -16,6 +16,10 @@ data class AppSettings(
     val refreshOnStart: Boolean = false, val refreshHours: Int = 0,
     val subscriptionTimeoutSeconds: Int = 20, val subscriptionUserAgent: String = "",
 ) {
+    fun remapExclusions(diff: dev.dotclient.android.core.subscription.SubscriptionDiff, validIds: Set<String>): AppSettings {
+        val replacements=autoExcluded.mapNotNull { diff.replacementFor(it)?.id }.toSet()
+        return copy(autoExcluded=(autoExcluded+replacements).intersect(validIds))
+    }
     fun validate() {
         ping.validate()
         require(autoMaxLatencyMs in 0..60_000 && autoExcluded.size <= 10000)
@@ -37,10 +41,34 @@ data class AppSettings(
         }
     }
 }
+
+/** Apply only fields edited since the UI snapshot, preserving concurrent refresh changes. */
+internal fun mergeSettings(current: AppSettings, base: AppSettings, next: AppSettings): AppSettings {
+    fun merge(target: JSONObject, before: JSONObject, after: JSONObject) {
+        for(key in after.keys()) {
+            val old=before.get(key); val value=after.get(key)
+            if(value is JSONObject && old is JSONObject) merge(target.getJSONObject(key),old,value)
+            else if(key=="auto_excluded") {
+                fun ids(array: JSONArray) = List(array.length()) { array.getString(it) }.toSet()
+                val existing=ids(target.getJSONArray(key)); val previous=ids(old as JSONArray); val desired=ids(value as JSONArray)
+                target.put(key,JSONArray(((existing - (previous-desired)) + (desired-previous)).toList()))
+            } else if(old!=value) target.put(key,value)
+        }
+    }
+    next.validate()
+    return AppSettings.from(current.json().also { merge(it,base.json(),next.json()) })
+}
+
 class SettingsRepository(context: Context) {
+    companion object { private val lock=Any() }
     private val prefs=context.getSharedPreferences("dot_settings",Context.MODE_PRIVATE)
     fun load(): AppSettings = AppSettings.from(JSONObject(prefs.getString("settings","{}")!!))
-    fun save(settings: AppSettings) {
+    fun update(base: AppSettings?, next: AppSettings): AppSettings = synchronized(lock) {
+        val updated=if(base==null) next else mergeSettings(load(),base,next)
+        save(updated)
+        updated
+    }
+    fun save(settings: AppSettings) = synchronized(lock) {
         settings.validate()
         val previous=prefs.getString("settings",null)
         if(!prefs.edit().putString("settings",settings.json().toString()).commit()) {

@@ -41,16 +41,14 @@ pub fn traffic_status(state: State<'_, SharedState>) -> TrafficSnapshot { read_t
 #[tauri::command]
 pub fn select_node(group_id: String, node_id: String, state: State<'_, SharedState>) -> Result<SelectionView, String> {
     let _operation=crate::operation::Operation::acquire(&state.operation)?;
-    let mut settings=state.store.preferences().advanced; settings.auto_node=false; state.store.set_advanced(settings)?;
-    state.store.set_selection(&group_id, &node_id)
+    state.store.set_manual_selection(&group_id, &node_id)
 }
 
 #[tauri::command]
 pub async fn switch_node(group_id: String, node_id: String, state: State<'_, SharedState>) -> Result<EngineSnapshot, String> {
     let _operation = crate::operation::Operation::acquire(&state.operation)?;
     let node = state.store.node(&group_id, &node_id)?;
-    let mut settings=state.store.preferences().advanced; settings.auto_node=false; state.store.set_advanced(settings)?;
-    state.store.set_selection(&group_id, &node_id)?;
+    state.store.set_manual_selection(&group_id, &node_id)?;
 
     let current = read_snapshot(&state.snapshot);
     if current.phase == EnginePhase::Offline || current.phase == EnginePhase::Error {
@@ -237,9 +235,9 @@ pub fn vpn_status(state: State<'_, SharedState>) -> EngineSnapshot {
 }
 
 #[tauri::command]
-pub fn set_advanced(settings: crate::settings::AdvancedSettings, state: State<'_, SharedState>) -> Result<AppPreferences,String> {
+pub fn set_advanced(settings: crate::settings::AdvancedSettings, base: Option<crate::settings::AdvancedSettings>, state: State<'_, SharedState>) -> Result<AppPreferences,String> {
     let _operation=crate::operation::Operation::acquire(&state.operation)?;
-    state.store.set_advanced(settings)
+    state.store.patch_advanced(base.as_ref(),settings)
 }
 #[tauri::command]
 pub fn clear_diagnostics(state: State<'_, SharedState>) -> Result<(),String> {
@@ -253,7 +251,7 @@ pub fn auto_select(group_id:String, state:State<'_,SharedState>) -> Result<Selec
     let _operation=crate::operation::Operation::acquire(&state.operation)?;
     if !matches!(read_snapshot(&state.snapshot).phase,EnginePhase::Offline|EnginePhase::Error) { return Err("disconnect before AUTO selection".into()); }
     let selected=state.store.auto_selection(&group_id)?;
-    let mut settings=state.store.preferences().advanced; settings.auto_node=true; state.store.set_advanced(settings)?;
+    state.store.set_auto_node(true)?;
     Ok(selected)
 }
 #[tauri::command]

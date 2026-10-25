@@ -9,6 +9,20 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SettingsAndTransportTest {
+    @Test fun `concurrent field edits preserve current settings and remapped AUTO exclusions`() {
+        val base=AppSettings()
+        val first=base.copy(dns="8.8.8.8",autoExcluded=setOf("remapped-node"))
+        val next=base.copy(showLatency=false,ping=base.ping.copy(attempts=5))
+        val merged=dev.dotclient.android.core.settings.mergeSettings(first,base,next)
+        assertEquals("8.8.8.8",merged.dns)
+        assertFalse(merged.showLatency)
+        assertEquals(5,merged.ping.attempts)
+        assertEquals(setOf("remapped-node"),merged.autoExcluded)
+        val old=Hysteria2UriParser.parse("hy2://secret@example.com#old").getOrThrow()
+        val renamed=Hysteria2UriParser.parse("hy2://secret@example.com#new").getOrThrow()
+        val diff=dev.dotclient.android.core.subscription.SubscriptionDiffer.calculate(listOf(old),listOf(renamed))
+        assertEquals(setOf(renamed.id),base.copy(autoExcluded=setOf(old.id)).remapExclusions(diff,setOf(renamed.id)).autoExcluded)
+    }
     @Test fun `AUTO rejects direct stale excluded failed and over threshold results`() {
         val a=Hysteria2UriParser.parse("hy2://secret@a.example#A").getOrThrow()
         val b=Hysteria2UriParser.parse("hy2://secret@b.example#B").getOrThrow()

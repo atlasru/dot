@@ -50,10 +50,18 @@ impl Store {
     pub fn preferences(&self) -> AppPreferences { self.inner.lock().expect("store poisoned").preferences.clone() }
 
     pub fn set_advanced(&self, settings: crate::settings::AdvancedSettings) -> Result<AppPreferences,String> {
+        self.patch_advanced(None,settings)
+    }
+    pub fn patch_advanced(&self, base: Option<&crate::settings::AdvancedSettings>, settings: crate::settings::AdvancedSettings) -> Result<AppPreferences,String> {
         settings.validate()?;
-        let mut guard=self.inner.lock().map_err(|_| "store lock poisoned")?;
-        let mut s=guard.clone(); s.preferences.advanced=settings;
-        self.save_locked(&s)?; *guard=s.clone(); Ok(s.preferences)
+        self.transaction(|s| {
+            s.preferences.advanced=if let Some(base)=base { crate::settings::merge_settings(&s.preferences.advanced,base,&settings)? } else { settings };
+            Ok(())
+        })?;
+        Ok(self.preferences())
+    }
+    pub fn set_auto_node(&self, enabled: bool) -> Result<(),String> {
+        self.transaction(|s| { s.preferences.advanced.auto_node=enabled; Ok(()) })
     }
     pub fn clear_diagnostics(&self) -> Result<(),String> {
         self.transaction(|s| { s.diagnostics.clear(); s.latencies.clear(); Ok(()) })
@@ -103,13 +111,16 @@ impl Store {
         Ok(build_group_view(&s, group))
     }
 
-    pub fn set_selection(&self, group_id: &str, node_id: &str) -> Result<SelectionView, String> {
+    pub fn set_selection(&self, group_id: &str, node_id: &str) -> Result<SelectionView, String> { self.set_selection_mode(group_id,node_id,false) }
+    pub fn set_manual_selection(&self, group_id: &str, node_id: &str) -> Result<SelectionView, String> { self.set_selection_mode(group_id,node_id,true) }
+    fn set_selection_mode(&self, group_id: &str, node_id: &str, manual: bool) -> Result<SelectionView, String> {
         let mut guard = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
         let mut s = guard.clone();
         let valid = s.groups.iter().any(|g| g.id == group_id && g.nodes.iter().any(|n| n.id == node_id));
         if !valid { return Err("selected node does not exist in subscription group".into()); }
         s.selected_group_id = Some(group_id.into());
         s.selected_node_id = Some(node_id.into());
+        if manual { s.preferences.advanced.auto_node=false; }
         self.save_locked(&s)?;
         *guard = s.clone();
         Ok(SelectionView { group_id: s.selected_group_id.clone(), node_id: s.selected_node_id.clone() })
@@ -171,6 +182,8 @@ impl Store {
         for old_id in old_favorites {
             if let Some(node) = diff.replacement_for(&old_id) { s.favorites.insert(node.id.clone()); }
         }
+        let old_exclusions:Vec<_>=old_nodes.iter().filter(|n|s.preferences.advanced.auto_excluded.contains(&n.id)).map(|n|n.id.clone()).collect();
+        for id in old_exclusions { if let Some(node)=diff.replacement_for(&id) { s.preferences.advanced.auto_excluded.insert(node.id.clone()); } }
         let old_latencies: Vec<(String, NodeLatency)> = old_nodes.iter().filter_map(|node| s.latencies.get(&node.id).cloned().map(|latency| (node.id.clone(), latency))).collect();
         for (old_id, latency) in old_latencies {
             if let Some(replacement) = diff.replacement_for(&old_id) {
@@ -330,6 +343,7 @@ fn normalize_selection(s: &mut PersistedState) {
 fn prune_runtime_metadata(s: &mut PersistedState) {
     let valid_node_ids: std::collections::HashSet<String> = s.groups.iter().flat_map(|group| group.nodes.iter().map(|node| node.id.clone())).collect();
     let valid_group_ids: std::collections::HashSet<String> = s.groups.iter().map(|group| group.id.clone()).collect();
+    s.preferences.advanced.auto_excluded.retain(|id|valid_node_ids.contains(id));
     s.favorites.retain(|id| valid_node_ids.contains(id));
     s.diagnostics.retain(|node_id, _| valid_node_ids.contains(node_id));
     s.latencies.retain(|node_id, _| valid_node_ids.contains(node_id));
@@ -419,6 +433,7 @@ mod subscription_management_tests {
         f.store.upsert_group(group("b", vec![old.clone()])).unwrap();
         f.store.set_selection("a", &old.id).unwrap();
         f.store.set_favorite(&old.id, true).unwrap();
+        let mut prefs=f.store.preferences().advanced; prefs.auto_excluded.insert(old.id.clone()); f.store.set_advanced(prefs).unwrap();
         f.store.record_latency(&old.id, Some(42), false, 2).unwrap();
         let result = f.store.apply_refresh("a", vec![new.clone()], 3).unwrap();
         assert!(!result.selected_node_removed);
@@ -427,6 +442,7 @@ mod subscription_management_tests {
         let reopened = Store::open(f.dir.join("state.json")).unwrap();
         assert!(reopened.groups()[0].nodes[0].favorite);
         assert_eq!(result.edited.len(), 1);
+        assert!(reopened.preferences().advanced.auto_excluded.contains(&new.id));
     }
     #[test]
     fn deleted_selection_is_reported_and_last_group_clears_metadata() {

@@ -1,5 +1,48 @@
 use serde::{Deserialize, Serialize};
 
+pub fn merge_settings(
+    current: &AdvancedSettings,
+    base: &AdvancedSettings,
+    next: &AdvancedSettings,
+) -> Result<AdvancedSettings, String> {
+    fn merge(
+        target: &mut serde_json::Value,
+        before: &serde_json::Value,
+        after: &serde_json::Value,
+    ) {
+        if let (Some(old), Some(new)) = (before.as_object(), after.as_object()) {
+            for (key, value) in new {
+                merge(&mut target[key], &old[key], value);
+            }
+        } else if before != after {
+            *target = after.clone();
+        }
+    }
+    next.validate()?;
+    let mut value = serde_json::to_value(current).map_err(|_| "invalid settings")?;
+    merge(
+        &mut value,
+        &serde_json::to_value(base).map_err(|_| "invalid settings")?,
+        &serde_json::to_value(next).map_err(|_| "invalid settings")?,
+    );
+    let mut settings: AdvancedSettings =
+        serde_json::from_value(value).map_err(|_| "invalid settings")?;
+    // Exclusions are a set: concurrent subscription remaps must survive unrelated edits.
+    let removed: std::collections::HashSet<_> = base
+        .auto_excluded
+        .difference(&next.auto_excluded)
+        .cloned()
+        .collect();
+    settings.auto_excluded = current
+        .auto_excluded
+        .difference(&removed)
+        .cloned()
+        .chain(next.auto_excluded.difference(&base.auto_excluded).cloned())
+        .collect();
+    settings.validate()?;
+    Ok(settings)
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PingMethod {
@@ -157,6 +200,21 @@ impl AdvancedSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stale_ui_edits_preserve_concurrent_changes() {
+        let base = AdvancedSettings::default();
+        let mut current = base.clone();
+        current.dns = "8.8.8.8".into();
+        current.auto_excluded.insert("remapped".into());
+        let mut next = base.clone();
+        next.show_latency = false;
+        next.ping.attempts = 5;
+        let merged = merge_settings(&current, &base, &next).unwrap();
+        assert_eq!(merged.dns, "8.8.8.8");
+        assert!(merged.auto_excluded.contains("remapped"));
+        assert_eq!(merged.ping.attempts, 5);
+        assert!(!merged.show_latency);
+    }
     #[test]
     fn defaults_migrate_and_validate() {
         let s: AdvancedSettings = serde_json::from_str("{}").unwrap();
