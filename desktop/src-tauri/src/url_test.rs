@@ -1,5 +1,7 @@
 use std::{
     fs,
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    io::Read,
     net::{TcpListener, TcpStream},
     path::Path,
     process::{Child, Command, Stdio},
@@ -9,20 +11,25 @@ use std::{
 
 use reqwest::{blocking::Client, Proxy};
 
-use crate::{config::build_url_test_config, job::ProcessJob, model::ProxyNode};
+use crate::{config::build_url_test_config, job::ProcessJob, model::ProxyNode, settings::{PingSettings, PingMethod}, diagnostics::{PingResult, measure, cancelled}};
 
-const TEST_URL: &str = "http://cp.cloudflare.com/";
-
-pub fn test_active_connection() -> Result<u64, String> {
-    let client = Client::builder()
-        .connect_timeout(Duration::from_secs(3))
-        .timeout(Duration::from_secs(5))
-        .build()
-        .map_err(|e| format!("failed to initialize URL test: {e}"))?;
-    measure_request(&client)
+pub fn test_active_connection(settings: &PingSettings, cancel: &AtomicBool) -> PingResult {
+    measure(settings, true, cancel, || {
+        let client = client(settings, None)?;
+        measure_request(&client, settings)
+    })
 }
 
-pub fn test_node(runtime_source: &Path, work_dir: &Path, node: &ProxyNode) -> Result<u64, String> {
+pub fn test_node(runtime_source: &Path, work_dir: &Path, node: &ProxyNode, settings: &PingSettings, cancel: &AtomicBool) -> PingResult {
+    if !settings.method.proxy() { return crate::diagnostics::direct(node, settings, cancel); }
+    match test_proxy(runtime_source, work_dir, node, settings, cancel) {
+        Ok(result) => result,
+        Err(error) => measure(settings, false, cancel, || Err(error.clone())),
+    }
+}
+
+fn test_proxy(runtime_source: &Path, work_dir: &Path, node: &ProxyNode, settings: &PingSettings, cancel: &AtomicBool) -> Result<PingResult, String> {
+    cancelled(cancel)?;
     fs::create_dir_all(work_dir).map_err(|e| format!("failed to create URL test directory: {e}"))?;
     let xray = runtime_source.join("xray.exe");
     if !xray.is_file() {
@@ -35,28 +42,17 @@ pub fn test_node(runtime_source: &Path, work_dir: &Path, node: &ProxyNode) -> Re
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let config_path = work_dir.join(format!("url-test-{}-{stamp}.json", std::process::id()));
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let serial=NEXT.fetch_add(1,Ordering::Relaxed);
+    let config_path = work_dir.join(format!("url-test-{}-{stamp}-{serial}.json", std::process::id()));
+    let _config_file = ConfigFile(config_path.clone());
     fs::write(
         &config_path,
         serde_json::to_vec_pretty(&config).map_err(|e| format!("failed to serialize URL test config: {e}"))?,
     )
     .map_err(|e| format!("failed to write URL test config: {e}"))?;
 
-    let tested = command(&xray, work_dir)
-        .args(["run", "-test", "-config"])
-        .arg(&config_path)
-        .output()
-        .map_err(|e| format!("failed to validate URL test config: {e}"))?;
-    if !tested.status.success() {
-        let _ = fs::remove_file(&config_path);
-        let stderr = String::from_utf8_lossy(&tested.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            "Xray rejected the URL test config".into()
-        } else {
-            node.redact(&stderr)
-        });
-    }
-
+    cancelled(cancel)?;
     let mut child = command(&xray, work_dir)
         .args(["run", "-config"])
         .arg(&config_path)
@@ -79,32 +75,40 @@ pub fn test_node(runtime_source: &Path, work_dir: &Path, node: &ProxyNode) -> Re
     }
 
     let result = (|| {
-        wait_for_proxy(&mut child, port)?;
-        let proxy = Proxy::http(format!("http://127.0.0.1:{port}"))
-            .map_err(|e| format!("failed to configure URL test proxy: {e}"))?;
-        let client = Client::builder()
-            .proxy(proxy)
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(5))
-            .build()
-            .map_err(|e| format!("failed to initialize URL test: {e}"))?;
-        measure_request(&client)
+        wait_for_proxy(&mut child, port, cancel)?;
+        let proxy = Proxy::all(format!("http://127.0.0.1:{port}"))
+            .map_err(|_| "failed to configure diagnostics proxy")?;
+        Ok(measure(settings, false, cancel, || {
+            // Each attempt opens a fresh HTTP/TLS connection; core startup is excluded.
+            let client = client(settings, Some(proxy.clone()))?;
+            measure_request(&client, settings)
+        }))
     })();
-
     terminate(job, &mut child);
-    let _ = fs::remove_file(&config_path);
     result
 }
 
-fn measure_request(client: &Client) -> Result<u64, String> {
+struct ConfigFile(std::path::PathBuf);
+impl Drop for ConfigFile { fn drop(&mut self) { let _ = fs::remove_file(&self.0); } }
+
+fn client(settings: &PingSettings, proxy: Option<Proxy>) -> Result<Client, String> {
+    let mut builder = Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(settings.timeout_seconds))
+        .timeout(Duration::from_secs(settings.timeout_seconds));
+    if let Some(proxy) = proxy { builder = builder.proxy(proxy); }
+    builder.build().map_err(|_| "failed to initialize diagnostics HTTP client".into())
+}
+
+fn measure_request(client: &Client, settings: &PingSettings) -> Result<u64, String> {
+    let request = if settings.method == PingMethod::ProxyHead { client.head(&settings.url) } else { client.get(&settings.url) };
     let started = Instant::now();
-    let response = client
-        .get(TEST_URL)
-        .header("Cache-Control", "no-cache")
-        .send()
-        .map_err(|e| format!("URL test failed: {e}"))?;
-    if !response.status().is_success() && response.status().as_u16() != 204 {
-        return Err(format!("URL test returned HTTP {}", response.status().as_u16()));
+    let response = request.header("Cache-Control", "no-cache").send().map_err(|e| if e.is_timeout() { "HTTP request timed out" } else { "HTTP request failed (DNS, TLS or proxy)" })?;
+    let code = response.status().as_u16();
+    if settings.method == PingMethod::ProxyHead && code == 405 { return Err("HEAD unsupported by test server (405); use GET; proxy health unknown".into()); }
+    if !(200..300).contains(&code) { return Err(format!("test URL returned HTTP {code}")); }
+    if settings.method == PingMethod::ProxyGet {
+        let size = std::io::copy(&mut response.take(1_048_577), &mut std::io::sink()).map_err(|_| "HTTP response body failed or timed out")?;
+        if size > 1_048_576 { return Err("test response exceeds 1 MiB; use a small test URL".into()); }
     }
     Ok(started.elapsed().as_millis().max(1) as u64)
 }
@@ -120,8 +124,9 @@ fn reserve_loopback_port() -> Result<u16, String> {
     Ok(port)
 }
 
-fn wait_for_proxy(child: &mut Child, port: u16) -> Result<(), String> {
-    for _ in 0..30 {
+fn wait_for_proxy(child: &mut Child, port: u16, cancel: &AtomicBool) -> Result<(), String> {
+    for _ in 0..100 {
+        cancelled(cancel)?;
         if TcpStream::connect_timeout(
             &format!("127.0.0.1:{port}").parse().map_err(|e| format!("invalid URL test address: {e}"))?,
             Duration::from_millis(80),
@@ -158,4 +163,35 @@ fn command(xray: &Path, current_dir: &Path) -> Command {
         value.creation_flags(0x08000000);
     }
     value
+}
+
+#[cfg(test)] mod tests {
+    use super::*;
+    use std::io::{Read,Write};
+    fn server(code: u16, expected: &'static str, pause: Duration) -> (String, std::thread::JoinHandle<()>) {
+        let listener=TcpListener::bind("127.0.0.1:0").unwrap();
+        let url=format!("http://{}/test",listener.local_addr().unwrap());
+        let handle=std::thread::spawn(move || {
+            let (mut stream,_)=listener.accept().unwrap();
+            let mut bytes=[0;4096]; let n=stream.read(&mut bytes).unwrap();
+            assert!(String::from_utf8_lossy(&bytes[..n]).starts_with(expected));
+            std::thread::sleep(pause);
+            let _=write!(stream,"HTTP/1.1 {code} Test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        }); (url,handle)
+    }
+    #[test] fn get_head_and_405_are_distinct() {
+        for (method,expected,code) in [(PingMethod::ProxyGet,"GET /test",204),(PingMethod::ProxyHead,"HEAD /test",204),(PingMethod::ProxyHead,"HEAD /test",405),(PingMethod::ProxyGet,"GET /test",503)] {
+            let (url,handle)=server(code,expected,Duration::ZERO);
+            let mut s=PingSettings::default(); s.method=method; s.url=url;
+            let result=measure_request(&client(&s,None).unwrap(),&s);
+            if code==204 { assert!(result.is_ok()); } else if code==405 { assert!(result.unwrap_err().starts_with("HEAD unsupported")); } else { assert!(result.is_err()); }
+            handle.join().unwrap();
+        }
+    }
+    #[test] fn timeout_is_a_failure() {
+        let (url,handle)=server(204,"GET /test",Duration::from_millis(200));
+        let mut s=PingSettings::default(); s.url=url;
+        let http=Client::builder().no_proxy().timeout(Duration::from_millis(30)).build().unwrap();
+        assert!(measure_request(&http,&s).unwrap_err().contains("timed out")); handle.join().unwrap();
+    }
 }

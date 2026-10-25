@@ -128,26 +128,6 @@ fun DotApp(viewModel: MainViewModel) {
         }
     }
 
-    LaunchedEffect(
-        state.autoNodeEnabled,
-        state.testingNodeIds,
-        state.message,
-        state.selectedProfileId,
-        state.vpnState,
-    ) {
-        val autoSelectionReady = state.autoNodeEnabled &&
-            state.testingNodeIds.isEmpty() &&
-            state.selectedProfileId != null &&
-            state.message?.startsWith("AUTO · ") == true &&
-            !state.message.orEmpty().contains("testing", ignoreCase = true)
-
-        if (autoSelectionReady) {
-            val selectedId = state.selectedProfileId ?: return@LaunchedEffect
-            viewModel.setAutoNodeEnabled(false)
-            if (state.vpnConnected) viewModel.switchProfile(selectedId) else toggleVpn()
-        }
-    }
-
     val updateSplitTunnel: (SplitTunnelConfig) -> Unit = { updated ->
         splitTunnelConfig = updated
         splitTunnelStore.save(updated)
@@ -463,6 +443,9 @@ private fun NodesScreen(
                         selected = profile.id == group.selectedProfileId,
                         running = state.vpnConnected && profile.name == state.runningNodeName,
                         latencyMs = state.nodeLatenciesMs[profile.id],
+                        compact = state.settings.compactNodes,
+                        showLatency = state.settings.showLatency,
+                        showTransport = state.settings.showTransport,
                         testing = profile.id in state.testingNodeIds,
                         failed = profile.id in state.nodeLatencyFailedIds,
                         onSelect = {
@@ -675,6 +658,9 @@ private fun NodeRow(
     selected: Boolean,
     running: Boolean,
     latencyMs: Long?,
+    compact: Boolean = false,
+    showLatency: Boolean = true,
+    showTransport: Boolean = true,
     testing: Boolean,
     failed: Boolean,
     onSelect: () -> Unit,
@@ -687,7 +673,7 @@ private fun NodeRow(
         Modifier.fillMaxWidth()
             .background(if (selected) Color(0xFF111111) else Color.Transparent)
             .clickable(onClick = onSelect)
-            .padding(vertical = 11.dp),
+            .padding(vertical = if(compact) 5.dp else 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(3.dp).height(36.dp).background(if (selected) DotRed else Color(0xFF181818)))
@@ -706,9 +692,8 @@ private fun NodeRow(
                     Text("LIVE", color = DotRed, style = MaterialTheme.typography.labelMedium)
                 }
             }
-            Spacer(Modifier.height(3.dp))
-            Text(
-                "${profile.protocol} · ${profile.security.name.lowercase()} · ${profile.transport.name.lowercase()}",
+            if(showTransport) Text(
+                "${profile.protocol} · ${profile.security.name.lowercase()} · ${profile.effectiveTransport.name.lowercase()}",
                 color = Color(0xFF5F5F5F),
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
@@ -716,7 +701,7 @@ private fun NodeRow(
             )
         }
         Spacer(Modifier.width(10.dp))
-        Text(
+        if(showLatency) Text(
             when {
                 testing -> "··"
                 latencyMs != null -> "$latencyMs ms"
@@ -856,6 +841,7 @@ private fun SettingsScreen(
             }
         } else {
             item {
+                AdvancedSettingsPanel(state,viewModel)
                 SettingsSectionTitle("VPN")
                 SettingsLink(
                     "split tunneling",
@@ -990,7 +976,7 @@ private fun AboutValue(name: String, value: String) {
 @Composable
 private fun AboutLink(name: String, value: String, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 11.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = if(compact) 5.dp else 11.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1209,7 +1195,7 @@ private fun ThemePicker(selected: DotThemeMode, onSelect: (DotThemeMode) -> Unit
                     .border(1.dp, if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
                     .background(if (active) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface, RoundedCornerShape(4.dp))
                     .clickable { onSelect(theme) }
-                    .padding(vertical = 11.dp),
+                    .padding(vertical = if(compact) 5.dp else 11.dp),
                 color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelMedium,
                 textAlign = TextAlign.Center,
@@ -1238,7 +1224,7 @@ private fun LauncherIconPicker() {
                             LauncherIconManager.apply(context, icon)
                             selected = icon
                         }
-                        .padding(vertical = 11.dp),
+                        .padding(vertical = if(compact) 5.dp else 11.dp),
                     color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelMedium,
                     textAlign = TextAlign.Center,

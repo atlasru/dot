@@ -354,3 +354,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .orb-button:active:not(:disabled) { transform: scale(.98); }
 .orb-button:focus-visible { outline: 2px solid var(--red); outline-offset: 5px; }
 .orb-button:disabled { cursor: default; }
+
+.advanced-settings summary { cursor: pointer; padding: 10px 0; font-weight: 600; letter-spacing: .08em; }
+.advanced-settings label { display: block; margin: 14px 0 8px; }
+.advanced-settings .advanced-check { display: flex; align-items: center; gap: 12px; }
+.advanced-check input { width: auto; }
+.advanced-settings p { line-height: 1.6; }
+.advanced-settings button { margin: 6px 8px 6px 0; }
+.cancel-tests { position: fixed; right: 28px; bottom: 28px; z-index: 10; background: #181818; color: #eee; border: 1px solid #555; padding: 12px; }
+html[data-compact="true"] .node-row-card { min-height: 46px; padding-top: 3px; padding-bottom: 3px; }
+html[data-latency="false"] .node-test { font-size: 0; }
+html[data-latency="false"] .node-test::after { content: 'TEST'; font-size: 11px; }
+html[data-transport="false"] .node-transport { display: none; }

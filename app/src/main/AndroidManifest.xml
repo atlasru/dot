@@ -22,6 +22,8 @@
         android:theme="@style/Theme.Dot"
         android:usesCleartextTraffic="false">
 
+        <service android:name=".core.diagnostics.PingService" android:exported="false" android:process=":diagnostics" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true">

@@ -19,6 +19,7 @@ impl Store {
             let bytes = fs::read(&path).map_err(|e| format!("failed to read state: {e}"))?;
             serde_json::from_slice(&bytes).map_err(|e| format!("failed to parse state: {e}"))?
         } else { PersistedState::default() };
+        state.preferences.advanced.validate()?;
         let mut migrated = false;
         for group in &mut state.groups {
             match &group.hwid {
@@ -47,6 +48,31 @@ impl Store {
     }
 
     pub fn preferences(&self) -> AppPreferences { self.inner.lock().expect("store poisoned").preferences.clone() }
+
+    pub fn set_advanced(&self, settings: crate::settings::AdvancedSettings) -> Result<AppPreferences,String> {
+        settings.validate()?;
+        let mut guard=self.inner.lock().map_err(|_| "store lock poisoned")?;
+        let mut s=guard.clone(); s.preferences.advanced=settings;
+        self.save_locked(&s)?; *guard=s.clone(); Ok(s.preferences)
+    }
+    pub fn clear_diagnostics(&self) -> Result<(),String> {
+        self.transaction(|s| { s.diagnostics.clear(); s.latencies.clear(); Ok(()) })
+    }
+    pub fn record_diagnostic(&self, id: &str, result: crate::diagnostics::PingResult) -> Result<(),String> {
+        self.transaction(|s| {
+            if !s.groups.iter().any(|g| g.nodes.iter().any(|n| n.id==id)) { return Err("node no longer exists".into()); }
+            if result.compatible(&s.preferences.advanced.ping) { s.diagnostics.insert(id.to_string(),result); }
+            Ok(())
+        })
+    }
+    pub fn auto_selection(&self, group_id: &str) -> Result<SelectionView,String> {
+        let guard=self.inner.lock().map_err(|_| "store lock poisoned")?;
+        let settings=&guard.preferences.advanced;
+        if !settings.ping.method.proxy() { return Err("AUTO requires Via Proxy GET/HEAD diagnostics".into()); }
+        let group=guard.groups.iter().find(|g|g.id==group_id).ok_or("subscription not found")?;
+        let best=group.nodes.iter().filter(|n| !settings.auto_excluded.contains(&n.id)).filter_map(|n|guard.diagnostics.get(&n.id).filter(|r| r.verified(&settings.ping)).and_then(|r|r.latency_ms).map(|ms|(n,ms))).filter(|(_,ms)|settings.auto_max_latency_ms==0 || *ms<=settings.auto_max_latency_ms).min_by_key(|(_,ms)|*ms).map(|(n,_)|n.id.clone()).ok_or("AUTO has no recently verified proxy; run diagnostics first")?;
+        drop(guard); self.set_selection(group_id,&best)
+    }
 
     pub fn set_theme(&self, theme: AppTheme) -> Result<AppPreferences, String> {
         let mut guard = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
@@ -157,6 +183,8 @@ impl Store {
             }
         }
 
+        let retained: Vec<_> = diff.unchanged.iter().map(|m|(&m.before,&m.after)).chain(diff.edited.iter().filter(|e|e.changed_fields.iter().all(|f|f=="name")).map(|e|(&e.before,&e.after))).filter_map(|(before,after)|s.diagnostics.get(&before.id).cloned().map(|r|(after.id.clone(),r))).collect();
+        for (id,result) in retained { s.diagnostics.insert(id,result); }
         s.groups[index].nodes = nodes;
         s.groups[index].updated_at_ms = updated_at_ms;
         if let Some(replacement_id) = selected_replacement {
@@ -182,16 +210,11 @@ impl Store {
         })
     }
 
+    #[cfg(test)]
     pub fn record_latency(&self, node_id: &str, latency_ms: Option<u64>, failed: bool, tested_at_ms: u64) -> Result<(), String> {
-        let mut guard = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
-        let mut s = guard.clone();
-        if !s.groups.iter().any(|group| group.nodes.iter().any(|node| node.id == node_id)) {
-            return Err("node not found".into());
-        }
-        s.latencies.insert(node_id.to_string(), NodeLatency { node_id: node_id.to_string(), latency_ms, failed, tested_at_ms });
-        self.save_locked(&s)?;
-        *guard = s;
-        Ok(())
+        let settings=self.preferences().advanced.ping;
+        let result=crate::diagnostics::PingResult { method:settings.method,latency_ms,tested_at_ms,success:!failed,error:None,url:Some(settings.url.clone()),samples:latency_ms.into_iter().collect(),attempts_succeeded:if failed {0} else {1},active_tunnel:false,settings };
+        self.record_diagnostic(node_id,result)
     }
 
     pub fn group_url(&self, group_id: &str) -> Result<String, String> {
@@ -282,9 +305,10 @@ fn build_group_view(state: &PersistedState, group: &SubscriptionGroup) -> GroupV
     view.sort_mode = state.sort_modes.get(&group.id).copied().unwrap_or_default();
     for node in &mut view.nodes {
         node.favorite = state.favorites.contains(&node.id);
-        if let Some(latency) = state.latencies.get(&node.id) {
-            node.latency_ms = latency.latency_ms;
-            node.latency_failed = latency.failed;
+        if let Some(result) = state.diagnostics.get(&node.id).filter(|r|r.compatible(&state.preferences.advanced.ping)) {
+            node.latency_ms=result.latency_ms;
+            node.latency_failed=!result.success && !result.error.as_deref().unwrap_or("").starts_with("HEAD unsupported");
+            node.diagnostic=Some(result.clone());
         }
     }
     sort_nodes(&mut view.nodes, view.sort_mode);
@@ -307,6 +331,7 @@ fn prune_runtime_metadata(s: &mut PersistedState) {
     let valid_node_ids: std::collections::HashSet<String> = s.groups.iter().flat_map(|group| group.nodes.iter().map(|node| node.id.clone())).collect();
     let valid_group_ids: std::collections::HashSet<String> = s.groups.iter().map(|group| group.id.clone()).collect();
     s.favorites.retain(|id| valid_node_ids.contains(id));
+    s.diagnostics.retain(|node_id, _| valid_node_ids.contains(node_id));
     s.latencies.retain(|node_id, _| valid_node_ids.contains(node_id));
     s.sort_modes.retain(|group_id, _| valid_group_ids.contains(group_id));
 }
@@ -525,5 +550,25 @@ mod subscription_management_tests {
         assert!(f.store.edit_group("a", "changed".into(), f.store.group_url("a").unwrap(), next).is_err());
         assert_eq!(original.hwid, f.store.groups()[0].hwid);
         assert_eq!(fs::read(f.dir.join("state.json")).unwrap(), before);
+    }
+}
+
+#[cfg(test)] mod settings_tests {
+    use super::*;
+    #[test] fn settings_atomic_persistence_auto_and_cache_compatibility() {
+        let dir=std::env::temp_dir().join(format!("dot-settings-{}-{}",std::process::id(),crate::diagnostics::now_ms()));
+        let path=dir.join("state.json");
+        let store=Store::open(path.clone()).unwrap();
+        let n=crate::hysteria2::parse_hysteria2("hy2://secret@example.com#HY2").unwrap();
+        store.upsert_group(SubscriptionGroup{id:"g".into(),name:"test".into(),url:String::new(),updated_at_ms:1,nodes:vec![n.clone()],hwid:None}).unwrap();
+        assert!(store.auto_selection("g").is_err());
+        let s=store.preferences().advanced.ping;
+        let r=crate::diagnostics::measure(&s,false,&std::sync::atomic::AtomicBool::new(false),||Ok(35));
+        store.record_diagnostic(&n.id,r).unwrap(); assert!(store.auto_selection("g").is_ok());
+        let reopened=Store::open(path.clone()).unwrap(); assert_eq!(reopened.groups()[0].nodes[0].latency_ms,Some(35));
+        let mut settings=reopened.preferences().advanced; settings.ping.method=crate::settings::PingMethod::Tcp;
+        reopened.set_advanced(settings.clone()).unwrap(); assert!(reopened.groups()[0].nodes[0].latency_ms.is_none()); assert!(reopened.auto_selection("g").is_err());
+        fs::create_dir(path.with_extension("json.tmp")).unwrap(); settings.dns="8.8.8.8".into(); assert!(reopened.set_advanced(settings).is_err()); assert_eq!(reopened.preferences().advanced.dns,"1.1.1.1");
+        let _=fs::remove_dir_all(dir);
     }
 }

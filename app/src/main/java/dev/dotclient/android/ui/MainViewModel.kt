@@ -9,7 +9,6 @@ import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.model.ProxyNode
 import dev.dotclient.android.core.parser.SubscriptionDecoder
-import dev.dotclient.android.core.reliability.AutoNodeSelector
 import dev.dotclient.android.core.subscription.SecretRedactor
 import dev.dotclient.android.core.subscription.SubscriptionClient
 import dev.dotclient.android.core.subscription.SubscriptionIdentity
@@ -26,6 +25,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.first
 
 class MainViewModel(
     application: Application,
@@ -33,14 +34,17 @@ class MainViewModel(
     private val subscriptionClient = SubscriptionClient()
     private val subscriptionStore = SubscriptionStore(application)
     private val uiPreferences = application.getSharedPreferences("dot_ui", Application.MODE_PRIVATE)
-    private val nodeLatencyTester = NodeLatencyTester(application)
+    private val settingsRepository = dev.dotclient.android.core.settings.SettingsRepository(application)
 
     private val mutableState = MutableStateFlow(loadInitialState())
     val state: StateFlow<DotUiState> = mutableState.asStateFlow()
 
+    private val diagnostics = NodeDiagnostics(application,mutableState,settingsRepository)
+
     init {
         viewModelScope.launch {
             VpnRuntime.state.collect { runtime ->
+                if (runtime.state != VpnConnectionState.DISCONNECTED && runtime.state != VpnConnectionState.ERROR && runtime.state != VpnConnectionState.CONNECTED) diagnostics.cancel()
                 mutableState.update {
                     it.copy(
                         requestingVpnPermission = false,
@@ -71,14 +75,29 @@ class MainViewModel(
             }
         }
 
-        state.value.selectedSubscription
-            ?.takeIf { it.sortMode == NodeSortMode.DELAY && it.profiles.isNotEmpty() }
-            ?.let { ensureDelaySortData(it.id) }
+        viewModelScope.launch {
+            val initial=state.value.settings
+            if(initial.autoConnect && android.net.VpnService.prepare(application)==null && !state.value.vpnConnected && requestVpnPermission()) onVpnPermissionGranted()
+            if(initial.refreshOnStart) refreshAllSubscriptions()
+            if(initial.ping.onStart) runScheduledDiagnostics()
+            var lastPing=System.nanoTime(); var lastRefresh=System.nanoTime()
+            while(true) {
+                kotlinx.coroutines.delay(15_000)
+                val settings=state.value.settings
+                if(settings.ping.repeatMinutes>0 && System.nanoTime()-lastPing>=settings.ping.repeatMinutes*60_000_000_000L) { runScheduledDiagnostics(); lastPing=System.nanoTime() }
+                if(settings.refreshHours>0 && System.nanoTime()-lastRefresh>=settings.refreshHours*3_600_000_000_000L) { refreshAllSubscriptions(); lastRefresh=System.nanoTime() }
+            }
+        }
     }
 
     private fun loadInitialState(): DotUiState {
         val stored = subscriptionStore.load()
+        val settings=runCatching { settingsRepository.load() }.getOrDefault(dev.dotclient.android.core.settings.AppSettings())
+        val results=settingsRepository.results().filterValues { it.settings==settings.ping }
         return DotUiState(
+            settings=settings, pingResults=results,
+            nodeLatenciesMs=results.mapNotNull { (id,r)->r.latencyMs?.let {id to it} }.toMap(),
+            nodeLatencyFailedIds=results.filterValues { !it.success && it.error?.startsWith("HEAD unsupported")!=true }.keys,
             subscriptions = stored.subscriptions,
             selectedSubscriptionId = stored.selectedSubscriptionId,
             message = stored.loadError,
@@ -140,7 +159,7 @@ class MainViewModel(
                 )
             }
 
-            val decoded = subscriptionClient.fetch(subscription).getOrElse { error ->
+            val decoded = subscriptionClient.fetch(subscription, state.value.settings.subscriptionTimeoutSeconds, state.value.settings.subscriptionUserAgent).getOrElse { error ->
                 showSubscriptionUpdateError(subscription, error)
                 return@launch
             }
@@ -165,20 +184,10 @@ class MainViewModel(
 
             mutableState.update { old ->
                 val oldProfileIds = latestGroup.profiles.mapTo(hashSetOf()) { it.id }
-                val transferredLatencies = old.nodeLatenciesMs
-                    .filterKeys { it !in oldProfileIds }
-                    .toMutableMap()
-                val transferredFailures = old.nodeLatencyFailedIds
-                    .filterNotTo(mutableSetOf()) { it in oldProfileIds }
-
-                diff.unchanged.forEach { match ->
-                    old.nodeLatenciesMs[match.before.id]?.let { transferredLatencies[match.after.id] = it }
-                    if (match.before.id in old.nodeLatencyFailedIds) transferredFailures += match.after.id
-                }
-                diff.edited.forEach { edit ->
-                    old.nodeLatenciesMs[edit.before.id]?.let { transferredLatencies[edit.after.id] = it }
-                    if (edit.before.id in old.nodeLatencyFailedIds) transferredFailures += edit.after.id
-                }
+                val currentIds = decoded.profiles.mapTo(hashSetOf()) { it.id }
+                val results=old.pingResults.filterKeys { it !in oldProfileIds || it in currentIds }
+                val transferredLatencies=results.mapNotNull { (id,r)->r.latencyMs?.let { id to it } }.toMap()
+                val transferredFailures=results.filterValues { !it.success && it.error?.startsWith("HEAD unsupported")!=true }.keys
 
                 val updated = old.subscriptions.map { group ->
                     if (group.id != id) return@map group
@@ -193,6 +202,7 @@ class MainViewModel(
                     subscriptions = updated,
                     selectedSubscriptionId = id,
                     loadingSubscriptionId = null,
+                    pingResults = results,
                     nodeLatenciesMs = transferredLatencies,
                     nodeLatencyFailedIds = transferredFailures,
                     testingNodeIds = old.testingNodeIds - oldProfileIds,
@@ -243,6 +253,7 @@ class MainViewModel(
                 } else {
                     old.selectedSubscriptionId
                 },
+                pingResults = old.pingResults.filterKeys { it !in removedProfileIds },
                 nodeLatenciesMs = old.nodeLatenciesMs.filterKeys { it !in removedProfileIds },
                 nodeLatencyFailedIds = old.nodeLatencyFailedIds - removedProfileIds,
                 testingNodeIds = old.testingNodeIds - removedProfileIds,
@@ -288,6 +299,7 @@ class MainViewModel(
     }
 
     fun setAutoNodeEnabled(enabled: Boolean) {
+        if(enabled && !state.value.settings.ping.method.proxy) { mutableState.update { it.copy(message="AUTO requires Via Proxy GET/HEAD diagnostics") }; return }
         uiPreferences.edit().putBoolean("auto_node", enabled).apply()
         mutableState.update { it.copy(autoNodeEnabled = enabled, message = null) }
         if (!enabled) return
@@ -312,9 +324,7 @@ class MainViewModel(
         val group = state.value.subscriptions.firstOrNull { it.id == subscriptionId } ?: return
         if (group.profiles.isEmpty() || state.value.testingNodeIds.isNotEmpty()) return
         if (state.value.vpnConnected || state.value.vpnBusy) return
-        val tested = group.profiles.all { profile ->
-            profile.id in state.value.nodeLatenciesMs || profile.id in state.value.nodeLatencyFailedIds
-        }
+        val tested = group.profiles.all { profile -> state.value.pingResults[profile.id]?.let { result -> result.settings == state.value.settings.ping && System.currentTimeMillis()-result.testedAtMs in 0..899_999 } == true }
         if (tested) {
             resolveAutoProfile(group)?.let { selected ->
                 selectProfileInternal(selected.id)
@@ -327,12 +337,8 @@ class MainViewModel(
 
     private fun resolveAutoProfile(group: Subscription? = state.value.selectedSubscription): ProxyNode? {
         val target = group ?: return null
-        return AutoNodeSelector.select(
-            profiles = target.profiles,
-            latenciesMs = state.value.nodeLatenciesMs,
-            failedIds = state.value.nodeLatencyFailedIds,
-            preferredProfileId = target.selectedProfileId,
-        )
+        val current=state.value
+        return dev.dotclient.android.core.reliability.AutoNodeSelector.selectVerified(target.profiles,current.pingResults,current.settings.ping,current.settings.autoExcluded,current.settings.autoMaxLatencyMs)
     }
 
     private fun resolvedConnectionProfile(): ProxyNode? {
@@ -384,7 +390,7 @@ class MainViewModel(
     }
 
     fun requestVpnPermission(): Boolean {
-        if (state.value.autoNodeEnabled && state.value.testingNodeIds.isNotEmpty()) {
+        if (state.value.testingNodeIds.isNotEmpty()) {
             mutableState.update { it.copy(message = "AUTO · testing nodes…") }
             return false
         }
@@ -405,6 +411,7 @@ class MainViewModel(
     }
 
     fun onVpnPermissionGranted() {
+        if(state.value.testingNodeIds.isNotEmpty()) { mutableState.update { it.copy(message="Wait for diagnostics to finish") }; return }
         val profile = resolvedConnectionProfile()
         if (profile == null) {
             mutableState.update { it.copy(requestingVpnPermission = false, message = "select a node first") }
@@ -428,6 +435,7 @@ class MainViewModel(
     }
 
     fun reconnectCurrentProfile() {
+        if(state.value.testingNodeIds.isNotEmpty()) return
         val profile = resolvedConnectionProfile() ?: return
         mutableState.update {
             it.copy(
@@ -476,161 +484,41 @@ class MainViewModel(
         uiPreferences.edit().putString("theme", theme.name).apply()
     }
 
-    fun testNode(profile: ProxyNode) {
-        if (state.value.testingNodeIds.contains(profile.id)) return
-        viewModelScope.launch {
-            mutableState.update {
-                it.copy(
-                    testingNodeIds = it.testingNodeIds + profile.id,
-                    nodeLatencyFailedIds = it.nodeLatencyFailedIds - profile.id,
-                )
-            }
-            nodeLatencyTester.test(profile.rawUri)
-                .onSuccess { latency ->
-                    mutableState.update { current ->
-                        current.copy(
-                            nodeLatenciesMs = current.nodeLatenciesMs + (profile.id to latency),
-                            nodeLatencyFailedIds = current.nodeLatencyFailedIds - profile.id,
-                            testingNodeIds = current.testingNodeIds - profile.id,
-                        )
-                    }
-                }
-                .onFailure { error ->
-                    mutableState.update { current ->
-                        current.copy(
-                            nodeLatenciesMs = current.nodeLatenciesMs - profile.id,
-                            nodeLatencyFailedIds = current.nodeLatencyFailedIds + profile.id,
-                            testingNodeIds = current.testingNodeIds - profile.id,
-                            message = profile.redact(error.message ?: "url test failed"),
-                        )
-                    }
-                }
+    fun testNode(profile: ProxyNode) { if(state.value.testingNodeIds.isEmpty()) viewModelScope.launch { diagnostics.run(listOf(profile)) } }
+    fun testAllNodes() { state.value.selectedSubscription?.let { group -> if(state.value.testingNodeIds.isEmpty()) viewModelScope.launch { runAllNodeTests(group.id,false) } } }
+    fun cancelDiagnostics() { diagnostics.cancel() }
+    private suspend fun runAllNodeTests(subscriptionId: String, activateDelaySort: Boolean, selectAutoAfter: Boolean = false) {
+        val group=state.value.subscriptions.firstOrNull { it.id==subscriptionId } ?: return
+        diagnostics.run(group.profiles)
+        if(activateDelaySort) updateSubscriptionSortMode(subscriptionId,NodeSortMode.DELAY)
+        if(selectAutoAfter && state.value.autoNodeEnabled && state.value.selectedSubscriptionId==subscriptionId) {
+            resolveAutoProfile()?.let { selectProfileInternal(it.id); mutableState.update { old -> old.copy(message="AUTO · ${it.name}") } }
         }
     }
-
-    fun testAllNodes() {
-        val group = state.value.selectedSubscription ?: return
-        if (group.profiles.isEmpty() || state.value.testingNodeIds.isNotEmpty()) return
-        viewModelScope.launch { runAllNodeTests(group.id, activateDelaySort = false) }
-    }
-
-    private suspend fun runAllNodeTests(
-        subscriptionId: String,
-        activateDelaySort: Boolean,
-        selectAutoAfter: Boolean = false,
-    ) {
-        val group = state.value.subscriptions.firstOrNull { it.id == subscriptionId } ?: return
-        val profiles = group.profiles
-        if (profiles.isEmpty() || state.value.testingNodeIds.isNotEmpty()) return
-        val profileIds = profiles.mapTo(hashSetOf()) { it.id }
-        val delaySortPending = activateDelaySort || group.sortMode == NodeSortMode.DELAY
-
-        mutableState.update {
-            it.copy(
-                testingNodeIds = it.testingNodeIds + profileIds,
-                nodeLatenciesMs = it.nodeLatenciesMs.filterKeys { id -> id !in profileIds },
-                nodeLatencyFailedIds = it.nodeLatencyFailedIds - profileIds,
-                pendingDelaySortSubscriptionId = if (delaySortPending) subscriptionId else it.pendingDelaySortSubscriptionId,
-                message = if (selectAutoAfter) "AUTO · testing nodes…" else null,
-            )
-        }
-
-        profiles.forEach { profile ->
-            nodeLatencyTester.test(profile.rawUri)
-                .onSuccess { latency ->
-                    mutableState.update { current ->
-                        current.copy(
-                            nodeLatenciesMs = current.nodeLatenciesMs + (profile.id to latency),
-                            nodeLatencyFailedIds = current.nodeLatencyFailedIds - profile.id,
-                            testingNodeIds = current.testingNodeIds - profile.id,
-                        )
-                    }
-                }
-                .onFailure {
-                    mutableState.update { current ->
-                        current.copy(
-                            nodeLatenciesMs = current.nodeLatenciesMs - profile.id,
-                            nodeLatencyFailedIds = current.nodeLatencyFailedIds + profile.id,
-                            testingNodeIds = current.testingNodeIds - profile.id,
-                        )
-                    }
-                }
-        }
-
-        mutableState.update { current ->
-            current.copy(
-                subscriptions = if (activateDelaySort) {
-                    current.subscriptions.map { item ->
-                        if (item.id == subscriptionId) item.copy(sortMode = NodeSortMode.DELAY) else item
-                    }
-                } else {
-                    current.subscriptions
-                },
-                pendingDelaySortSubscriptionId = current.pendingDelaySortSubscriptionId.takeUnless { it == subscriptionId },
-                message = if (selectAutoAfter) current.message else "URL test complete · cp.cloudflare.com",
-            )
-        }
-        if (activateDelaySort) persist()
-
-        if (selectAutoAfter && state.value.autoNodeEnabled && state.value.selectedSubscriptionId == subscriptionId) {
-            state.value.selectedSubscription?.let { latest ->
-                resolveAutoProfile(latest)?.let { selected ->
-                    selectProfileInternal(selected.id)
-                    mutableState.update { it.copy(message = "AUTO · ${selected.name}") }
-                }
-            }
-        }
-    }
-
     fun testConnection() {
-        val current = state.value
-        if (!current.vpnConnected || current.connectionTestRunning) return
-
-        val runningProfile = current.subscriptions
-            .asSequence()
-            .flatMap { it.profiles.asSequence() }
-            .firstOrNull { it.name == current.runningNodeName }
-            ?: current.selectedProfile
-
-        if (runningProfile == null) {
-            mutableState.update { it.copy(connectionTestError = "active node is unavailable") }
-            return
-        }
-
+        val node=state.value.subscriptions.flatMap {it.profiles}.firstOrNull { it.id==VpnRuntime.state.value.nodeId } ?: return
+        if(state.value.vpnConnected && state.value.testingNodeIds.isEmpty()) viewModelScope.launch { diagnostics.run(listOf(node),true) }
+    }
+    private fun runScheduledDiagnostics() {
+        if(state.value.vpnConnected || state.value.vpnBusy || state.value.testingNodeIds.isNotEmpty()) return
+        if(state.value.settings.ping.selectedOnly) state.value.selectedProfile?.let(::testNode) else testAllNodes()
+    }
+    fun updateSettings(settings: dev.dotclient.android.core.settings.AppSettings) {
+        if(state.value.testingNodeIds.isNotEmpty()) { mutableState.update { it.copy(message="Cancel diagnostics before changing settings") }; return }
         viewModelScope.launch {
-            mutableState.update {
-                it.copy(
-                    connectionTestRunning = true,
-                    connectionTestLatencyMs = null,
-                    connectionTestError = null,
-                )
-            }
-
-            nodeLatencyTester.test(runningProfile.rawUri)
-                .onSuccess { latency ->
-                    mutableState.update {
-                        it.copy(
-                            connectionTestRunning = false,
-                            connectionTestLatencyMs = latency,
-                            connectionTestError = null,
-                            nodeLatenciesMs = it.nodeLatenciesMs + (runningProfile.id to latency),
-                            nodeLatencyFailedIds = it.nodeLatencyFailedIds - runningProfile.id,
-                        )
-                    }
-                }
-                .onFailure { error ->
-                    mutableState.update {
-                        it.copy(
-                            connectionTestRunning = false,
-                            connectionTestLatencyMs = null,
-                            connectionTestError = error.message ?: "connection test failed",
-                        )
-                    }
-                }
+            try {
+                withContext(kotlinx.coroutines.Dispatchers.IO) { settingsRepository.save(settings) }
+                mutableState.update { old -> val results=old.pingResults.filterValues { it.settings==settings.ping }; old.copy(settings=settings,pingResults=results,nodeLatenciesMs=results.mapNotNull { (id,r)->r.latencyMs?.let {id to it} }.toMap(),nodeLatencyFailedIds=results.filterValues {!it.success && it.error?.startsWith("HEAD unsupported")!=true}.keys,message=if(old.vpnConnected) "Saved · DNS/routing/log changes apply after reconnect" else "Settings saved") }
+            } catch(e: Exception) { mutableState.update { it.copy(message=e.message ?: "Could not save settings") } }
         }
     }
+    fun clearDiagnostics() { if(state.value.testingNodeIds.isNotEmpty()) return; settingsRepository.saveResults(emptyMap()); mutableState.update { it.copy(pingResults=emptyMap(),nodeLatenciesMs=emptyMap(),nodeLatencyFailedIds=emptySet()) } }
+    fun refreshAllSubscriptions() { viewModelScope.launch {
+        for(group in state.value.subscriptions.toList()) { if(state.value.loadingSubscriptionId!=null) break; refreshSubscription(group.id); state.first { it.loadingSubscriptionId==null } }
+    } }
 
     fun switchProfile(id: String) {
+        if(state.value.testingNodeIds.isNotEmpty()) return
         val group = state.value.selectedSubscription ?: return
         val profile = group.profiles.firstOrNull { it.id == id } ?: return
         selectProfile(id)
@@ -653,6 +541,7 @@ class MainViewModel(
     fun redactedSubscriptionUrl(url: String): String = SecretRedactor.url(url)
 
     private fun startVpn(profile: ProxyNode) {
+        if(state.value.testingNodeIds.isNotEmpty()) { mutableState.update { it.copy(message="Wait for diagnostics to finish") }; return }
         val application = getApplication<Application>()
         val intent = Intent(application, DotVpnService::class.java)
             .setAction(DotVpnService.ACTION_CONNECT)

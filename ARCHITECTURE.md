@@ -60,3 +60,9 @@ Android also exposes waiting-for-network and reconnecting states; configuration 
 - Read connection state from the runtime, not an optimistic frontend boolean.
 
 See [VPN engine](docs/VPN_ENGINE.md), [Desktop](docs/DESKTOP.md) and [Hysteria2 validation](docs/hysteria2-manual-test.md).
+
+## 0.5.0 candidate additions
+
+Android `core/diagnostics` owns typed diagnostic settings/results, an asynchronous PingEngine and a private-process PingService. One core per service batch avoids libXray global-state conflicts; MainViewModel delegates operation/resource ownership to NodeDiagnostics. `core/settings/SettingsRepository` stores validated new preferences and results without replacing the subscription/theme stores. `RuntimeSettings` applies DNS/LAN/log controls at the next connection. UI categories live in AdvancedSettingsPanel.
+
+Windows `settings.rs` and `diagnostics.rs` define the same methods/defaults and verified-proxy policy. `url_test.rs` owns temporary-process/HTTP resources; Store persists versioned preferences and diagnostic metadata transactionally. A bounded scheduler uses the same connection-operation gate as commands/tray. React AdvancedSettings.tsx is independent of the main view. See [full semantics and limitations](docs/DIAGNOSTICS.md).

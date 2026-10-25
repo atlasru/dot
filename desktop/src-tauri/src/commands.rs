@@ -17,6 +17,7 @@ use crate::{
 
 pub struct SharedState {
     pub store: Arc<Store>,
+    pub ping_cancel: Arc<AtomicBool>,
     pub operation: Arc<AtomicBool>,
     pub refresh: Arc<crate::refresh::RefreshService>,
     pub engine: Arc<Mutex<VpnEngine>>,
@@ -39,6 +40,8 @@ pub fn traffic_status(state: State<'_, SharedState>) -> TrafficSnapshot { read_t
 
 #[tauri::command]
 pub fn select_node(group_id: String, node_id: String, state: State<'_, SharedState>) -> Result<SelectionView, String> {
+    let _operation=crate::operation::Operation::acquire(&state.operation)?;
+    let mut settings=state.store.preferences().advanced; settings.auto_node=false; state.store.set_advanced(settings)?;
     state.store.set_selection(&group_id, &node_id)
 }
 
@@ -46,6 +49,7 @@ pub fn select_node(group_id: String, node_id: String, state: State<'_, SharedSta
 pub async fn switch_node(group_id: String, node_id: String, state: State<'_, SharedState>) -> Result<EngineSnapshot, String> {
     let _operation = crate::operation::Operation::acquire(&state.operation)?;
     let node = state.store.node(&group_id, &node_id)?;
+    let mut settings=state.store.preferences().advanced; settings.auto_node=false; state.store.set_advanced(settings)?;
     state.store.set_selection(&group_id, &node_id)?;
 
     let current = read_snapshot(&state.snapshot);
@@ -110,7 +114,7 @@ pub async fn add_subscription(name: String, url: String, hwid: Option<String>, s
         if store.groups().iter().any(|g| store.group_url(&g.id).ok().as_deref() == Some(&url)) {
             return Err("this subscription URL already exists".into());
         }
-        let nodes = SubscriptionClient::new()?.fetch(&url, &hwid)?;
+        let nodes = SubscriptionClient::with_settings(&store.preferences().advanced)?.fetch(&url, &hwid)?;
         let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, format!("{url}:{}", now_ms()).as_bytes()).to_string();
         store.upsert_group(SubscriptionGroup { id, name, url, updated_at_ms: now_ms(), nodes, hwid: Some(hwid) })
     }).await.map_err(|_| "subscription task failed".to_string())?
@@ -157,7 +161,7 @@ pub async fn edit_subscription(group_id: String, name: String, url: String, hwid
         let (old_url, old_hwid) = store.subscription_source(&group_id)?;
         let hwid = hwid.unwrap_or(old_hwid);
         if old_url != url && !url.is_empty() {
-            let nodes = SubscriptionClient::new()?.fetch(&url, &hwid)?;
+            let nodes = SubscriptionClient::with_settings(&store.preferences().advanced)?.fetch(&url, &hwid)?;
             let result = store.apply_source_refresh(&group_id, nodes, now_ms(), name, url, hwid);
             service.record(&store, &group_id, &result);
             result?;
@@ -212,6 +216,7 @@ fn validate_url(raw: &str) -> Result<String, String> {
 #[tauri::command]
 pub async fn connect(group_id: String, node_id: String, state: State<'_, SharedState>) -> Result<EngineSnapshot, String> {
     let _operation = crate::operation::Operation::acquire(&state.operation)?;
+    let node_id = if state.store.preferences().advanced.auto_node { state.store.auto_selection(&group_id)?.node_id.ok_or("AUTO found no node")? } else { node_id };
     let node = state.store.node(&group_id, &node_id)?;
     state.store.set_selection(&group_id, &node_id)?;
     let current = read_snapshot(&state.snapshot);
@@ -232,108 +237,71 @@ pub fn vpn_status(state: State<'_, SharedState>) -> EngineSnapshot {
 }
 
 #[tauri::command]
+pub fn set_advanced(settings: crate::settings::AdvancedSettings, state: State<'_, SharedState>) -> Result<AppPreferences,String> {
+    let _operation=crate::operation::Operation::acquire(&state.operation)?;
+    state.store.set_advanced(settings)
+}
+#[tauri::command]
+pub fn clear_diagnostics(state: State<'_, SharedState>) -> Result<(),String> {
+    let _operation=crate::operation::Operation::acquire(&state.operation)?;
+    state.store.clear_diagnostics()
+}
+#[tauri::command]
+pub fn cancel_diagnostics(state: State<'_, SharedState>) { state.ping_cancel.store(true,Ordering::SeqCst); }
+#[tauri::command]
+pub fn auto_select(group_id:String, state:State<'_,SharedState>) -> Result<SelectionView,String> {
+    let _operation=crate::operation::Operation::acquire(&state.operation)?;
+    if read_snapshot(&state.snapshot).phase==EnginePhase::Connected { return Err("disconnect before AUTO selection".into()); }
+    let selected=state.store.auto_selection(&group_id)?;
+    let mut settings=state.store.preferences().advanced; settings.auto_node=true; state.store.set_advanced(settings)?;
+    Ok(selected)
+}
+#[tauri::command]
 pub async fn url_test(group_id: String, node_id: String, state: State<'_, SharedState>) -> Result<UrlTestResult, String> {
     let _operation = crate::operation::Operation::acquire(&state.operation)?;
-    let node = state.store.node(&group_id, &node_id)?;
-    let current = read_snapshot(&state.snapshot);
-    if matches!(current.phase, EnginePhase::Starting | EnginePhase::Stopping) {
-        return Err("wait for the VPN state change to finish before URL testing".into());
-    }
-
-    let active_tunnel = current.phase == EnginePhase::Connected && current.node_id.as_deref() == Some(node.id.as_str());
-    if current.phase == EnginePhase::Connected && !active_tunnel {
-        return Err("switch to this node before URL testing while VPN is connected".into());
-    }
-
-    let tested_node_id = node.id.clone();
-    let result = if active_tunnel {
-        tauri::async_runtime::spawn_blocking(url_test::test_active_connection)
-            .await
-            .map_err(|e| format!("active URL test task failed: {e}"))?
-    } else {
-        let runtime_source = state.runtime_source.clone();
-        let work_dir = state.url_test_dir.clone();
-        tauri::async_runtime::spawn_blocking(move || url_test::test_node(&runtime_source, &work_dir, &node))
-            .await
-            .map_err(|e| format!("node URL test task failed: {e}"))?
-    };
-
-    match result {
-        Ok(latency_ms) => {
-            state.store.record_latency(&tested_node_id, Some(latency_ms), false, now_ms())?;
-            Ok(UrlTestResult { node_id: tested_node_id, latency_ms, active_tunnel })
-        }
-        Err(error) => {
-            state.store.record_latency(&tested_node_id, None, true, now_ms())?;
-            Err(error)
-        }
-    }
+    let node=state.store.node(&group_id,&node_id)?;
+    let current=read_snapshot(&state.snapshot);
+    let active=current.phase==EnginePhase::Connected && current.node_id.as_deref()==Some(node.id.as_str());
+    if !matches!(current.phase,EnginePhase::Offline|EnginePhase::Error) && !active { return Err("disconnect before diagnosing another node".into()); }
+    let settings=state.store.preferences().advanced.ping;
+    if active && !settings.method.proxy() { return Err("disconnect for direct TCP/ICMP diagnostics".into()); }
+    state.ping_cancel.store(false,Ordering::SeqCst);
+    let cancel=Arc::clone(&state.ping_cancel); let runtime=state.runtime_source.clone(); let dir=state.url_test_dir.clone(); let id=node.id.clone();
+    let result=tauri::async_runtime::spawn_blocking(move || if active { url_test::test_active_connection(&settings,&cancel) } else { url_test::test_node(&runtime,&dir,&node,&settings,&cancel) }).await.map_err(|_|"diagnostics worker failed")?;
+    if state.ping_cancel.load(Ordering::SeqCst) { return Err("diagnostics cancelled".into()); }
+    state.store.record_diagnostic(&id,result.clone())?;
+    match result.latency_ms { Some(latency_ms)=>Ok(UrlTestResult { node_id:id,latency_ms,active_tunnel:active }), None=>Err(result.error.unwrap_or("diagnostics failed".into())) }
 }
-
 #[tauri::command]
-pub async fn url_test_group(group_id: String, state: State<'_, SharedState>) -> Result<GroupUrlTestResult, String> {
-    let _operation = crate::operation::Operation::acquire(&state.operation)?;
-    let current = read_snapshot(&state.snapshot);
-    if matches!(current.phase, EnginePhase::Starting | EnginePhase::Stopping) {
-        return Err("wait for the VPN state change to finish before testing the group".into());
-    }
-    if current.phase == EnginePhase::Connected {
-        return Err("disconnect before testing all nodes in a subscription".into());
-    }
-
-    let nodes = state.store.group_nodes(&group_id)?;
-    if nodes.is_empty() { return Err("subscription contains no nodes".into()); }
-    let runtime_source = state.runtime_source.clone();
-    let work_dir = state.url_test_dir.clone();
-
-    let outcomes = tauri::async_runtime::spawn_blocking(move || {
-        let mut outcomes = Vec::with_capacity(nodes.len());
-        for batch in nodes.chunks(6) {
-            let handles: Vec<_> = batch.iter().cloned().map(|node| {
-                let runtime_source = runtime_source.clone();
-                let work_dir = work_dir.clone();
-                std::thread::spawn(move || {
-                    let node_id = node.id.clone();
-                    let result = url_test::test_node(&runtime_source, &work_dir, &node);
-                    (node_id, result)
-                })
-            }).collect();
-            for handle in handles {
-                match handle.join() {
-                    Ok(outcome) => outcomes.push(outcome),
-                    Err(_) => outcomes.push((String::new(), Err("URL test worker panicked".into()))),
-                }
-            }
+pub async fn url_test_group(group_id:String, state:State<'_,SharedState>) -> Result<GroupUrlTestResult,String> {
+    let _operation=crate::operation::Operation::acquire(&state.operation)?;
+    if !matches!(read_snapshot(&state.snapshot).phase,EnginePhase::Offline|EnginePhase::Error) { return Err("disconnect before subscription diagnostics".into()); }
+    let nodes=state.store.group_nodes(&group_id)?;
+    let runtime=state.runtime_source.clone(); let dir=state.url_test_dir.clone();
+    let settings=state.store.preferences().advanced.ping;
+    state.ping_cancel.store(false,Ordering::SeqCst); let cancel=Arc::clone(&state.ping_cancel);
+    let outcomes=tauri::async_runtime::spawn_blocking(move || {
+        let mut outcomes=Vec::new();
+        for batch in nodes.chunks(settings.parallelism) {
+            if cancel.load(Ordering::SeqCst) { break; }
+            std::thread::scope(|scope| {
+                let handles:Vec<_>=batch.iter().map(|node| { let runtime=&runtime; let dir=&dir; let settings=&settings; let cancel=&cancel; scope.spawn(move || (node.id.clone(),url_test::test_node(runtime,dir,node,settings,cancel))) }).collect();
+                for handle in handles { if let Ok(result)=handle.join() { outcomes.push(result); } }
+            });
         }
         outcomes
-    }).await.map_err(|e| format!("group URL test task failed: {e}"))?;
-
-    let mut results = Vec::new();
-    let mut failed_node_ids = Vec::new();
-    for (node_id, outcome) in outcomes {
-        if node_id.is_empty() { continue; }
-        match outcome {
-            Ok(latency_ms) => {
-                state.store.record_latency(&node_id, Some(latency_ms), false, now_ms())?;
-                results.push(UrlTestResult { node_id, latency_ms, active_tunnel: false });
-            }
-            Err(_) => {
-                state.store.record_latency(&node_id, None, true, now_ms())?;
-                failed_node_ids.push(node_id);
-            }
-        }
+    }).await.map_err(|_|"diagnostics worker failed")?;
+    if state.ping_cancel.load(Ordering::SeqCst) { return Err("diagnostics cancelled".into()); }
+    let mut results=Vec::new(); let mut failed_node_ids=Vec::new();
+    for (id,result) in outcomes {
+        state.store.record_diagnostic(&id,result.clone())?;
+        if let Some(latency_ms)=result.latency_ms { results.push(UrlTestResult {node_id:id,latency_ms,active_tunnel:false}); } else { failed_node_ids.push(id); }
     }
-
-    Ok(GroupUrlTestResult {
-        group_id,
-        succeeded: results.len(),
-        failed: failed_node_ids.len(),
-        results,
-        failed_node_ids,
-    })
+    Ok(GroupUrlTestResult {group_id,succeeded:results.len(),failed:failed_node_ids.len(),results,failed_node_ids})
 }
 
 pub fn request_disconnect(state: &SharedState) -> EngineSnapshot {
+    state.ping_cancel.store(true, Ordering::SeqCst);
     let current = read_snapshot(&state.snapshot);
     if current.phase == EnginePhase::Offline { return current; }
     state.cancel.store(true, Ordering::SeqCst);
@@ -346,6 +314,7 @@ pub fn request_disconnect(state: &SharedState) -> EngineSnapshot {
 
 pub fn start_selected_background(state: &SharedState) -> Result<(), String> {
     let operation = crate::operation::Operation::acquire(&state.operation)?;
+    if state.store.preferences().advanced.auto_node { let selected=state.store.selection(); state.store.auto_selection(selected.group_id.as_deref().ok_or("select a subscription first")?)?; }
     let node = state.store.selected_node()?;
     let current = read_snapshot(&state.snapshot);
     if matches!(current.phase, EnginePhase::Starting | EnginePhase::Connected | EnginePhase::Stopping) { return Ok(()); }

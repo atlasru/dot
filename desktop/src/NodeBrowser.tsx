@@ -116,9 +116,9 @@ export default function NodeBrowser({ groups, group, activeGroup, activeNode, vp
           <button className="favorite-button" disabled={saving} aria-label={`${node.favorite ? "Remove" : "Add"} ${node.name} ${node.favorite ? "from" : "to"} favorites`} aria-pressed={node.favorite} onClick={() => favorite(node)}>{node.favorite ? "★" : "☆"}</button>
           <button className="node-main" disabled={busy || groupTesting || !!testingNodeId || vpn.phase === "stopping"} onClick={() => group && onChooseNode(group.id, node.id)}>
             <span className="node-copy"><span className="node-title"><strong>{node.name}</strong>{running && <em>LIVE</em>}</span>
-            <small>{node.protocol} · {node.security} · {node.transport} · {node.host}:{node.port}{map && geo[node.id] ? ` · ${geo[node.id].country}${geo[node.id].source === "name_fallback" ? " (approx.)" : ""}` : ""}</small></span>
+            <small className="node-transport">{node.protocol} · {node.security} · {node.transport} · {node.host}:{node.port}{map && geo[node.id] ? ` · ${geo[node.id].country}${geo[node.id].source === "name_fallback" ? " (approx.)" : ""}` : ""}</small></span>
           </button>
-          <button className={`node-test ${node.latency_failed ? "failed" : ""}`} aria-label={`Test ${node.name}`} disabled={busy || !!testingNodeId || groupTesting || ["starting", "stopping"].includes(vpn.phase) || (vpn.phase === "connected" && !running)} onClick={() => group && onTestNode(group, node)}>
+          <button title={node.diagnostic ? `${node.diagnostic.method} · ${new Date(node.diagnostic.tested_at_ms).toLocaleString()} · ${node.diagnostic.samples.length}/${node.diagnostic.settings.attempts} attempts${node.diagnostic.error ? ` · ${node.diagnostic.error}` : ""}` : "No diagnostics for this method"} className={`node-test ${node.latency_failed ? "failed" : ""}`} aria-label={`Test ${node.name}`} disabled={busy || !!testingNodeId || groupTesting || ["starting", "stopping"].includes(vpn.phase) || (vpn.phase === "connected" && !running)} onClick={() => group && onTestNode(group, node)}>
             {testing ? "…" : node.latency_failed ? "FAIL" : node.latency_ms !== null ? `${node.latency_ms} ms` : "TEST"}
           </button>
         </div>;

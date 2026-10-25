@@ -1,3 +1,5 @@
+> Source is being prepared for **0.5.0**. The published stable release remains 0.4.0 until owner approval. See [0.5.0 candidate notes](docs/releases/0.5.0.md) and [advanced settings / diagnostic methods](docs/DIAGNOSTICS.md). Default diagnostics: proxied HTTPS GET, 5s × 3, median, concurrency 4; startup testing off.
+
 # dot.
 
 Minimal VLESS and Hysteria2 client for Android and Windows with an AMOLED-first, Nothing-inspired interface.

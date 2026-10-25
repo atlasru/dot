@@ -29,3 +29,6 @@ desktop/src-tauri/target/
 desktop/src-tauri/runtime/
 desktop/src-tauri/icons/
 desktop/portable/
+
+# Local verification tools
+.local/

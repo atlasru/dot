@@ -48,9 +48,10 @@ class SubscriptionClient(
             .build()
     }
 
-    suspend fun fetch(subscription: Subscription): Result<SubscriptionDecoder.DecodeResult> = withContext(Dispatchers.IO) {
+    suspend fun fetch(subscription: Subscription, timeoutSeconds: Int = 20, userAgent: String = ""): Result<SubscriptionDecoder.DecodeResult> = withContext(Dispatchers.IO) {
         runCatching {
-            http.newCall(request(subscription)).execute().use { response ->
+            val request=request(subscription).newBuilder().apply { if(userAgent.isNotEmpty()) header("User-Agent",userAgent) }.build()
+            http.newBuilder().callTimeout(timeoutSeconds.toLong(), TimeUnit.SECONDS).build().newCall(request).execute().use { response ->
                 if (!response.isSuccessful) throw SubscriptionHttpException(response.code)
                 val body = response.body.string()
                 SubscriptionDecoder.decode(body)

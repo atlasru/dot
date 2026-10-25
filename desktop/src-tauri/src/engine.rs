@@ -17,6 +17,7 @@ use crate::{
 };
 
 pub struct VpnEngine {
+    store: Arc<crate::storage::Store>,
     runtime_source: PathBuf,
     work_dir: PathBuf,
     child: Option<Child>,
@@ -28,6 +29,7 @@ pub struct VpnEngine {
 
 impl VpnEngine {
     pub fn new(
+        store: Arc<crate::storage::Store>,
         runtime_source: PathBuf,
         work_dir: PathBuf,
         shared: Arc<RwLock<EngineSnapshot>>,
@@ -36,7 +38,7 @@ impl VpnEngine {
         fs::create_dir_all(&work_dir).map_err(|e| format!("failed to create VPN work directory: {e}"))?;
         let journal = SessionJournal::new(&work_dir)?;
         let _ = journal.clear_stale()?;
-        let engine = Self { runtime_source, work_dir, child: None, job: None, shared, cancel, journal };
+        let engine = Self { store, runtime_source, work_dir, child: None, job: None, shared, cancel, journal };
         engine.publish(EngineSnapshot::default());
         Ok(engine)
     }
@@ -47,7 +49,8 @@ impl VpnEngine {
         self.set_starting(node, "validating Xray configuration");
 
         let (xray, _) = self.prepare_runtime().map_err(|e| self.publish_error(node, e))?;
-        let config = build_xray_config(node).map_err(|e| self.publish_error(node, e))?;
+        let mut config = build_xray_config(node).map_err(|e| self.publish_error(node, e))?;
+        crate::config::apply_settings(&mut config, &self.store.preferences().advanced);
         let config_path = self.work_dir.join("config.json");
         let bytes = serde_json::to_vec_pretty(&config).map_err(|e| e.to_string())?;
         fs::write(&config_path, bytes)

@@ -9,6 +9,8 @@ import dev.dotclient.android.vpn.VpnConnectionState
 import dev.dotclient.android.vpn.VpnFailureCategory
 
 data class DotUiState(
+    val settings: dev.dotclient.android.core.settings.AppSettings = dev.dotclient.android.core.settings.AppSettings(),
+    val pingResults: Map<String,dev.dotclient.android.core.diagnostics.PingResult> = emptyMap(),
     val subscriptions: List<Subscription> = emptyList(),
     val selectedSubscriptionId: String? = null,
     val loadingSubscriptionId: String? = null,

@@ -24,6 +24,7 @@ data class ProxyNode(
 ) {
     enum class Security { NONE, TLS, REALITY }
     enum class Transport { TCP, WS, GRPC, XHTTP, HTTPUPGRADE, UNKNOWN, UDP }
+    val effectiveTransport: Transport get() = if (config is ProxyConfig.Hysteria2) Transport.UDP else transport
     val protocol: String get() = when (config) {
         ProxyConfig.Vless -> "VLESS"
         is ProxyConfig.Hysteria2 -> "HY2"

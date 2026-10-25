@@ -31,6 +31,7 @@ class DotVpnService : VpnService() {
     private val worker = Executors.newSingleThreadExecutor()
     private val trafficWorker = Executors.newSingleThreadScheduledExecutor()
     private val reconnectWorker = Executors.newSingleThreadScheduledExecutor()
+    private val settingsRepository by lazy { dev.dotclient.android.core.settings.SettingsRepository(this) }
     private val splitTunnelStore by lazy { SplitTunnelStore(this) }
     private val connectivityManager by lazy { getSystemService(ConnectivityManager::class.java) }
     private var trafficFuture: ScheduledFuture<*>? = null
@@ -47,7 +48,7 @@ class DotVpnService : VpnService() {
         override fun onAvailable(network: Network) {
             networkAvailable = true
             val rawUri = desiredRawUri ?: return
-            if (userRequestedDisconnect) return
+            if (userRequestedDisconnect || !settingsRepository.load().reconnectOnNetwork) return
             val state = VpnRuntime.state.value.state
             if (state == VpnConnectionState.WAITING_FOR_NETWORK || state == VpnConnectionState.ERROR) {
                 reconnectFuture?.cancel(false)
@@ -59,6 +60,7 @@ class DotVpnService : VpnService() {
         override fun onLost(network: Network) {
             networkAvailable = connectivityManager.activeNetwork != null
             if (networkAvailable || desiredRawUri == null || userRequestedDisconnect) return
+            if (!settingsRepository.load().reconnectOnNetwork) { disconnect(); return }
             worker.execute {
                 synchronized(this@DotVpnService) {
                     if (userRequestedDisconnect || desiredRawUri == null) return@synchronized
@@ -157,13 +159,14 @@ class DotVpnService : VpnService() {
             }
 
             try {
+                val settings = settingsRepository.load()
                 val splitTunnelConfig = splitTunnelStore.load()
                 val vpnInterface = Builder()
                     .setSession("dot.")
                     .setMtu(MTU)
                     .addAddress("10.77.0.2", 30)
                     .addRoute("0.0.0.0", 0)
-                    .addDnsServer("1.1.1.1")
+                    .addDnsServer(settings.dns)
                     .setBlocking(true)
                     .applySplitTunnel(splitTunnelConfig)
                     .establish()
@@ -177,9 +180,9 @@ class DotVpnService : VpnService() {
 
                 LibXray.registerDialerController(controller)
                 LibXray.registerListenerController(controller)
-                LibXray.setDNS(controller, "1.1.1.1:53")
+                LibXray.setDNS(controller, if (settings.dns.contains(':')) "[${settings.dns}]:53" else "${settings.dns}:53")
 
-                val config = buildXrayConfig(rawUri, vpnInterface.fd)
+                val config = RuntimeSettings.apply(buildXrayConfig(rawUri, vpnInterface.fd), settings)
                 invokeRunXrayFromJson(config)
 
                 reconnectAttempt = 0
@@ -200,7 +203,7 @@ class DotVpnService : VpnService() {
                         failure,
                     )
                     notifyStatus("waiting for network", nodeName)
-                } else if (failure.category == VpnFailureCategory.CONFIG) {
+                } else if (failure.category == VpnFailureCategory.CONFIG || !settingsRepository.load().reconnect) {
                     publishState(VpnConnectionState.ERROR, nodeName, failure.userMessage, failure)
                     notifyStatus("error", nodeName)
                     stopForeground(STOP_FOREGROUND_REMOVE)
@@ -215,7 +218,9 @@ class DotVpnService : VpnService() {
     private fun scheduleReconnect(failure: VpnFailure) {
         if (userRequestedDisconnect || desiredRawUri == null) return
         reconnectAttempt += 1
-        val delaySeconds = RECONNECT_DELAYS_SECONDS[min(reconnectAttempt - 1, RECONNECT_DELAYS_SECONDS.lastIndex)]
+        val settings = settingsRepository.load()
+        if (!settings.reconnect) return
+        val delaySeconds = (RECONNECT_DELAYS_SECONDS[min(reconnectAttempt - 1, RECONNECT_DELAYS_SECONDS.lastIndex)] * settings.retrySeconds).coerceAtMost(settings.maxRetrySeconds.toLong())
         val nodeName = desiredNodeName
         publishState(
             VpnConnectionState.RECONNECTING,
@@ -375,7 +380,7 @@ class DotVpnService : VpnService() {
         failure: VpnFailure? = null,
         reconnectAttempt: Int = 0,
     ) {
-        VpnRuntime.update(state, nodeName, message, failure, reconnectAttempt)
+        VpnRuntime.update(state=state, nodeName=nodeName, message=message, failure=failure, reconnectAttempt=reconnectAttempt, nodeId=desiredRawUri?.let { uri -> (if(uri.startsWith("vless://",true)) dev.dotclient.android.core.parser.VlessUriParser.parse(uri) else Hysteria2UriParser.parse(uri)).getOrNull()?.id })
         runCatching { DotQuickTileService.requestRefresh(this) }
     }
 
