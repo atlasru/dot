@@ -25,9 +25,8 @@ data class AppSettings(
         require(autoMaxLatencyMs in 0..60_000 && autoExcluded.size <= 10000)
         require(logLevel in listOf("none","error","warning"))
         // Numeric DNS only: no accidental hostname lookup on the UI thread.
-        val ipv4=dns.split('.').let { parts -> parts.size==4 && parts.all { part -> part.length in 1..3 && part.all { it in '0'..'9' } && part.toIntOrNull() in 0..255 } }
-        val ipv6=dns.contains(':') && dns.length<=45 && dns.matches(Regex("[0-9a-fA-F:.]+")) && runCatching { java.net.InetAddress.getByName(dns) }.isSuccess
-        require(ipv4 || ipv6) { "DNS must be an IPv4 or IPv6 address" }
+        val ipv4=dns.split('.').let { parts -> parts.size==4 && parts.all { part -> part.length in 1..3 && part.all { it in '0'..'9' } && part.toIntOrNull() in 0..255 && part==part.toIntOrNull()?.toString() } }
+        require(ipv4) { "Enter an IPv4 DNS resolver; IPv6 DNS requires IPv6 tunnel routing support" }
         require(retrySeconds in listOf(1,2,5,10) && maxRetrySeconds in listOf(10,30,60,120) && retrySeconds <= maxRetrySeconds)
         require(refreshHours in listOf(0,1,6,12,24) && subscriptionTimeoutSeconds in listOf(5,10,20,30,60))
         require(subscriptionUserAgent.length <= 256 && subscriptionUserAgent.all { it in ' '..'~' }) { "User-Agent must be printable ASCII" }

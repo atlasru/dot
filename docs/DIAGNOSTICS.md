@@ -40,13 +40,15 @@ Both platforms preserve existing themes, subscription identities, node sorting a
 | General | Connect on app launch after permission/setup | Windows close to tray; Android requires a foreground VPN notification |
 | Connection | Existing engine lifecycle/connectivity behavior retained | Android transient reconnect toggle, retry base/cap and reconnect after network recovery |
 | Ping & Diagnostics | Four methods, URL, timeout, attempts, aggregation, concurrency, startup/repeat, selected/subscription scope, cancel, reset | Android ICMP depends on executable/permissions; Windows on ICMP API/PowerShell |
-| DNS & Routing | Numeric custom DNS resolver, LAN/private-address bypass | Existing Android include/exclude app split tunneling |
+| DNS & Routing | Numeric custom DNS resolver, LAN/private-address bypass | Android DNS is IPv4-only; Windows accepts IPv4/IPv6 DNS. Existing Android include/exclude app split tunneling |
 | Subscriptions | Startup/interval refresh, timeout, User-Agent, manual refresh all | Android schedules while its ViewModel is alive; Windows while the app is running, including tray |
 | Nodes & AUTO | Lowest verified latency, failures excluded, node exclusions, threshold, manual priority | No automatic network handoff selection |
 | Appearance | Existing themes, compact nodes, latency and protocol/transport visibility, saved sorting | Existing Android launcher icons |
 | Advanced | Core log level (none/error/warning), redacted diagnostic metric export, advanced settings JSON import/export/reset, cache reset | Export uses clipboard on Android and download/file selection on Windows |
 
 OS boot startup, arbitrary Xray JSON overrides, DoH/DoT presets, custom domain/IP exclusion editors, IPv4/IPv6 preference controls, Windows app split tunneling, Windows network-aware reconnection, kill-switch semantics and optional connection-timeout overrides are **not implemented or exposed as working controls**. Existing TUN/IPv6 behavior is retained. These require separate engine/platform validation. Advanced JSON export covers the new settings; existing theme, tray, launcher, group sorting and subscription-identity preferences continue in their original stores. It never exports subscription credentials. Raw core logs are not exported: the diagnostic report intentionally omits node URIs, addresses, URLs, User-Agent values and error text to avoid secrets.
+
+Android intentionally rejects IPv6 DNS while its tunnel only installs IPv4 routes. Adding a DNS server implicitly allows its IP family in VpnService; without matching IPv6 routes, that could permit traffic through the underlying network. See [Android Builder address-family behavior](https://developer.android.com/reference/android/net/VpnService.Builder#allowFamily(int)). IPv6 server endpoints and ICMP reachability checks are separate from the tunnel's DNS resolver setting.
 
 ## Upgrade and validation
 

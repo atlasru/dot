@@ -58,9 +58,9 @@ internal fun AdvancedSettingsPanel(state: DotUiState, viewModel: MainViewModel) 
         state.selectedProfileId?.let { id -> state.pingResults[id]?.let { r -> Text("${r.method.label} · ${if(r.success) "${r.latencyMs} ms" else r.error} · ${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(r.testedAtMs))}\n${r.samples.size}/${r.settings.attempts} successful attempts",color=Color.Gray,style=MaterialTheme.typography.labelMedium) } }
     }
     category("DNS & ROUTING") {
-        ActionSetting("DNS server",settings.dns) { edit("DNS",settings.dns) }
+        ActionSetting("IPv4 DNS server",settings.dns) { edit("DNS",settings.dns) }
         ToggleSetting("Bypass LAN",settings.bypassLan,"Route private addresses directly; applies after reconnect") { update(settings.copy(bypassLan=it)) }
-        Text("DNS accepts a numeric IPv4/IPv6 resolver. App split tunneling is available below. Connection changes apply after reconnect.",color=Color.Gray,style=MaterialTheme.typography.labelMedium)
+        Text("DNS accepts a numeric IPv4 resolver. IPv6 DNS is unavailable in this version. App split tunneling is available below. Connection changes apply after reconnect.",color=Color.Gray,style=MaterialTheme.typography.labelMedium)
     }
     category("SUBSCRIPTIONS") {
         ToggleSetting("Refresh on launch",settings.refreshOnStart,"Failed refresh retains previous nodes") { update(settings.copy(refreshOnStart=it)) }
