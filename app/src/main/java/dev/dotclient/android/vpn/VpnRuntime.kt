@@ -17,6 +17,7 @@ enum class VpnConnectionState {
 data class VpnRuntimeSnapshot(
     val state: VpnConnectionState = VpnConnectionState.DISCONNECTED,
     val nodeId: String? = null,
+    val appInTunnel: Boolean = false,
     val nodeName: String? = null,
     val message: String? = null,
     val failureCategory: VpnFailureCategory? = null,
@@ -36,6 +37,7 @@ object VpnRuntime {
         state: VpnConnectionState,
         nodeName: String? = mutableState.value.nodeName,
         nodeId: String? = mutableState.value.nodeId,
+        appInTunnel: Boolean = mutableState.value.appInTunnel,
         message: String? = null,
         failure: VpnFailure? = null,
         reconnectAttempt: Int = if (state == VpnConnectionState.RECONNECTING) mutableState.value.reconnectAttempt else 0,
@@ -48,6 +50,7 @@ object VpnRuntime {
             state = state,
             nodeName = nodeName,
             nodeId = nodeId,
+            appInTunnel = appInTunnel,
             message = message,
             failureCategory = failure?.category,
             failureDetail = failure?.detail,

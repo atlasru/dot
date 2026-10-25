@@ -976,7 +976,7 @@ private fun AboutValue(name: String, value: String) {
 @Composable
 private fun AboutLink(name: String, value: String, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = if(compact) 5.dp else 11.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 11.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1195,7 +1195,7 @@ private fun ThemePicker(selected: DotThemeMode, onSelect: (DotThemeMode) -> Unit
                     .border(1.dp, if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
                     .background(if (active) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface, RoundedCornerShape(4.dp))
                     .clickable { onSelect(theme) }
-                    .padding(vertical = if(compact) 5.dp else 11.dp),
+                    .padding(vertical = 11.dp),
                 color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelMedium,
                 textAlign = TextAlign.Center,
@@ -1224,7 +1224,7 @@ private fun LauncherIconPicker() {
                             LauncherIconManager.apply(context, icon)
                             selected = icon
                         }
-                        .padding(vertical = if(compact) 5.dp else 11.dp),
+                        .padding(vertical = 11.dp),
                     color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelMedium,
                     textAlign = TextAlign.Center,

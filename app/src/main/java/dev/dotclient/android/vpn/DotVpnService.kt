@@ -38,6 +38,7 @@ class DotVpnService : VpnService() {
     private var reconnectFuture: ScheduledFuture<*>? = null
     private var tun: ParcelFileDescriptor? = null
     private var runningNodeName: String? = null
+    private var appInTunnel = false
     @Volatile private var desiredRawUri: String? = null
     @Volatile private var desiredNodeName: String? = null
     @Volatile private var userRequestedDisconnect = false
@@ -161,6 +162,11 @@ class DotVpnService : VpnService() {
             try {
                 val settings = settingsRepository.load()
                 val splitTunnelConfig = splitTunnelStore.load()
+                appInTunnel = when(splitTunnelConfig.mode) {
+                    dev.dotclient.android.core.splittunnel.SplitTunnelMode.ALL_APPS -> true
+                    dev.dotclient.android.core.splittunnel.SplitTunnelMode.EXCLUDE_SELECTED -> packageName !in splitTunnelConfig.normalizedPackages
+                    dev.dotclient.android.core.splittunnel.SplitTunnelMode.INCLUDE_ONLY_SELECTED -> packageName in splitTunnelConfig.normalizedPackages
+                }
                 val vpnInterface = Builder()
                     .setSession("dot.")
                     .setMtu(MTU)
@@ -380,7 +386,7 @@ class DotVpnService : VpnService() {
         failure: VpnFailure? = null,
         reconnectAttempt: Int = 0,
     ) {
-        VpnRuntime.update(state=state, nodeName=nodeName, message=message, failure=failure, reconnectAttempt=reconnectAttempt, nodeId=desiredRawUri?.let { uri -> (if(uri.startsWith("vless://",true)) dev.dotclient.android.core.parser.VlessUriParser.parse(uri) else Hysteria2UriParser.parse(uri)).getOrNull()?.id })
+        VpnRuntime.update(state=state, nodeName=nodeName, message=message, failure=failure, reconnectAttempt=reconnectAttempt, appInTunnel=appInTunnel, nodeId=desiredRawUri?.let { uri -> (if(uri.startsWith("vless://",true)) dev.dotclient.android.core.parser.VlessUriParser.parse(uri) else Hysteria2UriParser.parse(uri)).getOrNull()?.id })
         runCatching { DotQuickTileService.requestRefresh(this) }
     }
 

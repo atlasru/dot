@@ -4,8 +4,6 @@ import android.content.Context
 import dev.dotclient.android.core.diagnostics.PingEngine
 import dev.dotclient.android.core.model.ProxyNode
 import dev.dotclient.android.core.settings.SettingsRepository
-import dev.dotclient.android.core.splittunnel.SplitTunnelStore
-import dev.dotclient.android.core.splittunnel.SplitTunnelMode
 import dev.dotclient.android.vpn.VpnRuntime
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,8 +11,6 @@ import kotlinx.coroutines.flow.update
 
 internal class NodeDiagnostics(context: Context, private val state: MutableStateFlow<DotUiState>, private val repository: SettingsRepository) {
     private val engine=PingEngine(context)
-    private val split=SplitTunnelStore(context)
-    private val packageName=context.packageName
     private var job: Job?=null
     fun cancel() { job?.cancel() }
     suspend fun run(nodes: List<ProxyNode>, connection: Boolean = false) {
@@ -22,14 +18,10 @@ internal class NodeDiagnostics(context: Context, private val state: MutableState
         val current=state.value
         val active=current.vpnConnected
         val settings=current.settings.ping
-        if(current.loading || current.vpnBusy || (active && (nodes.size!=1 || nodes.single().id!=VpnRuntime.state.value.nodeId || !settings.method.proxy()))) {
+        if(current.loading || current.vpnBusy || (active && (nodes.size!=1 || nodes.single().id!=VpnRuntime.state.value.nodeId || !settings.method.proxy))) {
             state.update { it.copy(message="Disconnect before diagnosing other nodes or using TCP/ICMP") }; return
         }
-        if(active) {
-            val policy=split.load()
-            val included=when(policy.mode) { SplitTunnelMode.ALL_APPS->true; SplitTunnelMode.EXCLUDE_SELECTED->packageName !in policy.packages; SplitTunnelMode.INCLUDE_ONLY_SELECTED->packageName in policy.packages }
-            if(!included) { state.update { it.copy(message="dot is outside the active split tunnel; disconnect for reliable diagnostics") }; return }
-        }
+        if(active && !VpnRuntime.state.value.appInTunnel) { state.update { it.copy(message="dot is outside the active split tunnel; disconnect for reliable diagnostics") }; return }
         val ids=nodes.map {it.id}.toSet()
         job=currentCoroutineContext()[Job]
         state.update { it.copy(testingNodeIds=ids,connectionTestRunning=connection,message=null) }

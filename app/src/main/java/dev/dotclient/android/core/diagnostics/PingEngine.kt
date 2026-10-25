@@ -19,7 +19,7 @@ import kotlin.coroutines.resumeWithException
 class PingEngine(private val context: Context) {
     suspend fun test(nodes: List<ProxyNode>, settings: PingSettings, activeTunnel: Boolean = false): Map<String,PingResult> {
         settings.validate()
-        if (settings.method.proxy() && !activeTunnel) {
+        if (settings.method.proxy && !activeTunnel) {
             require(nodes.all { it.rawUri.length <= 16384 }) { "Node URI exceeds diagnostic limit" }
             val results=mutableMapOf<String,PingResult>()
             for(batch in nodes.chunked(settings.parallelism)) results.putAll(isolated(batch,settings))
@@ -27,7 +27,7 @@ class PingEngine(private val context: Context) {
         }
         val permits=Semaphore(settings.parallelism)
         return coroutineScope { nodes.map { node -> async { permits.withPermit { node.id to measure(settings,activeTunnel) {
-            if (settings.method.proxy()) httpAttempt(settings,null)
+            if (settings.method.proxy) httpAttempt(settings,null)
             else directAttempt(node,settings)
         } } } }.awaitAll().toMap() }
     }
@@ -53,11 +53,12 @@ class PingEngine(private val context: Context) {
                 runCatching { remote!!.send(message) }.onFailure { result.completeExceptionally(it) }
             }
             override fun onServiceDisconnected(name: ComponentName?) { result.completeExceptionally(IOException("Diagnostics process stopped")) }
+            override fun onBindingDied(name: ComponentName?) { result.completeExceptionally(IOException("Diagnostics binding stopped")) }
             override fun onNullBinding(name: ComponentName?) { result.completeExceptionally(IOException("Diagnostics unavailable")) }
         }
         val bound=context.bindService(Intent(context,PingService::class.java),connection,Context.BIND_AUTO_CREATE)
         check(bound) { "Diagnostics service unavailable" }
-        try { result.await() } finally {
+        try { withTimeout((settings.timeoutSeconds*settings.attempts+15)*1000L) { result.await() } } finally {
             runCatching { remote?.send(Message.obtain(null,4)) }
             context.unbindService(connection)
         }

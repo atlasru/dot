@@ -50,11 +50,11 @@ fn main() {
             let engine = Arc::new(Mutex::new(VpnEngine::new(Arc::clone(&store), runtime_source.clone(), data_dir.join("vpn"), Arc::clone(&snapshot), Arc::clone(&cancel)).map_err(std::io::Error::other)?));
             spawn_watchdog(&engine);
             traffic::spawn_traffic_sampler(&snapshot, &traffic);
-            diagnostics::spawn_scheduler(Arc::clone(&store), Arc::clone(&operation), Arc::clone(&snapshot), Arc::clone(&ping_cancel), Arc::clone(&exiting), runtime_source.clone(), url_test_dir.clone());
             app.manage(SharedState { ping_cancel, store, refresh, operation, engine, snapshot, traffic, cancel, exiting, runtime_source, url_test_dir });
             tray::setup(app)?;
             let state=app.state::<SharedState>();
             if state.store.preferences().advanced.auto_connect { if let Err(message)=commands::start_selected_background(&state) { if let Ok(mut snapshot)=state.snapshot.write() { snapshot.phase=model::EnginePhase::Error; snapshot.message=Some(message); } } }
+            diagnostics::spawn_scheduler(Arc::clone(&state.store), Arc::clone(&state.operation), Arc::clone(&state.snapshot), Arc::clone(&state.ping_cancel), Arc::clone(&state.exiting), state.runtime_source.clone(), state.url_test_dir.clone());
             Ok(())
         })
         .on_window_event(|window, event| {
