@@ -30,7 +30,9 @@ impl PingResult {
         self.success
             && self.method.proxy()
             && self.compatible(settings)
-            && now_ms().saturating_sub(self.tested_at_ms) < 900_000
+            && now_ms()
+                .checked_sub(self.tested_at_ms)
+                .is_some_and(|age| age < 900_000)
     }
 }
 pub fn now_ms() -> u64 {
@@ -266,6 +268,9 @@ mod tests {
         let mut s = PingSettings::default();
         let r = measure(&s, false, &c, || Ok(12));
         assert!(r.verified(&s));
+        let mut future = r.clone();
+        future.tested_at_ms = now_ms() + 60_000;
+        assert!(!future.verified(&s));
         s.method = PingMethod::Tcp;
         assert!(!r.compatible(&s));
         let r = measure(&s, false, &c, || Ok(1));
@@ -295,8 +300,13 @@ mod worker_tests {
     #[test]
     #[cfg(windows)]
     fn system_icmp_loopback_is_an_actual_icmp_probe() {
-        let latency=icmp(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),3,&AtomicBool::new(false)).unwrap();
-        assert!(latency>=1);
+        let latency = icmp(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            3,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert!(latency >= 1);
     }
     #[test]
     fn worker_pool_is_bounded_and_cancellation_stops_new_work() {
