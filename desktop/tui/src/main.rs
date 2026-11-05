@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #![cfg(windows)]
 
+mod ui;
 #[path = "../../src-tauri/src/config.rs"] mod config;
 #[path = "../../src-tauri/src/engine.rs"] mod engine;
 #[path = "../../src-tauri/src/hysteria2.rs"] mod hysteria2;
@@ -30,14 +31,8 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    backend::CrosstermBackend, layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
-    Terminal,
-};
-use model::{EnginePhase, EngineSnapshot, GroupView, NodeSortMode, SubscriptionGroup};
+use ratatui::{backend::CrosstermBackend, Terminal};
+use model::{EnginePhase, EngineSnapshot, NodeSortMode, SubscriptionGroup};
 use storage::Store;
 use subscription::SubscriptionClient;
 use subscription_identity::SubscriptionIdentity;
@@ -56,6 +51,8 @@ struct App {
     message: String,
     runtime: PathBuf,
     work_dir: PathBuf,
+    view: ui::ViewState,
+    show_help: bool,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -81,8 +78,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         store, engine, snapshot, cancel,
         busy: Arc::new(AtomicBool::new(false)),
         tx, rx, group: 0, row: 0, input: None,
-        message: "Ready. Run elevated to connect.".into(),
+        message: "Готово. Для VPN запустите терминал от администратора.".into(),
         runtime, work_dir: data_dir.join("url-test"),
+        view: ui::ViewState::default(), show_help: false,
     };
     let selection = app.store.selection();
     if let Some(gid) = selection.group_id {
@@ -116,13 +114,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> io::Result<()> {
     loop {
         while let Ok(message) = app.rx.try_recv() { app.message = message; }
-        terminal.draw(|frame| draw(frame, app))?;
+        let groups = app.store.groups();
+        app.group = app.group.min(groups.len().saturating_sub(1));
+        let count = groups.get(app.group).map_or(0, |g| g.nodes.len());
+        app.row = app.row.min(count.saturating_sub(1));
+        let snapshot = app.snapshot.read().map(|v| v.clone()).unwrap_or_default();
+        terminal.draw(|frame| ui::draw(frame, &ui::View {
+            groups: &groups, group: app.group, row: app.row, snapshot: &snapshot,
+            message: &app.message, input_len: app.input.as_ref().map(|v| v.chars().count()),
+            busy: app.busy.load(Ordering::SeqCst), show_help: app.show_help,
+        }, &mut app.view))?;
         if !event::poll(Duration::from_millis(150))? { continue; }
         let Event::Key(key) = event::read()? else { continue };
         if key.kind != KeyEventKind::Press { continue; }
+        if app.show_help {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('?') | KeyCode::F(1) => app.show_help = false,
+                KeyCode::Char('q') => break,
+                _ => {}
+            }
+            continue;
+        }
         if let Some(input) = &mut app.input {
             match key.code {
-                KeyCode::Esc => { app.input = None; app.message = "Import cancelled".into(); }
+                KeyCode::Esc => { app.input = None; app.message = "Импорт отменён".into(); }
                 KeyCode::Enter => {
                     let url = app.input.take().unwrap_or_default();
                     if !url.trim().is_empty() { add_subscription(app, url); }
@@ -133,11 +148,15 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
             }
             continue;
         }
-        let groups = app.store.groups();
         let len = groups.len();
         match key.code {
             KeyCode::Char('q') => break,
+            KeyCode::Char('?') | KeyCode::F(1) => { app.show_help = true; }
             KeyCode::Up | KeyCode::Char('k') => { app.row = app.row.saturating_sub(1); }
+            KeyCode::PageUp => { app.row = app.row.saturating_sub(10); }
+            KeyCode::PageDown => { app.row = (app.row + 10).min(count.saturating_sub(1)); }
+            KeyCode::Home => { app.row = 0; }
+            KeyCode::End => { app.row = count.saturating_sub(1); }
             KeyCode::Down | KeyCode::Char('j') => {
                 let count = groups.get(app.group).map_or(0, |g| g.nodes.len());
                 if count > 0 { app.row = (app.row + 1).min(count - 1); }
@@ -161,7 +180,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                         NodeSortMode::Delay => NodeSortMode::Origin,
                     };
                     match app.store.set_sort_mode(&g.id, next) {
-                        Ok(_) => { app.row = 0; app.message = format!("Sort: {next:?}"); }
+                        Ok(_) => { app.row = 0; app.message = "Порядок узлов изменён".into(); }
                         Err(error) => { app.message = error; }
                     }
                 }
@@ -174,7 +193,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
 
 fn task(app: &mut App, name: &str, f: impl FnOnce() -> Result<String, String> + Send + 'static) {
     if app.busy.swap(true, Ordering::SeqCst) {
-        app.message = "Another operation is running".into();
+        app.message = "Дождитесь завершения текущей операции".into();
         return;
     }
     app.message = format!("{name}...");
@@ -184,8 +203,8 @@ fn task(app: &mut App, name: &str, f: impl FnOnce() -> Result<String, String> + 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
         let message = match result {
             Ok(Ok(value)) => value,
-            Ok(Err(error)) => format!("Error: {error}"),
-            Err(_) => "Error: background operation panicked".into(),
+            Ok(Err(error)) => format!("Ошибка: {error}"),
+            Err(_) => "Ошибка фоновой операции".into(),
         };
         let _ = tx.send(message);
         busy.store(false, Ordering::SeqCst);
@@ -199,17 +218,17 @@ fn selected(app: &App) -> Option<(String, String)> {
 }
 
 fn connect(app: &mut App) {
-    let Some((gid, nid)) = selected(app) else { app.message = "No node selected".into(); return };
+    let Some((gid, nid)) = selected(app) else { app.message = "Выберите узел".into(); return };
     let store = Arc::clone(&app.store);
     let engine = Arc::clone(&app.engine);
     let cancel = Arc::clone(&app.cancel);
-    task(app, "Connecting", move || {
+    task(app, "Подключение", move || {
         let node = store.node(&gid, &nid)?;
         store.set_selection(&gid, &nid)?;
         let mut engine = engine.lock().map_err(|_| "VPN engine lock poisoned")?;
         cancel.store(false, Ordering::SeqCst);
         engine.start(&node)?;
-        Ok(format!("Connected: {}", node.name))
+        Ok(format!("Подключено: {}", node.name))
     });
 }
 
@@ -220,23 +239,23 @@ fn disconnect(app: &mut App) {
     let tx = app.tx.clone();
     thread::spawn(move || {
         let message = match engine.lock() {
-            Ok(mut engine) => { engine.stop(); "Disconnected".to_string() }
+            Ok(mut engine) => { engine.stop(); "VPN отключён".to_string() }
             Err(_) => "Error: VPN engine lock poisoned".into(),
         };
         let _ = tx.send(message);
     });
-    app.message = "Disconnecting...".into();
+    app.message = "Отключение...".into();
 }
 
 fn add_subscription(app: &mut App, raw: String) {
     let url = raw.trim().to_string();
     let parsed = match url::Url::parse(&url) {
         Ok(value) if value.scheme() == "https" || value.scheme() == "http" => value,
-        _ => { app.message = "Invalid HTTP(S) subscription URL".into(); return; }
+        _ => { app.message = "Нужен корректный HTTP(S) адрес подписки".into(); return; }
     };
-    if parsed.host_str().is_none() { app.message = "Subscription URL missing host".into(); return; }
+    if parsed.host_str().is_none() { app.message = "В адресе подписки не указан сервер".into(); return; }
     let store = Arc::clone(&app.store);
-    task(app, "Importing subscription", move || {
+    task(app, "Импорт подписки", move || {
         let hwid = SubscriptionIdentity::generate()?;
         let nodes = SubscriptionClient::new()?.fetch(parsed.as_str(), &hwid)?;
         let id = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, format!("{}:{}", url, now_ms()).as_bytes()).to_string();
@@ -245,19 +264,19 @@ fn add_subscription(app: &mut App, raw: String) {
         store.upsert_group(SubscriptionGroup {
             id, name, url: parsed.to_string(), updated_at_ms: now_ms(), nodes, hwid: Some(hwid),
         })?;
-        Ok(format!("Imported {count} nodes"))
+        Ok(format!("Добавлено узлов: {count}"))
     });
 }
 
 fn refresh(app: &mut App) {
     let Some(gid) = app.store.groups().get(app.group).map(|g| g.id.clone()) else { return };
     let store = Arc::clone(&app.store);
-    task(app, "Refreshing subscription", move || {
+    task(app, "Обновление подписки", move || {
         let (url, hwid) = store.subscription_source(&gid)?;
-        if url.is_empty() { return Err("This is a local group".into()); }
+        if url.is_empty() { return Err("У этой группы нет адреса подписки".into()); }
         let nodes = SubscriptionClient::new()?.fetch(&url, &hwid)?;
         let result = store.apply_refresh(&gid, nodes, now_ms())?;
-        Ok(format!("Refreshed: +{} / -{} / ~{}", result.added.len(), result.deleted.len(), result.edited.len()))
+        Ok(format!("Обновлено: +{} / -{} / ~{}", result.added.len(), result.deleted.len(), result.edited.len()))
     });
 }
 
@@ -265,13 +284,13 @@ fn test_selected(app: &mut App) {
     let Some((gid, nid)) = selected(app) else { return };
     let phase = app.snapshot.read().map(|s| s.phase.clone()).unwrap_or(EnginePhase::Error);
     if phase != EnginePhase::Offline && phase != EnginePhase::Error {
-        app.message = "Disconnect before testing nodes".into();
+        app.message = "Отключите VPN перед проверкой пинга".into();
         return;
     }
     let store = Arc::clone(&app.store);
     let runtime = app.runtime.clone();
     let dir = app.work_dir.clone();
-    task(app, "Testing node", move || {
+    task(app, "Проверка пинга", move || {
         let node = store.node(&gid, &nid)?;
         match url_test::test_node(&runtime, &dir, &node) {
             Ok(ms) => {
@@ -289,68 +308,4 @@ fn test_selected(app: &mut App) {
 fn now_ms() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
-}
-
-fn draw(frame: &mut ratatui::Frame<'_>, app: &App) {
-    let area = frame.area();
-    let sections = Layout::default().direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(6), Constraint::Length(4), Constraint::Length(3)])
-        .split(area);
-    let snapshot = app.snapshot.read().map(|v| v.clone()).unwrap_or_default();
-    let (phase, color) = match snapshot.phase {
-        EnginePhase::Connected => ("CONNECTED", Color::Green),
-        EnginePhase::Starting => ("CONNECTING", Color::Yellow),
-        EnginePhase::Stopping => ("STOPPING", Color::Yellow),
-        EnginePhase::Error => ("ERROR", Color::Red),
-        EnginePhase::Offline => ("OFFLINE", Color::DarkGray),
-    };
-    let title = Paragraph::new(Line::from(vec![
-        Span::styled(" dot. ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-        Span::raw(" TUI  |  "),
-        Span::styled(phase, Style::default().fg(color).add_modifier(Modifier::BOLD)),
-        Span::raw(format!("  |  {}", snapshot.node_name.unwrap_or_else(|| "No active node".into()))),
-    ])).block(Block::default().borders(Borders::ALL));
-    frame.render_widget(title, sections[0]);
-
-    let groups: Vec<GroupView> = app.store.groups();
-    let group = groups.get(app.group);
-    let group_label = group.map(|g| format!(" {}/{}  {}  [{} nodes]  sort: {:?} ",
-        app.group + 1, groups.len(), g.name, g.nodes.len(), g.sort_mode))
-        .unwrap_or_else(|| " No subscriptions  |  press a to import ".into());
-    let items: Vec<ListItem> = group.map(|g| g.nodes.iter().map(|n| {
-        let latency = match n.latency_ms {
-            Some(ms) => format!("{ms} ms"),
-            None if n.latency_failed => "failed".into(),
-            None => "—".into(),
-        };
-        let favorite = if n.favorite { "★ " } else { "  " };
-        ListItem::new(format!("{favorite}{}  |  {}  |  {}  |  {}",
-            n.name, n.protocol, n.host, latency))
-    }).collect()).unwrap_or_default();
-    let list = List::new(items)
-        .block(Block::default().title(group_label).borders(Borders::ALL))
-        .highlight_style(Style::default().fg(Color::Black).bg(Color::White).add_modifier(Modifier::BOLD))
-        .highlight_symbol("› ");
-    let mut selected = ListState::default();
-    if group.is_some_and(|g| !g.nodes.is_empty()) {
-        selected.select(Some(app.row.min(group.unwrap().nodes.len() - 1)));
-    }
-    frame.render_stateful_widget(list, sections[1], &mut selected);
-
-    let msg = if let Some(input) = &app.input {
-        // Avoid echoing secret-bearing subscription URLs into terminal scrollback.
-        format!("Subscription URL: {} characters entered  | Enter submit | Esc cancel", input.chars().count())
-    } else {
-        app.message.clone()
-    };
-    let status = Paragraph::new(vec![
-        Line::from(msg),
-        Line::from(snapshot.message.unwrap_or_default()),
-    ]).wrap(Wrap { trim: true }).block(Block::default().title(" Status ").borders(Borders::ALL));
-    frame.render_widget(status, sections[2]);
-    frame.render_widget(
-        Paragraph::new("↑↓/jk nodes  Tab group  Enter connect/switch  d disconnect  a add  r refresh  t test  s sort  q quit")
-            .block(Block::default().borders(Borders::ALL)),
-        sections[3],
-    );
 }

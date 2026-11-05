@@ -15,8 +15,10 @@ The `tui` workflow builds the release executable and runs the shared Rust tests
 on Windows for TUI changes and changes to the shared desktop Rust sources.
 Its `dot-tui-windows-x64-exe` artifact contains the executable, this README and
 project license/notices; supply the Xray/Wintun runtime as described below.
-TUI-only pull requests skip the unified Android/desktop GUI builds. Mixed
-changes still run the unified checks, and main/tag release builds are unchanged.
+TUI-only pull requests skip the unified Android/desktop GUI builds. The
+`feat/dot-tui` development branch also skips those two builds when its PR still
+contains earlier CI changes. Other mixed PRs and main/tag releases retain the
+unified platform checks.
 
 ## Run
 
@@ -34,6 +36,7 @@ By default, imports and selections share the desktop app's state at %APPDATA%\de
 ## Keys
 
 - Up/Down or j/k: move between nodes
+- PageUp/PageDown: move by ten nodes; Home/End: first/last node
 - Tab / Shift+Tab: next/previous subscription group
 - Enter: connect or switch to selected node (real Xray/TUN)
 - d: disconnect
@@ -43,6 +46,11 @@ By default, imports and selections share the desktop app's state at %APPDATA%\de
 - s: cycle node order (origin/name/delay)
 - q: quit and stop VPN
 - Esc: cancel URL input
+- ? or F1: show keyboard help; Esc: close help
+
+The node table uses fixed columns and hides address/protocol columns in narrow
+windows. Country flags are rendered as two-letter codes for Windows terminal
+font compatibility. The selected row and scroll position persist between frames.
 
 Subscription URLs and proxy credentials are never displayed in the interface. The state file still contains secrets, just as in desktop dot. Native VPN needs administrator privileges and working Xray/Wintun runtime.
 
