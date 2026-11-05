@@ -7,7 +7,18 @@ Native Windows terminal frontend. Uses the exact Rust storage, subscription, VLE
 In PowerShell:
 
     cd desktop\tui
-    cargo build --release
+    cargo build --release --locked
+
+## CI
+
+The `tui` workflow builds the release executable and runs the shared Rust tests
+on Windows for TUI changes and changes to the shared desktop Rust sources.
+Its `dot-tui-windows-x64-exe` artifact contains the executable, this README and
+project license/notices; supply the Xray/Wintun runtime as described below.
+TUI-only pull requests skip the unified Android/desktop GUI builds. Mixed
+changes still run the unified checks, and main/tag release builds are unchanged.
+
+## Run
 
 Place xray.exe and wintun.dll next to the generated executable in a runtime\ directory:
 
@@ -37,4 +48,5 @@ Subscription URLs and proxy credentials are never displayed in the interface. Th
 
 This version is Windows-only because the existing dot. desktop engine and its TUN implementation are Windows-specific.
 
-Note: Build and real Windows VPN behavior have not yet been verified in CI.
+CI does not exercise elevated TUN connections or interactive terminal behavior;
+verify those manually with the Xray/Wintun runtime installed.

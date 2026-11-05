@@ -5,6 +5,9 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+    # TUI-only PRs use tui.yml; mixed changes still run both GUI platforms.
+    paths-ignore:
+      - 'desktop/tui/**'
   # Select an existing version tag in the UI. Branch dispatches cannot publish.
   workflow_dispatch:
 

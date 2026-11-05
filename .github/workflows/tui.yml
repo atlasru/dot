@@ -1,0 +1,42 @@
+name: tui
+
+on:
+  pull_request:
+    paths:
+      - 'desktop/tui/**'
+      - 'desktop/src-tauri/src/**'
+      - '.github/workflows/tui.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/tui/**'
+      - 'desktop/src-tauri/src/**'
+      - '.github/workflows/tui.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-tui:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop/tui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build native TUI
+        run: cargo build --release --locked
+      - name: Test TUI and shared Rust modules
+        run: cargo test --locked
+      - name: Upload standalone TUI executable (runtime required)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dot-tui-windows-x64-exe
+          path: |
+            desktop/tui/target/release/dot-tui.exe
+            desktop/tui/README.md
+            LICENSE
+            THIRD_PARTY_NOTICES.md
+          if-no-files-found: error

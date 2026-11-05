@@ -14,6 +14,11 @@
 #[path = "../../src-tauri/src/subscription_identity.rs"] mod subscription_identity;
 #[path = "../../src-tauri/src/url_test.rs"] mod url_test;
 #[path = "../../src-tauri/src/vless.rs"] mod vless;
+// Existing shared-module tests use the refresh clock and HTTP test helpers.
+#[cfg(test)]
+#[path = "../../src-tauri/src/refresh.rs"] mod refresh;
+#[cfg(test)]
+#[path = "../../src-tauri/src/subscription_integration.rs"] mod subscription_integration;
 
 use std::{
     env, io, path::PathBuf,
