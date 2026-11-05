@@ -39,6 +39,7 @@ jobs:
           DOT_TUI_PREVIEW_DIR: ${{ github.workspace }}\desktop\tui\target\ui-previews
         run: cargo test --locked
       - name: Upload rendered layout previews
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dot-tui-layout-previews

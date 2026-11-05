@@ -499,9 +499,11 @@ mod tests {
         let columns: Vec<_> = data
             .iter()
             .take(3)
-            .map(|line| line.chars().position(|c| c == 's').unwrap())
+            .map(|line| line[..line.find("server-").unwrap()].chars().count())
             .collect();
-        assert!(columns.windows(2).all(|pair| pair[0] == pair[1]));
+        let header = lines.lines().find(|line| line.contains("АДРЕС")).unwrap();
+        let address_column = header[..header.find("АДРЕС").unwrap()].chars().count();
+        assert_eq!(columns, vec![address_column; 3]);
         assert!(lines.contains("RU Россия"));
         assert!(lines.contains("АДРЕС"));
         assert!(!lines.contains('🇷'));
