@@ -1,0 +1,3 @@
+# Shipped legal texts must have identical bytes in Windows and Linux builds.
+LICENSE text eol=lf
+THIRD_PARTY_NOTICES.md text eol=lf

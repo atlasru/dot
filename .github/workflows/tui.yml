@@ -6,12 +6,18 @@ on:
       - 'desktop/tui/**'
       - 'desktop/src-tauri/src/**'
       - '.github/workflows/tui.yml'
+      - '.gitattributes'
+      - 'LICENSE'
+      - 'THIRD_PARTY_NOTICES.md'
   push:
     branches: [main]
     paths:
       - 'desktop/tui/**'
       - 'desktop/src-tauri/src/**'
       - '.github/workflows/tui.yml'
+      - '.gitattributes'
+      - 'LICENSE'
+      - 'THIRD_PARTY_NOTICES.md'
   workflow_dispatch:
 
 permissions:
