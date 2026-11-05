@@ -19,6 +19,9 @@ jobs:
           node-version: '24'
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Portable validator regression tests
+        run: python ../scripts/tests/test_verify_portable.py
+
       - name: Reject unfinished product markers
         shell: pwsh
         run: |

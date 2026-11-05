@@ -5,6 +5,9 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+    # TUI-only PRs use tui.yml; mixed changes still run both GUI platforms.
+    paths-ignore:
+      - 'desktop/tui/**'
   # Select an existing version tag in the UI. Branch dispatches cannot publish.
   workflow_dispatch:
 
@@ -46,10 +49,13 @@ jobs:
           fi
 
   android:
+    # This native TUI development branch is built separately by tui.yml.
+    if: github.event_name != 'pull_request' || github.head_ref != 'feat/dot-tui'
     needs: source
     uses: ./.github/workflows/android.yml
 
   windows:
+    if: github.event_name != 'pull_request' || github.head_ref != 'feat/dot-tui'
     needs: source
     uses: ./.github/workflows/desktop.yml
 
