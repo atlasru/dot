@@ -48,7 +48,8 @@ data class PingResult(
 ) {
     val method get() = settings.method
     val url get() = settings.url.takeIf { method.proxy }
-    fun verified(current: PingSettings) = success && method.proxy && settings == current && System.currentTimeMillis() - testedAtMs in 0..899_999
+    fun verified(current: PingSettings) = success && !activeTunnel && method.proxy &&
+        settings == current && System.currentTimeMillis() - testedAtMs in 0..899_999
     fun json() = JSONObject().put("settings",settings.json()).put("latency_ms",latencyMs ?: JSONObject.NULL).put("tested_at_ms",testedAtMs).put("success",success).put("error",error ?: JSONObject.NULL).put("method",method.key).put("url",url ?: JSONObject.NULL).put("samples",JSONArray(samples)).put("active_tunnel",activeTunnel)
     companion object {
         fun from(j: JSONObject): PingResult {

@@ -53,7 +53,7 @@ internal fun AdvancedSettingsPanel(state: DotUiState, viewModel: MainViewModel) 
         ToggleSetting("Selected node only",ping.selectedOnly,"Scope for scheduled tests; TEST ALL always tests the subscription") { update(settings.copy(ping=ping.copy(selectedOnly=it))) }
         Text("While connected, only the active tunnel can be tested. Core startup and config preparation are excluded from timing.",color=Color.Gray,style=MaterialTheme.typography.labelMedium)
         ActionSetting("Run diagnostics",if(ping.selectedOnly) "selected node" else "subscription") { if(ping.selectedOnly) state.selectedProfile?.let(viewModel::testNode) else viewModel.testAllNodes() }
-        if(state.testingNodeIds.isNotEmpty()) ActionSetting("Cancel diagnostics","stop") { viewModel.cancelDiagnostics() }
+        if(state.diagnosticsRunning) ActionSetting("Cancel diagnostics","stop") { viewModel.cancelDiagnostics() }
         ActionSetting("Clear diagnostics","reset cache") { viewModel.clearDiagnostics() }
         state.selectedProfileId?.let { id -> state.pingResults[id]?.let { r -> Text("${r.method.label} · ${if(r.success) "${r.latencyMs} ms" else r.error} · ${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(r.testedAtMs))}\n${r.samples.size}/${r.settings.attempts} successful attempts",color=Color.Gray,style=MaterialTheme.typography.labelMedium) } }
     }

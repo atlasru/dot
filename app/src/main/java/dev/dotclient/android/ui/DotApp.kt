@@ -39,6 +39,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -64,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.dotclient.android.BuildConfig
+import dev.dotclient.android.core.diagnostics.PingResult
 import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.model.ProxyNode
@@ -390,6 +392,13 @@ private fun NodesScreen(
         Spacer(Modifier.height(14.dp))
 
         GroupToolbar(state, viewModel)
+        state.diagnosticBatch?.takeIf { it.running || it.groupId == group?.id }?.let { batch ->
+            DiagnosticBatchSummary(
+                batch,
+                state.subscriptions.firstOrNull { it.id == batch.groupId }?.name.takeIf { batch.groupId != group?.id },
+                viewModel::cancelDiagnostics,
+            )
+        }
         Spacer(Modifier.height(8.dp))
         Divider()
 
@@ -441,15 +450,20 @@ private fun NodesScreen(
                     NodeRow(
                         profile = profile,
                         selected = profile.id == group.selectedProfileId,
-                        running = state.vpnConnected && profile.name == state.runningNodeName,
+                        running = state.vpnConnected && profile.id == state.runningNodeId,
                         latencyMs = state.nodeLatenciesMs[profile.id],
                         compact = state.settings.compactNodes,
-                        showLatency = state.settings.showLatency,
+                        showLatency = state.settings.showLatency || state.diagnosticBatch?.let { it.groupId == group.id && profile.id in it.nodeIds } == true,
                         showTransport = state.settings.showTransport,
                         testing = profile.id in state.testingNodeIds,
+                        skipped = state.diagnosticBatch?.let {
+                            it.groupId == group.id && !it.running && profile.id in it.nodeIds && profile.id !in it.results
+                        } == true && profile.id !in state.pingResults,
                         failed = profile.id in state.nodeLatencyFailedIds,
+                        diagnostic = state.pingResults[profile.id],
+                        testEnabled = !state.diagnosticsRunning && !state.loading && !state.savingSettings,
                         onSelect = {
-                            if (state.vpnConnected && profile.name != state.runningNodeName) viewModel.switchProfile(profile.id)
+                            if (state.vpnConnected && profile.id != state.runningNodeId) viewModel.switchProfile(profile.id)
                             else viewModel.selectProfile(profile.id)
                         },
                         onTest = { viewModel.testNode(profile) },
@@ -473,9 +487,9 @@ private fun AutoNodeRow(state: DotUiState, onClick: () -> Unit) {
     val bestLatency = state.nodeLatenciesMs
         .filterKeys { it in profileIds }
         .minByOrNull { it.value }
-    val autoTesting = state.autoNodeEnabled && state.testingNodeIds.isNotEmpty()
+    val autoTesting = state.autoNodeEnabled && state.diagnosticsRunning
     val canUseCachedWhileConnected = !state.vpnConnected || bestLatency != null
-    val enabled = !state.vpnBusy && state.testingNodeIds.isEmpty() && canUseCachedWhileConnected
+    val enabled = !state.vpnBusy && !state.diagnosticsRunning && canUseCachedWhileConnected
 
     Row(
         Modifier.fillMaxWidth()
@@ -528,8 +542,8 @@ private fun GroupToolbar(state: DotUiState, viewModel: MainViewModel) {
     var groupMenuOpen by remember { mutableStateOf(false) }
     var actionsOpen by remember { mutableStateOf(false) }
     val group = state.selectedSubscription
-    val canTest = group != null && group.profiles.isNotEmpty() && state.testingNodeIds.isEmpty()
-    val canRefresh = group != null && state.loadingSubscriptionId == null && state.testingNodeIds.isEmpty()
+    val canTest = group != null && group.profiles.isNotEmpty() && !state.diagnosticsRunning && !state.loading && !state.savingSettings
+    val canRefresh = group != null && !state.loading && !state.diagnosticsRunning
 
     Row(
         Modifier.fillMaxWidth(),
@@ -585,7 +599,7 @@ private fun GroupToolbar(state: DotUiState, viewModel: MainViewModel) {
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text(if (state.testingNodeIds.isNotEmpty()) "testing…" else "test all nodes") },
+                    text = { Text(if (state.diagnosticsRunning) "testing…" else "test all nodes") },
                     enabled = canTest,
                     onClick = {
                         actionsOpen = false
@@ -598,6 +612,38 @@ private fun GroupToolbar(state: DotUiState, viewModel: MainViewModel) {
 }
 
 @Composable
+private fun DiagnosticBatchSummary(batch: DiagnosticBatch, groupName: String?, onCancel: () -> Unit) {
+    val checked = batch.results.size
+    val total = batch.nodeIds.size
+    val phase = when (batch.phase) {
+        DiagnosticBatchPhase.RUNNING -> "TESTING"
+        DiagnosticBatchPhase.CANCELLING -> "CANCELLING"
+        DiagnosticBatchPhase.COMPLETED -> "COMPLETE"
+        DiagnosticBatchPhase.CANCELLED -> "CANCELLED"
+        DiagnosticBatchPhase.FAILED -> "INTERRUPTED"
+    }
+    val succeeded = batch.results.values.count { it.success }
+    val unavailable = batch.results.values.count { it.unavailable }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(listOfNotNull(groupName, phase, "$checked/$total checked").joinToString(" · "),
+                    style = MaterialTheme.typography.labelMedium)
+                Text("$succeeded OK · ${checked - succeeded - unavailable} failed · $unavailable unavailable",
+                    style = MaterialTheme.typography.labelMedium, color = Color(0xFF777777))
+            }
+            if (batch.running) TextButton(
+                onClick = onCancel,
+                enabled = batch.phase == DiagnosticBatchPhase.RUNNING,
+            ) { Text("CANCEL") }
+        }
+        if (batch.running && total > 0) {
+            LinearProgressIndicator(progress = { checked.toFloat() / total }, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
 private fun NodeViewSwitcher(
     state: DotUiState,
     selected: NodeViewMode,
@@ -605,8 +651,6 @@ private fun NodeViewSwitcher(
     onSortSelect: (NodeSortMode) -> Unit,
 ) {
     var sortMenuOpen by remember(state.selectedSubscriptionId) { mutableStateOf(false) }
-    val delayTesting = state.pendingDelaySortSubscriptionId == state.selectedSubscriptionId
-
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -614,9 +658,9 @@ private fun NodeViewSwitcher(
     ) {
         Box {
             Text(
-                if (delayTesting) "SORT: TESTING" else "SORT: ${state.selectedSortMode.name}",
+                "SORT: ${state.selectedSortMode.name}",
                 Modifier.border(1.dp, Color(0xFF252525), RoundedCornerShape(2.dp))
-                    .clickable(enabled = !delayTesting) { sortMenuOpen = true }
+                    .clickable { sortMenuOpen = true }
                     .padding(horizontal = 10.dp, vertical = 6.dp),
                 color = Color(0xFF777777),
                 style = MaterialTheme.typography.labelMedium,
@@ -662,7 +706,10 @@ private fun NodeRow(
     showLatency: Boolean = true,
     showTransport: Boolean = true,
     testing: Boolean,
+    skipped: Boolean,
     failed: Boolean,
+    diagnostic: PingResult?,
+    testEnabled: Boolean,
     onSelect: () -> Unit,
     onTest: () -> Unit,
     onConnect: () -> Unit,
@@ -699,12 +746,18 @@ private fun NodeRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (showLatency && !testing) diagnostic?.error?.let { error ->
+                Text(error, color = if (failed) DotRed else Color(0xFF777777),
+                    style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
         }
         Spacer(Modifier.width(10.dp))
         if(showLatency) Text(
             when {
                 testing -> "··"
+                skipped -> "SKIPPED"
                 latencyMs != null -> "$latencyMs ms"
+                diagnostic?.unavailable == true -> "UNAVAILABLE"
                 failed -> "FAIL"
                 else -> "--"
             },
@@ -732,6 +785,7 @@ private fun NodeRow(
                 )
                 DropdownMenuItem(
                     text = { Text("test latency") },
+                    enabled = testEnabled,
                     onClick = { menuOpen = false; onTest() },
                 )
                 DropdownMenuItem(
@@ -1058,13 +1112,13 @@ private fun ConnectionTestButton(state: DotUiState, onClick: () -> Unit) {
     val result = when {
         state.connectionTestRunning -> "TESTING…"
         state.connectionTestLatencyMs != null -> "${state.connectionTestLatencyMs} ms"
-        state.connectionTestError != null -> "FAILED"
+        state.connectionTestError != null -> state.connectionTestError
         else -> null
     }
 
     Row(
         Modifier.border(1.dp, Color(0xFF303030), RoundedCornerShape(2.dp))
-            .clickable(enabled = !state.connectionTestRunning, onClick = onClick)
+            .clickable(enabled = !state.diagnosticsRunning && !state.savingSettings, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

@@ -129,7 +129,7 @@ fun NodeMapPanel(
                         latitude = cluster.latitude,
                         longitude = cluster.longitude,
                         nodeCount = cluster.profiles.size,
-                        active = cluster.profiles.any { it.name == state.runningNodeName },
+                        active = cluster.profiles.any { it.id == state.runningNodeId },
                     )
                 },
                 onMarkerClick = { selectedCountry = it },
@@ -207,7 +207,7 @@ private fun CountrySheet(
         Spacer(Modifier.height(7.dp))
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 170.dp)) {
             items(orderedProfiles, key = ProxyNode::id) { profile ->
-                val running = state.vpnConnected && profile.name == state.runningNodeName
+                val running = state.vpnConnected && profile.id == state.runningNodeId
                 val failed = profile.id in state.nodeLatencyFailedIds
                 Row(
                     Modifier
@@ -240,6 +240,7 @@ private fun CountrySheet(
                         when {
                             profile.id in state.testingNodeIds -> "··"
                             latency != null -> "$latency ms"
+                            state.pingResults[profile.id]?.unavailable == true -> "UNAVAILABLE"
                             failed -> "FAIL"
                             running -> "LIVE"
                             else -> "CONNECT"

@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -43,11 +44,12 @@ class MainViewModel(
     val state: StateFlow<DotUiState> = mutableState.asStateFlow()
 
     private val diagnostics = NodeDiagnostics(application,mutableState,settingsRepository)
+    private var delaySortRequest: Job? = null
 
     init {
         viewModelScope.launch {
             VpnRuntime.state.collect { runtime ->
-                if (runtime.state != VpnConnectionState.DISCONNECTED && runtime.state != VpnConnectionState.ERROR && runtime.state != VpnConnectionState.CONNECTED) diagnostics.cancel()
+                if (runtime.state != VpnConnectionState.CONNECTED) diagnostics.cancelConnection()
                 mutableState.update {
                     it.copy(
                         requestingVpnPermission = false,
@@ -65,6 +67,7 @@ class MainViewModel(
                         uploadBytesPerSecond = runtime.uploadBytesPerSecond,
                         sessionDownloadBytes = runtime.sessionDownloadBytes,
                         sessionUploadBytes = runtime.sessionUploadBytes,
+                        runningNodeId = runtime.nodeId,
                         runningNodeName = runtime.nodeName,
                         connectionTestRunning = if (runtime.state == VpnConnectionState.CONNECTED) it.connectionTestRunning else false,
                         connectionTestLatencyMs = if (runtime.state == VpnConnectionState.CONNECTED) it.connectionTestLatencyMs else null,
@@ -83,6 +86,7 @@ class MainViewModel(
             if(initial.autoConnect && android.net.VpnService.prepare(application)==null && !state.value.vpnConnected && requestVpnPermission()) onVpnPermissionGranted()
             if(initial.refreshOnStart) refreshAllSubscriptions().join()
             if(initial.ping.onStart) runScheduledDiagnostics()
+            state.value.selectedSubscriptionId?.let(::ensureDelaySortData)
             var lastPing=System.nanoTime(); var lastRefresh=System.nanoTime()
             while(true) {
                 kotlinx.coroutines.delay(15_000)
@@ -96,11 +100,11 @@ class MainViewModel(
     private fun loadInitialState(): DotUiState {
         val stored = subscriptionStore.load()
         val settings=runCatching { settingsRepository.load() }.getOrDefault(dev.dotclient.android.core.settings.AppSettings())
-        val results=settingsRepository.results().filterValues { it.settings==settings.ping }
+        val results=settingsRepository.results().filterValues { it.settings==settings.ping && !it.activeTunnel }
         return DotUiState(
             settings=settings, pingResults=results,
             nodeLatenciesMs=results.mapNotNull { (id,r)->r.latencyMs?.let {id to it} }.toMap(),
-            nodeLatencyFailedIds=results.filterValues { !it.success && it.error?.startsWith("HEAD unsupported")!=true }.keys,
+            nodeLatencyFailedIds=results.filterValues { !it.success && !it.unavailable }.keys,
             subscriptions = stored.subscriptions,
             selectedSubscriptionId = stored.selectedSubscriptionId,
             message = stored.loadError,
@@ -110,7 +114,7 @@ class MainViewModel(
     }
 
     fun saveSubscription(existingId: String?, name: String, url: String, hwid: String): Boolean {
-        if(state.value.testingNodeIds.isNotEmpty()) { mutableState.update { it.copy(message="Wait for diagnostics before editing subscriptions") }; return false }
+        if(state.value.diagnosticsRunning) { mutableState.update { it.copy(message="Wait for diagnostics before editing subscriptions") }; return false }
         if (!SubscriptionIdentity.isValid(hwid)) {
             mutableState.update { it.copy(message = SubscriptionIdentity.VALIDATION_ERROR) }
             return false
@@ -149,7 +153,7 @@ class MainViewModel(
     fun refreshSubscription(id: String) {
         val subscription = state.value.subscriptions.firstOrNull { it.id == id } ?: return
         if (state.value.loadingSubscriptionId != null) return
-        if (subscription.profiles.any { it.id in state.value.testingNodeIds }) {
+        if (state.value.diagnosticsRunning) {
             mutableState.update { it.copy(message = "wait for URL test to finish") }
             return
         }
@@ -191,7 +195,7 @@ class MainViewModel(
                 val currentIds = decoded.profiles.mapTo(hashSetOf()) { it.id }
                 val results=old.pingResults.filterKeys { it !in oldProfileIds || it in currentIds }
                 val transferredLatencies=results.mapNotNull { (id,r)->r.latencyMs?.let { id to it } }.toMap()
-                val transferredFailures=results.filterValues { !it.success && it.error?.startsWith("HEAD unsupported")!=true }.keys
+                val transferredFailures=results.filterValues { !it.success && !it.unavailable }.keys
 
                 val updated = old.subscriptions.map { group ->
                     if (group.id != id) return@map group
@@ -210,6 +214,7 @@ class MainViewModel(
                     nodeLatenciesMs = transferredLatencies,
                     nodeLatencyFailedIds = transferredFailures,
                     testingNodeIds = old.testingNodeIds - oldProfileIds,
+                    diagnosticBatch = old.diagnosticBatch.takeUnless { it?.groupId == id },
                     message = null,
                     subscriptionUpdateResult = SubscriptionUpdateResult.Success(
                         subscriptionName = latestGroup.name,
@@ -230,6 +235,7 @@ class MainViewModel(
                 }
             }
             if (state.value.autoNodeEnabled && state.value.selectedSubscriptionId == id) ensureAutoNodeData(id)
+            ensureDelaySortData(id)
         }
     }
 
@@ -253,7 +259,7 @@ class MainViewModel(
     }
 
     fun deleteSubscription(id: String) {
-        if(state.value.subscriptions.firstOrNull { it.id==id }?.profiles?.any { it.id in state.value.testingNodeIds }==true) { mutableState.update { it.copy(message="Cancel diagnostics before deleting this subscription") }; return }
+        if(state.value.diagnosticsRunning) { mutableState.update { it.copy(message="Cancel diagnostics before deleting this subscription") }; return }
         mutableState.update { old ->
             val removedProfileIds = old.subscriptions
                 .firstOrNull { it.id == id }
@@ -272,7 +278,7 @@ class MainViewModel(
                 nodeLatenciesMs = old.nodeLatenciesMs.filterKeys { it !in removedProfileIds },
                 nodeLatencyFailedIds = old.nodeLatencyFailedIds - removedProfileIds,
                 testingNodeIds = old.testingNodeIds - removedProfileIds,
-                pendingDelaySortSubscriptionId = old.pendingDelaySortSubscriptionId.takeUnless { it == id },
+                diagnosticBatch = old.diagnosticBatch.takeUnless { it?.groupId == id },
                 message = null,
                 subscriptionUpdateResult = null,
             )
@@ -282,6 +288,7 @@ class MainViewModel(
 
     fun selectSubscription(id: String) {
         if (state.value.subscriptions.none { it.id == id }) return
+        if (state.value.selectedSubscriptionId != id) delaySortRequest?.cancel()
         mutableState.update { it.copy(selectedSubscriptionId = id, message = null) }
         persist()
         ensureDelaySortData(id)
@@ -338,7 +345,7 @@ class MainViewModel(
 
     private fun ensureAutoNodeData(subscriptionId: String) {
         val group = state.value.subscriptions.firstOrNull { it.id == subscriptionId } ?: return
-        if (group.profiles.isEmpty() || state.value.testingNodeIds.isNotEmpty()) return
+        if (group.profiles.isEmpty() || state.value.diagnosticsRunning) return
         if (state.value.vpnConnected || state.value.vpnBusy) return
         val tested = group.profiles.all { profile -> state.value.pingResults[profile.id]?.let { result -> result.settings == state.value.settings.ping && System.currentTimeMillis()-result.testedAtMs in 0..899_999 } == true }
         if (tested) {
@@ -348,7 +355,7 @@ class MainViewModel(
             } ?: mutableState.update { it.copy(message="AUTO has no eligible verified proxy; run GET/HEAD diagnostics or choose a node manually") }
             return
         }
-        viewModelScope.launch { runAllNodeTests(subscriptionId, activateDelaySort = false, selectAutoAfter = true) }
+        viewModelScope.launch { runAllNodeTests(subscriptionId, selectAutoAfter = true) }
     }
 
     private fun resolveAutoProfile(group: Subscription? = state.value.selectedSubscription): ProxyNode? {
@@ -369,18 +376,8 @@ class MainViewModel(
         val group = state.value.selectedSubscription ?: return
         if (group.profiles.isEmpty()) return
 
-        if (mode == NodeSortMode.DELAY) {
-            val tested = group.profiles.all { profile ->
-                profile.id in state.value.nodeLatenciesMs || profile.id in state.value.nodeLatencyFailedIds
-            }
-            if (!tested) {
-                if (state.value.testingNodeIds.isNotEmpty()) return
-                viewModelScope.launch { runAllNodeTests(group.id, activateDelaySort = true) }
-                return
-            }
-        }
-
         updateSubscriptionSortMode(group.id, mode)
+        if (mode == NodeSortMode.DELAY) ensureDelaySortData(group.id) else delaySortRequest?.cancel()
     }
 
     private fun updateSubscriptionSortMode(subscriptionId: String, mode: NodeSortMode) {
@@ -389,28 +386,29 @@ class MainViewModel(
                 subscriptions = old.subscriptions.map { group ->
                     if (group.id == subscriptionId) group.copy(sortMode = mode) else group
                 },
-                pendingDelaySortSubscriptionId = old.pendingDelaySortSubscriptionId.takeUnless { it == subscriptionId },
             )
         }
         persist()
     }
 
     private fun ensureDelaySortData(subscriptionId: String) {
-        val group = state.value.subscriptions.firstOrNull { it.id == subscriptionId } ?: return
+        val current = state.value
+        val group = current.subscriptions.firstOrNull { it.id == subscriptionId } ?: return
         if (group.sortMode != NodeSortMode.DELAY || group.profiles.isEmpty()) return
-        val tested = group.profiles.all { profile ->
-            profile.id in state.value.nodeLatenciesMs || profile.id in state.value.nodeLatencyFailedIds
+        val missing = group.profiles.filter { current.pingResults[it.id]?.settings != current.settings.ping }
+        if (missing.isEmpty() || missing.all { it.id in current.testingNodeIds }) return
+
+        delaySortRequest?.cancel()
+        delaySortRequest = viewModelScope.launch {
+            val current = state.first { !it.diagnosticsRunning && !it.loading && !it.savingSettings }
+            val latest = current.subscriptions.firstOrNull { it.id == subscriptionId } ?: return@launch
+            if (latest.sortMode != NodeSortMode.DELAY) return@launch
+            val unmeasured = latest.profiles.filter { current.pingResults[it.id]?.settings != current.settings.ping }
+            viewModelScope.launch { diagnostics.run(unmeasured, groupId = subscriptionId) }
         }
-        if (tested || state.value.testingNodeIds.isNotEmpty()) return
-        viewModelScope.launch { runAllNodeTests(subscriptionId, activateDelaySort = false) }
     }
 
     fun requestVpnPermission(): Boolean {
-        if (state.value.testingNodeIds.isNotEmpty()) {
-            mutableState.update { it.copy(message = "AUTO · testing nodes…") }
-            return false
-        }
-
         val profile = resolvedConnectionProfile()
         if (profile == null) {
             mutableState.update { it.copy(message = if(it.autoNodeEnabled) "AUTO has no eligible verified proxy; run GET/HEAD diagnostics or choose a node manually" else "select a node first") }
@@ -427,7 +425,6 @@ class MainViewModel(
     }
 
     fun onVpnPermissionGranted() {
-        if(state.value.testingNodeIds.isNotEmpty()) { mutableState.update { it.copy(message="Wait for diagnostics to finish") }; return }
         val profile = resolvedConnectionProfile()
         if (profile == null) {
             mutableState.update { it.copy(requestingVpnPermission = false, message = if(it.autoNodeEnabled) "AUTO has no eligible verified proxy; run GET/HEAD diagnostics or choose a node manually" else "select a node first") }
@@ -451,7 +448,6 @@ class MainViewModel(
     }
 
     fun reconnectCurrentProfile() {
-        if(state.value.testingNodeIds.isNotEmpty()) return
         val profile = resolvedConnectionProfile() ?: return
         mutableState.update {
             it.copy(
@@ -469,6 +465,7 @@ class MainViewModel(
     }
 
     fun disconnect() {
+        diagnostics.cancelConnection()
         mutableState.update {
             it.copy(
                 vpnState = VpnConnectionState.DISCONNECTING,
@@ -500,49 +497,57 @@ class MainViewModel(
         uiPreferences.edit().putString("theme", theme.name).apply()
     }
 
-    fun testNode(profile: ProxyNode) { if(state.value.testingNodeIds.isEmpty()) viewModelScope.launch { diagnostics.run(listOf(profile)) } }
-    fun testAllNodes() { state.value.selectedSubscription?.let { group -> if(state.value.testingNodeIds.isEmpty()) viewModelScope.launch { runAllNodeTests(group.id,false) } } }
+    fun testNode(profile: ProxyNode) { viewModelScope.launch { diagnostics.run(listOf(profile)) } }
+    fun testAllNodes() {
+        val groupId = state.value.selectedSubscriptionId ?: return
+        viewModelScope.launch { runAllNodeTests(groupId) }
+    }
     fun cancelDiagnostics() { diagnostics.cancel() }
-    private suspend fun runAllNodeTests(subscriptionId: String, activateDelaySort: Boolean, selectAutoAfter: Boolean = false) {
+    private suspend fun runAllNodeTests(subscriptionId: String, selectAutoAfter: Boolean = false) {
         val group=state.value.subscriptions.firstOrNull { it.id==subscriptionId } ?: return
-        diagnostics.run(group.profiles)
-        if(activateDelaySort) updateSubscriptionSortMode(subscriptionId,NodeSortMode.DELAY)
-        if(selectAutoAfter && state.value.autoNodeEnabled && state.value.selectedSubscriptionId==subscriptionId) {
+        val completed = diagnostics.run(group.profiles, groupId = subscriptionId)
+        if(completed && selectAutoAfter && !state.value.vpnConnected && !state.value.vpnBusy &&
+            state.value.autoNodeEnabled && state.value.selectedSubscriptionId==subscriptionId) {
             resolveAutoProfile()?.let { selectProfileInternal(it.id); mutableState.update { old -> old.copy(message="AUTO · ${it.name}") } }
                 ?: mutableState.update { it.copy(message="AUTO has no eligible verified proxy; check exclusions/threshold or choose a node manually") }
         }
     }
     fun testConnection() {
         val node=state.value.subscriptions.flatMap {it.profiles}.firstOrNull { it.id==VpnRuntime.state.value.nodeId } ?: return
-        if(state.value.vpnConnected && state.value.testingNodeIds.isEmpty()) viewModelScope.launch { diagnostics.run(listOf(node),true) }
+        if(state.value.vpnConnected) viewModelScope.launch { diagnostics.run(listOf(node), connection = true) }
     }
     private fun runScheduledDiagnostics() {
-        if(state.value.vpnConnected || state.value.vpnBusy || state.value.testingNodeIds.isNotEmpty()) return
+        if(state.value.vpnConnected || state.value.vpnBusy || state.value.diagnosticsRunning) return
         if(state.value.settings.ping.selectedOnly) state.value.selectedProfile?.let(::testNode) else testAllNodes()
     }
     fun updateSettings(settings: dev.dotclient.android.core.settings.AppSettings, base: dev.dotclient.android.core.settings.AppSettings? = null) {
-        if(state.value.testingNodeIds.isNotEmpty()) { mutableState.update { it.copy(message="Cancel diagnostics before changing settings") }; return }
+        if(state.value.diagnosticsRunning) { mutableState.update { it.copy(message="Cancel diagnostics before changing settings") }; return }
         viewModelScope.launch { settingsMutex.withLock {
+            if (state.value.diagnosticsRunning) {
+                mutableState.update { it.copy(message = "Cancel diagnostics before changing settings") }
+                return@withLock
+            }
+            mutableState.update { it.copy(savingSettings = true) }
             try {
                 val saved=withContext(kotlinx.coroutines.Dispatchers.IO) { settingsRepository.update(base,settings) }
                 mutableState.update { old ->
                     val results=old.pingResults.filterValues { it.settings==saved.ping }
-                    old.copy(settings=saved,pingResults=results,nodeLatenciesMs=results.mapNotNull { (id,r)->r.latencyMs?.let {id to it} }.toMap(),nodeLatencyFailedIds=results.filterValues {!it.success && it.error?.startsWith("HEAD unsupported")!=true}.keys,message=if(old.vpnConnected) "Saved · DNS/routing/log changes apply after reconnect" else "Settings saved")
+                    old.copy(settings=saved,pingResults=results,nodeLatenciesMs=results.mapNotNull { (id,r)->r.latencyMs?.let {id to it} }.toMap(),nodeLatencyFailedIds=results.filterValues {!it.success && !it.unavailable}.keys,diagnosticBatch=old.diagnosticBatch.takeIf { old.settings.ping==saved.ping },message=if(old.vpnConnected) "Saved · DNS/routing/log changes apply after reconnect" else "Settings saved")
                 }
             } catch(e: Exception) { mutableState.update { it.copy(message=e.message ?: "Could not save settings") } }
+            finally { mutableState.update { it.copy(savingSettings = false) } }
         } }
     }
-    fun clearDiagnostics() { if(state.value.testingNodeIds.isNotEmpty()) return; settingsRepository.saveResults(emptyMap()); mutableState.update { it.copy(pingResults=emptyMap(),nodeLatenciesMs=emptyMap(),nodeLatencyFailedIds=emptySet()) } }
+    fun clearDiagnostics() { if(state.value.diagnosticsRunning) return; settingsRepository.saveResults(emptyMap()); mutableState.update { it.copy(pingResults=emptyMap(),nodeLatenciesMs=emptyMap(),nodeLatencyFailedIds=emptySet(),diagnosticBatch=null) } }
     fun refreshAllSubscriptions() = viewModelScope.launch {
         for(group in state.value.subscriptions.toList()) {
-            state.first { it.loadingSubscriptionId==null && it.testingNodeIds.isEmpty() }
+            state.first { it.loadingSubscriptionId==null && !it.diagnosticsRunning }
             refreshSubscription(group.id)
             state.first { it.loadingSubscriptionId==null }
         }
     }
 
     fun switchProfile(id: String) {
-        if(state.value.testingNodeIds.isNotEmpty()) return
         val group = state.value.selectedSubscription ?: return
         val profile = group.profiles.firstOrNull { it.id == id } ?: return
         selectProfile(id)
@@ -565,7 +570,7 @@ class MainViewModel(
     fun redactedSubscriptionUrl(url: String): String = SecretRedactor.url(url)
 
     private fun startVpn(profile: ProxyNode) {
-        if(state.value.testingNodeIds.isNotEmpty()) { mutableState.update { it.copy(message="Wait for diagnostics to finish") }; return }
+        diagnostics.cancelConnection()
         val application = getApplication<Application>()
         val intent = Intent(application, DotVpnService::class.java)
             .setAction(DotVpnService.ACTION_CONNECT)
