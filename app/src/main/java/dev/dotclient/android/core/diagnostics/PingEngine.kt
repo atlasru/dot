@@ -13,6 +13,7 @@ import android.os.Messenger
 import android.util.Log
 import dev.dotclient.android.core.model.ProxyConfig
 import dev.dotclient.android.core.model.ProxyNode
+import dev.dotclient.android.vpn.VpnRuntime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -98,6 +99,7 @@ class PingEngine(private val context: Context) {
                 message.replyTo = reply
                 message.data = Bundle().apply {
                     putString("settings", settings.json().toString())
+                    putParcelable("underlay", VpnRuntime.underlyingNetwork)
                     putString("nodes", JSONArray(nodes.map { node ->
                         JSONObject().put("id", node.id).apply {
                             if (settings.method.proxy) put("uri", node.rawUri)

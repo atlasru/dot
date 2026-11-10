@@ -77,6 +77,7 @@ class PingService : Service() {
         super.onDestroy()
     }
 
+    @Suppress("DEPRECATION") // The typed Parcelable overload requires API 33.
     private suspend fun runBatch(data: Bundle, id: Int, reply: Messenger) {
         val settings = PingSettings.from(JSONObject(data.getString("settings")!!))
         val payload = JSONArray(data.getString("nodes")!!)
@@ -91,7 +92,7 @@ class PingService : Service() {
         }
 
         val connectivity = getSystemService(ConnectivityManager::class.java)
-        val network = connectivity.diagnosticNetwork()
+        val network = connectivity.diagnosticNetwork(data.getParcelable<Network>("underlay"))
         if (network == null) {
             for (index in 0 until payload.length()) {
                 report(payload.getJSONObject(index).getString("id"), failedProbe(settings, "No underlying network for diagnostics"))
@@ -212,11 +213,12 @@ class PingService : Service() {
 }
 
 @Suppress("DEPRECATION")
-private fun ConnectivityManager.diagnosticNetwork(): Network? {
+private fun ConnectivityManager.diagnosticNetwork(preferred: Network?): Network? {
     fun Network.capabilities() = getNetworkCapabilities(this)?.takeIf {
         it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) &&
             it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
+    if (preferred?.capabilities() != null) return preferred
     activeNetwork?.let { if (it.capabilities() != null) return it }
     return allNetworks.mapNotNull { network -> network.capabilities()?.let { network to it } }
         .maxByOrNull { (_, capabilities) ->
