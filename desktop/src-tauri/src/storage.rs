@@ -1,6 +1,7 @@
-use std::{fs, path::{Path, PathBuf}, sync::Mutex};
+use std::{collections::{HashMap, HashSet}, fs, path::{Path, PathBuf}, sync::Mutex};
 
 use crate::{
+    diagnostics::PingResult,
     model::{
         AppPreferences, AppTheme, GroupView, NodeEditView, NodeLatency, NodeSortMode, PersistedState,
         SelectionView, SubscriptionGroup, SubscriptionRefreshResult, ProxyNode,
@@ -38,8 +39,12 @@ impl Store {
     }
 
     pub fn groups(&self) -> Vec<GroupView> {
+        self.groups_with_results(&HashMap::new())
+    }
+
+    pub fn groups_with_results(&self, live: &HashMap<String, PingResult>) -> Vec<GroupView> {
         let state = self.inner.lock().expect("store poisoned");
-        state.groups.iter().map(|group| build_group_view(&state, group)).collect()
+        state.groups.iter().map(|group| build_group_view(&state, group, live)).collect()
     }
 
     pub fn selection(&self) -> SelectionView {
@@ -70,6 +75,17 @@ impl Store {
         self.transaction(|s| {
             if !s.groups.iter().any(|g| g.nodes.iter().any(|n| n.id==id)) { return Err("node no longer exists".into()); }
             if result.compatible(&s.preferences.advanced.ping) { s.diagnostics.insert(id.to_string(),result); }
+            Ok(())
+        })
+    }
+    pub fn record_diagnostics(&self, results: HashMap<String, PingResult>) -> Result<(), String> {
+        if results.is_empty() { return Ok(()); }
+        self.transaction(|state| {
+            let valid_ids: HashSet<_> = state.groups.iter().flat_map(|g| g.nodes.iter().map(|n| n.id.as_str())).collect();
+            let settings = &state.preferences.advanced.ping;
+            state.diagnostics.extend(results.into_iter().filter(|(id, result)| {
+                valid_ids.contains(id.as_str()) && result.compatible(settings)
+            }));
             Ok(())
         })
     }
@@ -108,7 +124,7 @@ impl Store {
         self.save_locked(&s)?;
         *guard = s.clone();
         let group = s.groups.iter().find(|group| group.id == group_id).expect("group checked above");
-        Ok(build_group_view(&s, group))
+        Ok(build_group_view(&s, group, &HashMap::new()))
     }
 
     pub fn set_selection(&self, group_id: &str, node_id: &str) -> Result<SelectionView, String> { self.set_selection_mode(group_id,node_id,false) }
@@ -146,7 +162,7 @@ impl Store {
         prune_runtime_metadata(&mut s);
         self.save_locked(&s)?;
         *guard = s.clone();
-        s.groups.iter().find(|g| g.id == id).map(|group| build_group_view(&s, group)).ok_or_else(|| "subscription group disappeared after save".into())
+        s.groups.iter().find(|g| g.id == id).map(|group| build_group_view(&s, group, &HashMap::new())).ok_or_else(|| "subscription group disappeared after save".into())
     }
 
     pub fn apply_refresh(&self, group_id: &str, nodes: Vec<ProxyNode>, updated_at_ms: u64) -> Result<SubscriptionRefreshResult, String> {
@@ -208,7 +224,7 @@ impl Store {
         self.save_locked(&s)?;
         *guard = s.clone();
 
-        let group = build_group_view(&s, &s.groups[index]);
+        let group = build_group_view(&s, &s.groups[index], &HashMap::new());
         Ok(SubscriptionRefreshResult {
             group,
             added: diff.added.iter().map(Into::into).collect(),
@@ -243,6 +259,15 @@ impl Store {
 
     pub fn group_nodes(&self, group_id: &str) -> Result<Vec<ProxyNode>, String> {
         self.inner.lock().map_err(|_| "store lock poisoned".to_string())?.groups.iter().find(|g| g.id == group_id).map(|g| g.nodes.clone()).ok_or_else(|| "subscription group not found".into())
+    }
+
+    pub fn unmeasured_nodes(&self, group_id: &str) -> Result<Vec<ProxyNode>, String> {
+        let state = self.inner.lock().map_err(|_| "store lock poisoned".to_string())?;
+        let group = state.groups.iter().find(|group| group.id == group_id).ok_or("subscription group not found")?;
+        let settings = &state.preferences.advanced.ping;
+        Ok(group.nodes.iter().filter(|node| {
+            !state.diagnostics.get(&node.id).is_some_and(|result| result.compatible(settings))
+        }).cloned().collect())
     }
 
     pub fn node(&self, group_id: &str, node_id: &str) -> Result<ProxyNode, String> {
@@ -313,14 +338,14 @@ impl Store {
     }
 }
 
-fn build_group_view(state: &PersistedState, group: &SubscriptionGroup) -> GroupView {
+fn build_group_view(state: &PersistedState, group: &SubscriptionGroup, live: &HashMap<String, PingResult>) -> GroupView {
     let mut view = GroupView::from(group);
     view.sort_mode = state.sort_modes.get(&group.id).copied().unwrap_or_default();
     for node in &mut view.nodes {
         node.favorite = state.favorites.contains(&node.id);
-        if let Some(result) = state.diagnostics.get(&node.id).filter(|r|r.compatible(&state.preferences.advanced.ping)) {
+        if let Some(result) = live.get(&node.id).or_else(|| state.diagnostics.get(&node.id)).filter(|r|r.compatible(&state.preferences.advanced.ping)) {
             node.latency_ms=result.latency_ms;
-            node.latency_failed=!result.success && !result.error.as_deref().unwrap_or("").starts_with("HEAD unsupported");
+            node.latency_failed = !result.success && !result.unavailable();
             node.diagnostic=Some(result.clone());
         }
     }

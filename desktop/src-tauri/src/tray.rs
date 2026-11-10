@@ -34,6 +34,7 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
             "quit" => {
                 let state = app.state::<SharedState>();
                 state.exiting.store(true, Ordering::SeqCst);
+                state.diagnostics.cancel(false);
                 state.cancel.store(true, Ordering::SeqCst);
                 if let Ok(mut engine) = state.engine.try_lock() { engine.stop(); }
                 app.exit(0);

@@ -45,7 +45,7 @@ impl VpnEngine {
 
     pub fn start(&mut self, node: &ProxyNode) -> Result<EngineSnapshot, String> {
         self.stop_internal();
-        self.cancel.store(false, Ordering::SeqCst);
+        if self.is_cancelled() { return Ok(self.cancelled()); }
         self.set_starting(node, "validating Xray configuration");
 
         let (xray, _) = self.prepare_runtime().map_err(|e| self.publish_error(node, e))?;
@@ -129,7 +129,9 @@ impl VpnEngine {
                 return Err(self.publish_error(node, error));
             }
         }
+        let mut shared = self.shared.write().unwrap_or_else(|error| error.into_inner());
         if self.is_cancelled() {
+            drop(shared);
             terminate_local(job, &mut child);
             let _ = self.journal.clear();
             return Ok(self.cancelled());
@@ -138,7 +140,7 @@ impl VpnEngine {
         self.job = Some(job);
         self.child = Some(child);
         let value = EngineSnapshot { phase: EnginePhase::Connected, node_name: Some(node.name.clone()), node_id: Some(node.id.clone()), message: Some("connected".into()) };
-        self.publish(value.clone());
+        *shared = value.clone();
         Ok(value)
     }
 
@@ -288,4 +290,28 @@ fn command(xray: &Path, current_dir: &Path) -> Command {
         value.creation_flags(0x08000000);
     }
     value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disconnect_before_start_worker_prevents_runtime_start() {
+        let directory = std::env::temp_dir().join(format!("dot-start-cancel-{}", std::process::id()));
+        let store = Arc::new(crate::storage::Store::open(directory.join("state.json")).unwrap());
+        let snapshot = Arc::new(RwLock::new(EngineSnapshot::default()));
+        let cancel = Arc::new(AtomicBool::new(true));
+        let mut engine = VpnEngine::new(
+            store, directory.join("absent-runtime"), directory.clone(),
+            Arc::clone(&snapshot), Arc::clone(&cancel),
+        ).unwrap();
+        let node = crate::vless::parse_vless("vless://test@127.0.0.1:443").unwrap();
+
+        assert_eq!(engine.start(&node).unwrap().phase, EnginePhase::Offline);
+        assert!(cancel.load(Ordering::SeqCst));
+        assert!(!directory.join("config.json").exists());
+        drop(engine);
+        let _ = fs::remove_dir(directory);
+    }
 }

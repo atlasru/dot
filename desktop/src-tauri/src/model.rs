@@ -244,15 +244,6 @@ pub struct UrlTestResult {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct GroupUrlTestResult {
-    pub group_id: String,
-    pub succeeded: usize,
-    pub failed: usize,
-    pub results: Vec<UrlTestResult>,
-    pub failed_node_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
 pub struct NodeChangeView {
     pub id: String,
     pub name: String,

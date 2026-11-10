@@ -36,7 +36,17 @@ export interface TrafficSnapshot { download_bytes_per_second: number; upload_byt
 export interface AppPreferences { advanced: AdvancedSettings; theme: AppTheme; close_to_tray: boolean; refresh_on_start: boolean; refresh_interval_hours: number; }
 export interface SelectionView { group_id: string | null; node_id: string | null; }
 export interface UrlTestResult { node_id: string; latency_ms: number; active_tunnel: boolean; }
-export interface GroupUrlTestResult { group_id: string; succeeded: number; failed: number; results: UrlTestResult[]; failed_node_ids: string[]; }
+export interface DiagnosticBatch {
+  run_id: number;
+  group_id: string;
+  phase: "running" | "cancelling" | "completed" | "cancelled" | "failed";
+  checked: number;
+  total: number;
+  succeeded: number;
+  failed: number;
+  unavailable: number;
+  pending_node_ids: string[];
+}
 
 export interface NodeChangeView { id: string; name: string; }
 export interface NodeEditView { before: NodeChangeView; after: NodeChangeView; changed_fields: string[]; }

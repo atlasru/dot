@@ -2,6 +2,8 @@ use serde_json::{json, Map, Value};
 
 use crate::model::{ProxyConfig, Security, Transport, ProxyNode};
 
+pub const TUN_INTERFACE_NAME: &str = "dot0";
+
 pub fn apply_settings(config: &mut Value, settings: &crate::settings::AdvancedSettings) {
     config["log"]["loglevel"] = json!(settings.log_level);
     config["dns"] = json!({"servers":[settings.dns]});
@@ -23,7 +25,7 @@ pub fn build_xray_config(node: &ProxyNode) -> Result<Value, String> {
                 "tag": "dot-tun",
                 "protocol": "tun",
                 "settings": {
-                    "name": "dot0",
+                    "name": TUN_INTERFACE_NAME,
                     "desc": "dot.",
                     "mtu": 1500,
                     "gateway": ["10.77.0.1/30"],
@@ -68,15 +70,12 @@ pub fn build_url_test_config(node: &ProxyNode, port: u16) -> Result<Value, Strin
                 "listen": "127.0.0.1",
                 "port": port,
                 "protocol": "http",
-                "settings": { "timeout": 5 }
+                "settings": {}
             }
         ],
         "outbounds": [
-            proxy,
-            {
-                "tag": "direct",
-                "protocol": "freedom"
-            }
+            { "tag": "blocked", "protocol": "blackhole" },
+            proxy
         ],
         "routing": {
             "domainStrategy": "AsIs",
@@ -277,6 +276,8 @@ mod tests {
         assert_eq!(config["inbounds"][0]["protocol"], "http");
         assert_eq!(config["inbounds"][0]["listen"], "127.0.0.1");
         assert_eq!(config["inbounds"][0]["port"], 18080);
+        assert_eq!(config["outbounds"][0]["protocol"], "blackhole");
+        assert_eq!(config["outbounds"][1]["tag"], "proxy");
         assert_eq!(config["routing"]["rules"][0]["outboundTag"], "proxy");
     }
 }
