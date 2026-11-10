@@ -90,17 +90,13 @@ internal class NodeDiagnostics(
                         ) {
                             return@update old.copy(testingNodeIds = pending)
                         }
-                        val nextBatch = if (batch == null) old.diagnosticBatch else old.diagnosticBatch?.record(node.id, result)
+                        val nextBatch = if (batch == null) {
+                            old.diagnosticBatch?.supersedeUnchecked(node.id)
+                        } else old.diagnosticBatch?.record(node.id, result)
                         old.copy(
                             pingResults = old.pingResults + (node.id to result),
-                            nodeLatenciesMs = result.latencyMs?.let { old.nodeLatenciesMs + (node.id to it) }
-                                ?: (old.nodeLatenciesMs - node.id),
-                            nodeLatencyFailedIds = if (!result.success && !result.unavailable) {
-                                old.nodeLatencyFailedIds + node.id
-                            } else old.nodeLatencyFailedIds - node.id,
                             testingNodeIds = pending,
                             diagnosticBatch = nextBatch,
-                            message = if (batch == null) result.error ?: "Diagnostics complete · ${settings.method.label}" else old.message,
                         )
                     }
                     completed++

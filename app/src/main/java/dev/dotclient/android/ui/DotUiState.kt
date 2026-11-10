@@ -1,5 +1,6 @@
 package dev.dotclient.android.ui
 
+import dev.dotclient.android.core.diagnostics.PingResult
 import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.NodeSorter
 import dev.dotclient.android.core.model.Subscription
@@ -11,7 +12,7 @@ import dev.dotclient.android.vpn.VpnFailureCategory
 data class DotUiState(
     val settings: dev.dotclient.android.core.settings.AppSettings = dev.dotclient.android.core.settings.AppSettings(),
     val savingSettings: Boolean = false,
-    val pingResults: Map<String,dev.dotclient.android.core.diagnostics.PingResult> = emptyMap(),
+    val pingResults: Map<String, PingResult> = emptyMap(),
     val subscriptions: List<Subscription> = emptyList(),
     val selectedSubscriptionId: String? = null,
     val loadingSubscriptionId: String? = null,
@@ -30,8 +31,6 @@ data class DotUiState(
     val sessionUploadBytes: Long = 0L,
     val runningNodeId: String? = null,
     val runningNodeName: String? = null,
-    val nodeLatenciesMs: Map<String, Long> = emptyMap(),
-    val nodeLatencyFailedIds: Set<String> = emptySet(),
     val diagnosticsRunning: Boolean = false,
     val testingNodeIds: Set<String> = emptySet(),
     val diagnosticBatch: DiagnosticBatch? = null,
@@ -50,10 +49,19 @@ data class DotUiState(
         get() = selectedSubscription?.sortMode ?: NodeSortMode.ORIGIN
 
     val sortedProfiles: List<ProxyNode>
-        get() = NodeSorter.sort(
-            profiles, selectedSortMode, nodeLatenciesMs,
-            if (selectedSortMode == NodeSortMode.DELAY) pingResults.filterValues { !it.success }.keys else emptySet(),
-        )
+        get() {
+            val batch = diagnosticBatch?.takeIf { it.groupId == selectedSubscriptionId && !it.running }
+            val results = if (selectedSortMode == NodeSortMode.DELAY && batch != null) {
+                pingResults.filterKeys { batch.uncheckedLabel(it) == null }
+            } else pingResults
+            return NodeSorter.sort(profiles, selectedSortMode, results)
+        }
+
+    internal fun uncheckedDiagnosticLabel(groupId: String?, id: String): String? =
+        diagnosticBatch?.takeIf { it.groupId == groupId }?.uncheckedLabel(id)
+
+    internal fun measuredResult(groupId: String, id: String): PingResult? =
+        pingResults[id].takeUnless { uncheckedDiagnosticLabel(groupId, id) != null }
 
     val selectedProfileId: String?
         get() = selectedSubscription?.selectedProfileId

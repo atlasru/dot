@@ -15,6 +15,7 @@ data class AppSettings(
     val retrySeconds: Int = 1, val maxRetrySeconds: Int = 30,
     val refreshOnStart: Boolean = false, val refreshHours: Int = 0,
     val subscriptionTimeoutSeconds: Int = 20, val subscriptionUserAgent: String = "",
+    val showDetailedTestErrors: Boolean = false,
 ) {
     fun remapExclusions(diff: dev.dotclient.android.core.subscription.SubscriptionDiff, validIds: Set<String>): AppSettings {
         val replacements=autoExcluded.mapNotNull { diff.replacementFor(it)?.id }.toSet()
@@ -32,11 +33,14 @@ data class AppSettings(
         require(subscriptionUserAgent.length <= 256 && subscriptionUserAgent.all { it in ' '..'~' }) { "User-Agent must be printable ASCII" }
     }
     fun json() = JSONObject().put("schema_version",1).put("ping",ping.json()).put("auto_connect",autoConnect).put("auto_max_latency_ms",autoMaxLatencyMs).put("auto_excluded",JSONArray(autoExcluded.toList())).put("compact_nodes",compactNodes).put("show_latency",showLatency).put("show_transport",showTransport).put("dns",dns).put("bypass_lan",bypassLan).put("log_level",logLevel).put("reconnect",reconnect).put("reconnect_on_network",reconnectOnNetwork).put("retry_seconds",retrySeconds).put("max_retry_seconds",maxRetrySeconds).put("refresh_on_start",refreshOnStart).put("refresh_hours",refreshHours).put("subscription_timeout_seconds",subscriptionTimeoutSeconds).put("subscription_user_agent",subscriptionUserAgent)
+        .put("show_detailed_test_errors", showDetailedTestErrors)
     companion object {
         fun from(j: JSONObject): AppSettings {
             require(j.optInt("schema_version",1)==1) { "Unsupported settings version" }
             val excluded=j.optJSONArray("auto_excluded") ?: JSONArray()
-            return AppSettings(PingSettings.from(j.optJSONObject("ping") ?: JSONObject()), j.optBoolean("auto_connect"),j.optLong("auto_max_latency_ms"),List(excluded.length()) {excluded.getString(it)}.toSet(),j.optBoolean("compact_nodes"),j.optBoolean("show_latency",true),j.optBoolean("show_transport",true),j.optString("dns","1.1.1.1"),j.optBoolean("bypass_lan"),j.optString("log_level","warning"),j.optBoolean("reconnect",true),j.optBoolean("reconnect_on_network",true),j.optInt("retry_seconds",1),j.optInt("max_retry_seconds",30),j.optBoolean("refresh_on_start"),j.optInt("refresh_hours"),j.optInt("subscription_timeout_seconds",20),j.optString("subscription_user_agent","")).also { it.validate() }
+            return AppSettings(PingSettings.from(j.optJSONObject("ping") ?: JSONObject()), j.optBoolean("auto_connect"),j.optLong("auto_max_latency_ms"),List(excluded.length()) {excluded.getString(it)}.toSet(),j.optBoolean("compact_nodes"),j.optBoolean("show_latency",true),j.optBoolean("show_transport",true),j.optString("dns","1.1.1.1"),j.optBoolean("bypass_lan"),j.optString("log_level","warning"),j.optBoolean("reconnect",true),j.optBoolean("reconnect_on_network",true),j.optInt("retry_seconds",1),j.optInt("max_retry_seconds",30),j.optBoolean("refresh_on_start"),j.optInt("refresh_hours",0),j.optInt("subscription_timeout_seconds",20),j.optString("subscription_user_agent",""),
+                showDetailedTestErrors = j.optBoolean("show_detailed_test_errors"),
+            ).also { it.validate() }
         }
     }
 }

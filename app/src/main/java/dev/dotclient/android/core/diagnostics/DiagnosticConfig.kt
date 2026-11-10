@@ -5,13 +5,14 @@ import libXray.LibXray
 import org.json.JSONArray
 import org.json.JSONObject
 import dev.dotclient.android.vpn.Hysteria2XrayConfig
+import java.net.URISyntaxException
 
 internal object DiagnosticConfig {
     fun proxyOutbound(rawUri: String): JSONObject {
         val outbounds = convertProfile(rawUri).getJSONArray("outbounds")
-        return (0 until outbounds.length()).map { outbounds.getJSONObject(it) }.first {
+        return (0 until outbounds.length()).map { outbounds.getJSONObject(it) }.firstOrNull {
             it.optString("protocol") in listOf("vless", "hysteria")
-        }
+        } ?: throw ProbeFailure("Proxy configuration has no supported outbound", PingStatus.FAIL)
     }
 
     fun batch(outbounds: List<JSONObject>, ports: List<Int>): JSONObject {
@@ -33,7 +34,19 @@ internal object DiagnosticConfig {
 
     private fun convertProfile(rawUri: String): JSONObject {
         if (rawUri.startsWith("hy2://", true) || rawUri.startsWith("hysteria2://", true)) {
-            return Hysteria2XrayConfig.fromUri(rawUri)
+            try {
+                return Hysteria2XrayConfig.fromUri(rawUri)
+            } catch (_: IllegalArgumentException) {
+                throw ProbeFailure("Invalid or unsupported Hysteria2 configuration", PingStatus.FAIL)
+            } catch (_: URISyntaxException) {
+                throw ProbeFailure("Invalid Hysteria2 URI", PingStatus.FAIL)
+            } catch (error: IllegalStateException) {
+                when (val reason = error.message) {
+                    "Hysteria2 host is missing", "Invalid Hysteria2 insecure flag" ->
+                        throw ProbeFailure(reason, PingStatus.FAIL)
+                    else -> throw error
+                }
+            }
         }
         val request = JSONObject()
             .put("apiVersion", 1)
@@ -41,10 +54,10 @@ internal object DiagnosticConfig {
             .put("payload", JSONObject().put("text", rawUri))
         val response = JSONObject(LibXray.invoke(request.toString()))
         if (!response.optBoolean("success")) {
-            error(response.optString("error", "failed to convert VLESS link"))
+            throw conversionFailure(response.optString("error"))
         }
         val generated = response.optString("data")
-        if (generated.isBlank()) error("libXray returned an empty config")
+        if (generated.isBlank()) throw ProbeFailure("Diagnostics core returned an empty configuration")
         val config = JSONObject(generated)
         val shareUri = Uri.parse(rawUri)
         config.remove("metrics")

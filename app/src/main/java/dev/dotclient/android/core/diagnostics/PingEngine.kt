@@ -24,6 +24,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.EventListener
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -34,6 +35,7 @@ import java.net.InetSocketAddress
 import java.net.Proxy
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -161,7 +163,10 @@ class PingEngine(private val context: Context) {
 }
 
 internal fun failedProbe(settings: PingSettings, error: String): PingResult =
-    PingResult(settings, null, System.currentTimeMillis(), false, error, emptyList())
+    failedProbe(settings, ProbeFailure(error))
+
+internal fun failedProbe(settings: PingSettings, failure: ProbeFailure): PingResult =
+    PingResult(settings, null, System.currentTimeMillis(), failure.status, failure.message, emptyList())
 
 internal suspend fun measure(
     settings: PingSettings,
@@ -169,32 +174,36 @@ internal suspend fun measure(
     attempt: suspend () -> Long,
 ): PingResult {
     val samples = mutableListOf<Long>()
-    var error: String? = null
+    var failure: ProbeFailure? = null
     repeat(settings.attempts) {
         currentCoroutineContext().ensureActive()
         try {
-            samples += attempt()
+            val latency = attempt()
+            if (latency < 0) throw ProbeFailure("Invalid measured latency")
+            samples += latency
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (failed: IOException) {
-            error = failed.message ?: "Diagnostics failed"
-        } catch (_: Exception) {
-            error = "Diagnostics failed"
+        } catch (failed: Exception) {
+            val current = failed as? ProbeFailure ?: ProbeFailure("Diagnostics failed")
+            if (failure?.status != PingStatus.FAIL || current.status == PingStatus.FAIL) failure = current
         }
     }
     currentCoroutineContext().ensureActive()
-    val success = samples.size == settings.attempts
-    return PingResult(settings, if (success) aggregate(samples, settings.aggregation) else null,
-        System.currentTimeMillis(), success, error, samples, active)
+    val latency = if (samples.size == settings.attempts) aggregate(samples, settings.aggregation) else null
+    return PingResult(settings, latency, System.currentTimeMillis(),
+        if (latency != null) PingStatus.OK else failure?.status ?: PingStatus.UNAVAILABLE,
+        failure?.message, samples, active)
 }
 
 internal fun loopbackProxy(port: Int): Proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", port))
 
-internal suspend fun httpAttempt(settings: PingSettings, proxy: Proxy): Long =
-    withTimeoutOrNull(settings.timeoutSeconds * 1000L) { executeHttp(settings, proxy) }
-        ?: throw IOException("HTTP request timed out")
+internal suspend fun httpAttempt(settings: PingSettings, proxy: Proxy): Long {
+    val phase = AtomicReference(HttpProbePhase.HTTP)
+    return withTimeoutOrNull(settings.timeoutSeconds * 1000L) { executeHttp(settings, proxy, phase) }
+        ?: throw ProbeFailure(phase.get().timeout)
+}
 
-private suspend fun executeHttp(settings: PingSettings, proxy: Proxy): Long =
+private suspend fun executeHttp(settings: PingSettings, proxy: Proxy, phase: AtomicReference<HttpProbePhase>): Long =
     suspendCancellableCoroutine { continuation ->
         val client = OkHttpClient.Builder()
             .proxy(proxy)
@@ -202,6 +211,14 @@ private suspend fun executeHttp(settings: PingSettings, proxy: Proxy): Long =
             .followSslRedirects(false)
             .retryOnConnectionFailure(false)
             .callTimeout(settings.timeoutSeconds.toLong(), TimeUnit.SECONDS)
+            .eventListener(object : EventListener() {
+                override fun dnsStart(call: Call, domainName: String) { phase.set(HttpProbePhase.DNS) }
+                override fun connectStart(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy) {
+                    phase.set(HttpProbePhase.CONNECT)
+                }
+                override fun secureConnectStart(call: Call) { phase.set(HttpProbePhase.TLS) }
+                override fun requestHeadersStart(call: Call) { phase.set(HttpProbePhase.HTTP) }
+            })
             .build()
         val method = if (settings.method == PingMethod.PROXY_HEAD) "HEAD" else "GET"
         val request = Request.Builder().url(settings.url).method(method, null).header("Cache-Control", "no-cache").build()
@@ -215,16 +232,16 @@ private suspend fun executeHttp(settings: PingSettings, proxy: Proxy): Long =
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 cleanup()
-                if (continuation.isActive) continuation.resumeWithException(IOException("HTTP request failed or timed out (DNS, TLS or proxy)"))
+                if (continuation.isActive) continuation.resumeWithException(httpFailure(e, phase.get(), proxy.type() == Proxy.Type.HTTP))
             }
 
             override fun onResponse(call: Call, response: Response) {
                 try {
                     response.use {
                         if (settings.method == PingMethod.PROXY_HEAD && it.code == 405) {
-                            throw ProbeResponseException("HEAD unsupported by test server (405); use GET; proxy health unknown")
+                            throw ProbeFailure("HEAD unsupported by test server (405); use GET")
                         }
-                        if (!it.isSuccessful) throw ProbeResponseException("Test URL returned HTTP ${it.code}")
+                        if (!it.isSuccessful) throw ProbeFailure("Test URL returned HTTP ${it.code}")
                         if (settings.method == PingMethod.PROXY_GET) {
                             val source = it.body.source()
                             var size = 0L
@@ -234,13 +251,13 @@ private suspend fun executeHttp(settings: PingSettings, proxy: Proxy): Long =
                                 if (read < 0) break
                                 size += read
                                 buffer.clear()
-                                if (size > 1_048_576) throw ProbeResponseException("Test response exceeds 1 MiB; use a small URL")
+                                if (size > 1_048_576) throw ProbeFailure("Test response exceeds 1 MiB; use a small URL")
                             }
                         }
                     }
                     if (continuation.isActive) continuation.resume(elapsedMs(start))
                 } catch (e: Exception) {
-                    val error = e as? ProbeResponseException ?: IOException("HTTP response failed or timed out")
+                    val error = httpFailure(e, HttpProbePhase.HTTP, proxy.type() == Proxy.Type.HTTP)
                     if (continuation.isActive) continuation.resumeWithException(error)
                 } finally {
                     cleanup()
@@ -248,7 +265,5 @@ private suspend fun executeHttp(settings: PingSettings, proxy: Proxy): Long =
             }
         })
     }
-
-private class ProbeResponseException(message: String) : IOException(message)
 
 internal fun elapsedMs(start: Long): Long = ((System.nanoTime() - start) / 1_000_000).coerceAtLeast(1)

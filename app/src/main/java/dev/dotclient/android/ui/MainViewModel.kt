@@ -103,8 +103,6 @@ class MainViewModel(
         val results=settingsRepository.results().filterValues { it.settings==settings.ping && !it.activeTunnel }
         return DotUiState(
             settings=settings, pingResults=results,
-            nodeLatenciesMs=results.mapNotNull { (id,r)->r.latencyMs?.let {id to it} }.toMap(),
-            nodeLatencyFailedIds=results.filterValues { !it.success && !it.unavailable }.keys,
             subscriptions = stored.subscriptions,
             selectedSubscriptionId = stored.selectedSubscriptionId,
             message = stored.loadError,
@@ -194,8 +192,6 @@ class MainViewModel(
                 val oldProfileIds = latestGroup.profiles.mapTo(hashSetOf()) { it.id }
                 val currentIds = decoded.profiles.mapTo(hashSetOf()) { it.id }
                 val results=old.pingResults.filterKeys { it !in oldProfileIds || it in currentIds }
-                val transferredLatencies=results.mapNotNull { (id,r)->r.latencyMs?.let { id to it } }.toMap()
-                val transferredFailures=results.filterValues { !it.success && !it.unavailable }.keys
 
                 val updated = old.subscriptions.map { group ->
                     if (group.id != id) return@map group
@@ -211,8 +207,6 @@ class MainViewModel(
                     selectedSubscriptionId = id,
                     loadingSubscriptionId = null,
                     pingResults = results,
-                    nodeLatenciesMs = transferredLatencies,
-                    nodeLatencyFailedIds = transferredFailures,
                     testingNodeIds = old.testingNodeIds - oldProfileIds,
                     diagnosticBatch = old.diagnosticBatch.takeUnless { it?.groupId == id },
                     message = null,
@@ -275,8 +269,6 @@ class MainViewModel(
                     old.selectedSubscriptionId
                 },
                 pingResults = old.pingResults.filterKeys { it !in removedProfileIds },
-                nodeLatenciesMs = old.nodeLatenciesMs.filterKeys { it !in removedProfileIds },
-                nodeLatencyFailedIds = old.nodeLatencyFailedIds - removedProfileIds,
                 testingNodeIds = old.testingNodeIds - removedProfileIds,
                 diagnosticBatch = old.diagnosticBatch.takeUnless { it?.groupId == id },
                 message = null,
@@ -329,9 +321,8 @@ class MainViewModel(
 
         val group = state.value.selectedSubscription ?: return
         val selected = resolveAutoProfile(group)
-        val hasFreshResult = selected != null && selected.id in state.value.nodeLatenciesMs
-        if (hasFreshResult) {
-            selectProfileInternal(selected!!.id)
+        if (selected != null) {
+            selectProfileInternal(selected.id)
             mutableState.update { it.copy(message = "AUTO · ${selected.name}") }
             return
         }
@@ -395,7 +386,7 @@ class MainViewModel(
         val current = state.value
         val group = current.subscriptions.firstOrNull { it.id == subscriptionId } ?: return
         if (group.sortMode != NodeSortMode.DELAY || group.profiles.isEmpty()) return
-        val missing = group.profiles.filter { current.pingResults[it.id]?.settings != current.settings.ping }
+        val missing = group.profiles.filter { current.measuredResult(group.id, it.id)?.settings != current.settings.ping }
         if (missing.isEmpty() || missing.all { it.id in current.testingNodeIds }) return
 
         delaySortRequest?.cancel()
@@ -403,7 +394,7 @@ class MainViewModel(
             val current = state.first { !it.diagnosticsRunning && !it.loading && !it.savingSettings }
             val latest = current.subscriptions.firstOrNull { it.id == subscriptionId } ?: return@launch
             if (latest.sortMode != NodeSortMode.DELAY) return@launch
-            val unmeasured = latest.profiles.filter { current.pingResults[it.id]?.settings != current.settings.ping }
+            val unmeasured = latest.profiles.filter { current.measuredResult(latest.id, it.id)?.settings != current.settings.ping }
             viewModelScope.launch { diagnostics.run(unmeasured, groupId = subscriptionId) }
         }
     }
@@ -532,13 +523,22 @@ class MainViewModel(
                 val saved=withContext(kotlinx.coroutines.Dispatchers.IO) { settingsRepository.update(base,settings) }
                 mutableState.update { old ->
                     val results=old.pingResults.filterValues { it.settings==saved.ping }
-                    old.copy(settings=saved,pingResults=results,nodeLatenciesMs=results.mapNotNull { (id,r)->r.latencyMs?.let {id to it} }.toMap(),nodeLatencyFailedIds=results.filterValues {!it.success && !it.unavailable}.keys,diagnosticBatch=old.diagnosticBatch.takeIf { old.settings.ping==saved.ping },message=if(old.vpnConnected) "Saved · DNS/routing/log changes apply after reconnect" else "Settings saved")
+                    val needsReconnect = saved.dns != old.settings.dns || saved.bypassLan != old.settings.bypassLan ||
+                        saved.logLevel != old.settings.logLevel
+                    old.copy(
+                        settings = saved,
+                        pingResults = results,
+                        diagnosticBatch = old.diagnosticBatch.takeIf { old.settings.ping == saved.ping },
+                        message = if (old.vpnConnected && needsReconnect) {
+                            "Saved · DNS/routing/log changes apply after reconnect"
+                        } else "Settings saved",
+                    )
                 }
             } catch(e: Exception) { mutableState.update { it.copy(message=e.message ?: "Could not save settings") } }
             finally { mutableState.update { it.copy(savingSettings = false) } }
         } }
     }
-    fun clearDiagnostics() { if(state.value.diagnosticsRunning) return; settingsRepository.saveResults(emptyMap()); mutableState.update { it.copy(pingResults=emptyMap(),nodeLatenciesMs=emptyMap(),nodeLatencyFailedIds=emptySet(),diagnosticBatch=null) } }
+    fun clearDiagnostics() { if(state.value.diagnosticsRunning) return; settingsRepository.saveResults(emptyMap()); mutableState.update { it.copy(pingResults=emptyMap(),diagnosticBatch=null) } }
     fun refreshAllSubscriptions() = viewModelScope.launch {
         for(group in state.value.subscriptions.toList()) {
             state.first { it.loadingSubscriptionId==null && !it.diagnosticsRunning }

@@ -42,19 +42,66 @@ fun aggregate(samples: List<Long>, mode: Aggregation): Long? {
         Aggregation.MEDIAN -> samples.sorted().let { if (it.size % 2 == 0) (it[it.size/2-1]+it[it.size/2])/2 else it[it.size/2] }
     }
 }
+enum class PingStatus { OK, FAIL, UNAVAILABLE }
+
 data class PingResult(
-    val settings: PingSettings, val latencyMs: Long?, val testedAtMs: Long,
-    val success: Boolean, val error: String?, val samples: List<Long>, val activeTunnel: Boolean = false,
+    val settings: PingSettings,
+    val latencyMs: Long?,
+    val testedAtMs: Long,
+    val status: PingStatus,
+    val error: String?,
+    val samples: List<Long>,
+    val activeTunnel: Boolean = false,
 ) {
+    init {
+        require(if (status == PingStatus.OK) latencyMs != null && latencyMs >= 0 else latencyMs == null)
+    }
+
+    val success get() = status == PingStatus.OK
     val method get() = settings.method
     val url get() = settings.url.takeIf { method.proxy }
     fun verified(current: PingSettings) = success && !activeTunnel && method.proxy &&
         settings == current && System.currentTimeMillis() - testedAtMs in 0..899_999
-    fun json() = JSONObject().put("settings",settings.json()).put("latency_ms",latencyMs ?: JSONObject.NULL).put("tested_at_ms",testedAtMs).put("success",success).put("error",error ?: JSONObject.NULL).put("method",method.key).put("url",url ?: JSONObject.NULL).put("samples",JSONArray(samples)).put("active_tunnel",activeTunnel)
+    fun json() = JSONObject()
+        .put("settings", settings.json())
+        .put("latency_ms", latencyMs ?: JSONObject.NULL)
+        .put("tested_at_ms", testedAtMs)
+        .put("status", status.name)
+        .put("success", success)
+        .put("error", error ?: JSONObject.NULL)
+        .put("method", method.key)
+        .put("url", url ?: JSONObject.NULL)
+        .put("samples", JSONArray(samples))
+        .put("active_tunnel", activeTunnel)
+
     companion object {
         fun from(j: JSONObject): PingResult {
-            val samples=j.getJSONArray("samples")
-            return PingResult(PingSettings.from(j.getJSONObject("settings")),if (j.isNull("latency_ms")) null else j.getLong("latency_ms"),j.getLong("tested_at_ms"),j.getBoolean("success"),if(j.isNull("error")) null else j.getString("error"),List(samples.length()) {samples.getLong(it)},j.optBoolean("active_tunnel"))
+            val samples = j.getJSONArray("samples")
+            val latency = j.optLong("latency_ms", -1).takeIf { it >= 0 }
+            val recordedStatus = PingStatus.entries.firstOrNull { it.name == j.optString("status") }
+            val status = when {
+                recordedStatus == PingStatus.FAIL -> PingStatus.FAIL
+                latency != null && (recordedStatus == PingStatus.OK ||
+                    (recordedStatus == null && j.optBoolean("success"))) -> PingStatus.OK
+                // Legacy failures did not distinguish proven rejection from a network error.
+                else -> PingStatus.UNAVAILABLE
+            }
+            val error = if (status == PingStatus.OK || j.isNull("error")) null else j.getString("error")
+            return PingResult(
+                settings = PingSettings.from(j.getJSONObject("settings")),
+                latencyMs = latency.takeIf { status == PingStatus.OK },
+                testedAtMs = j.getLong("tested_at_ms"),
+                status = status,
+                error = if (recordedStatus == null) legacyReason(error) else error,
+                samples = List(samples.length()) { samples.getLong(it) },
+                activeTunnel = j.optBoolean("active_tunnel"),
+            )
+        }
+
+        private fun legacyReason(error: String?): String? = when (error) {
+            "Diagnostics core rejected proxy configuration" -> "Diagnostics core could not start"
+            "Invalid proxy configuration" -> "Diagnostics could not prepare the proxy outbound"
+            else -> error
         }
     }
 }

@@ -19,6 +19,8 @@ Attempts: 1/2/3/5. Timeout: 3/5/10/15 seconds. Aggregation: minimum, average, me
 
 Every result stores method, optional latency, wall-clock timestamp, success, sanitized error, applicable URL, individual samples, settings snapshot and active-tunnel context. The monotonic timer measures duration; wall-clock time labels history. A settings mismatch hides incompatible cached results from the list, sorting and AUTO. Old 0.4.0 latency values do not have enough metadata and are not reused as 0.5.0 measurements.
 
+On Android, **OK** requires a valid latency. **FAIL** requires evidence of rejected proxy credentials or a configuration or protocol error. **UNAVAILABLE** covers DNS, timeouts, other network failures, and ambiguous errors from the core. Cancelled and untested nodes are separate from these outcomes. Delay Sort orders successful nodes by latency, followed by unavailable, failed, and untested nodes in their original order within each group. The **Show detailed test errors** switch under Ping & Diagnostics is off by default. It reveals the sanitized reason under each affected node.
+
 ## Isolation, routing and cancellation
 
 Android diagnostics use a private `:diagnostics` service process. It owns **one temporary libXray core at a time**, with at most the selected number of outbounds/HTTP requests. The process-wide service mutex covers cancellation and service recreation. Diagnostic sockets and endpoint DNS use an underlying network. The separate process isolates libXray's process-global dialer and outbound manager from the VPN core. See the [pinned upstream isolation warning](https://github.com/XTLS/libXray/tree/v26.7.28#api).

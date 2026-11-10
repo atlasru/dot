@@ -17,6 +17,7 @@ import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executor
 import java.util.concurrent.RejectedExecutionException
@@ -47,7 +48,7 @@ internal suspend fun directProbe(
             val addresses = resolve(network, host)
             if (settings.method == PingMethod.TCP) tcpAttempt(network, addresses, port, deadline)
             else icmpAttempt(addresses.first(), checkNotNull(networkInterface), deadline)
-        } ?: throw IOException("${settings.method.label} timed out")
+        } ?: throw ProbeFailure("${settings.method.label} timed out")
     }
 }
 
@@ -65,7 +66,7 @@ private suspend fun resolve(network: Network, host: String): List<InetAddress> {
                     }
 
                     override fun onError(error: DnsResolver.DnsException) {
-                        continuation.resumeWithException(IOException("Server DNS lookup failed"))
+                        continuation.resumeWithException(ProbeFailure("DNS resolution failed"))
                     }
                 },
             )
@@ -77,7 +78,7 @@ private suspend fun resolve(network: Network, host: String): List<InetAddress> {
                     try {
                         continuation.resume(network.getAllByName(host).toList())
                     } catch (_: Exception) {
-                        continuation.resumeWithException(IOException("Server DNS lookup failed"))
+                        continuation.resumeWithException(ProbeFailure("DNS resolution failed"))
                     }
                 }
                 // Old platform resolvers may finish after cancellation. The fixed pool bounds those calls.
@@ -86,11 +87,11 @@ private suspend fun resolve(network: Network, host: String): List<InetAddress> {
                     legacyResolver.purge()
                 }
             } catch (_: RejectedExecutionException) {
-                continuation.resumeWithException(IOException("Server DNS resolver is busy"))
+                continuation.resumeWithException(ProbeFailure("Server DNS resolver is busy"))
             }
         }
     }
-    if (addresses.isEmpty()) throw IOException("Server DNS lookup returned no addresses")
+    if (addresses.isEmpty()) throw ProbeFailure("DNS resolution returned no addresses")
     return addresses
 }
 
@@ -101,6 +102,7 @@ private suspend fun tcpAttempt(
     deadline: Long,
 ): Long = withContext(Dispatchers.IO) {
     val start = System.nanoTime()
+    var failure = ProbeFailure("Connection timed out")
     for ((index, address) in addresses.withIndex()) {
         val timeout = remainingMillis(deadline) / (addresses.size - index)
         if (timeout <= 0) break
@@ -112,17 +114,19 @@ private suspend fun tcpAttempt(
                         if (!address.isLoopbackAddress) network.bindSocket(socket)
                         socket.connect(InetSocketAddress(address, port), timeout.toInt())
                         continuation.resume(Unit)
-                    } catch (_: IOException) {
-                        continuation.resumeWithException(IOException("TCP connect failed or timed out"))
+                    } catch (error: IOException) {
+                        continuation.resumeWithException(error)
                     }
                 }
             }
             return@withContext elapsedMs(start)
-        } catch (_: IOException) {
+        } catch (error: IOException) {
             // Continue to the next DNS address under the original attempt deadline.
+            failure = if (error is SocketTimeoutException) ProbeFailure("Connection timed out")
+            else ProbeFailure("TCP connection failed")
         }
     }
-    throw IOException("TCP connect failed or timed out")
+    throw failure
 }
 
 private val pingBinary = File("/system/bin/ping")
@@ -137,27 +141,27 @@ private val legacyResolver = ThreadPoolExecutor(
 private suspend fun icmpAttempt(address: InetAddress, networkInterface: String, deadline: Long): Long =
     runInterruptible(Dispatchers.IO) {
         val timeout = remainingMillis(deadline)
-        if (timeout <= 0) throw IOException("ICMP timed out")
+        if (timeout <= 0) throw ProbeFailure("ICMP timed out")
         val binary = if (address is Inet6Address && ping6Binary.canExecute()) ping6Binary else pingBinary
         val command = mutableListOf(binary.path)
         if (binary == pingBinary && address is Inet6Address) command += "-6"
         command += listOf("-n", "-c", "1", "-W", ((timeout + 999) / 1000).toString())
         if (!address.isLoopbackAddress) command += listOf("-I", networkInterface)
-        command += address.hostAddress ?: throw IOException("Server DNS lookup returned no address")
+        command += address.hostAddress ?: throw ProbeFailure("DNS resolution returned no addresses")
         val process = try {
             ProcessBuilder(command).redirectErrorStream(true).apply { environment()["LC_ALL"] = "C" }.start()
         } catch (_: IOException) {
-            throw IOException("ICMP unavailable on this device; use Via Proxy")
+            throw ProbeFailure("ICMP unavailable on this device; use Via Proxy")
         }
         try {
-            if (!process.waitFor(remainingMillis(deadline), TimeUnit.MILLISECONDS)) throw IOException("ICMP timed out")
+            if (!process.waitFor(remainingMillis(deadline), TimeUnit.MILLISECONDS)) throw ProbeFailure("ICMP timed out")
             val output = process.inputStream.bufferedReader().use { it.readText() }
             if (process.exitValue() != 0) {
-                if (isIcmpUnavailable(output)) throw IOException("ICMP unavailable on this device or network; use Via Proxy")
-                throw IOException("ICMP blocked or timed out; proxy health unknown")
+                if (isIcmpUnavailable(output)) throw ProbeFailure("ICMP unavailable on this device or network; use Via Proxy")
+                throw ProbeFailure("ICMP blocked or timed out; proxy health unknown")
             }
             echoTime.find(output)?.groupValues?.get(1)?.toDoubleOrNull()?.toLong()?.coerceAtLeast(1)
-                ?: throw IOException("ICMP round trip time unavailable")
+                ?: throw ProbeFailure("ICMP round trip time unavailable")
         } finally {
             process.destroyForcibly()
         }

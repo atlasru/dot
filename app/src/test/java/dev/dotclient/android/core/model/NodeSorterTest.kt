@@ -1,5 +1,8 @@
 package dev.dotclient.android.core.model
 
+import dev.dotclient.android.core.diagnostics.PingResult
+import dev.dotclient.android.core.diagnostics.PingSettings
+import dev.dotclient.android.core.diagnostics.PingStatus
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -21,21 +24,35 @@ class NodeSorterTest {
     }
 
     @Test
-    fun delayPlacesSuccessfulNodesFirstThenFailedThenUntested() {
+    fun delayRanksSuccessThenUnavailableThenFailureThenUntestedAndKeepsProviderOrderWithinGroups() {
         val slow = profile("slow")
-        val failed = profile("failed")
         val fast = profile("fast")
-        val untested = profile("untested")
-        val profiles = listOf(slow, failed, fast, untested)
+        val firstUnavailable = profile("Z unavailable")
+        val secondUnavailable = profile("A unavailable")
+        val firstFailed = profile("Z failed")
+        val secondFailed = profile("A failed")
+        val firstUntested = profile("Z untested")
+        val secondUntested = profile("A untested")
+        val profiles = listOf(firstUntested, firstFailed, slow, firstUnavailable,
+            secondFailed, secondUntested, secondUnavailable, fast)
 
         val sorted = NodeSorter.sort(
             profiles = profiles,
             mode = NodeSortMode.DELAY,
-            latenciesMs = mapOf(slow.id to 140L, fast.id to 28L),
-            failedIds = setOf(failed.id),
+            results = mapOf(
+                slow.id to result(PingStatus.OK, 140),
+                fast.id to result(PingStatus.OK, 28),
+                secondUnavailable.id to result(PingStatus.UNAVAILABLE),
+                firstUnavailable.id to result(PingStatus.UNAVAILABLE),
+                secondFailed.id to result(PingStatus.FAIL),
+                firstFailed.id to result(PingStatus.FAIL),
+            ),
         )
 
-        assertEquals(listOf("fast", "slow", "failed", "untested"), sorted.map { it.name })
+        assertEquals(
+            listOf(fast, slow, firstUnavailable, secondUnavailable, firstFailed, secondFailed, firstUntested, secondUntested),
+            sorted,
+        )
     }
 
     @Test
@@ -44,6 +61,15 @@ class NodeSorterTest {
 
         assertEquals(profiles, NodeSorter.sort(profiles, NodeSortMode.DELAY, emptyMap()))
     }
+
+    private fun result(status: PingStatus, latency: Long? = null) = PingResult(
+        settings = PingSettings(), latencyMs = latency, testedAtMs = 1,
+        status = status, error = when (status) {
+            PingStatus.OK -> null
+            PingStatus.UNAVAILABLE -> "HTTP request timed out"
+            PingStatus.FAIL -> "Proxy authentication rejected"
+        }, samples = listOfNotNull(latency),
+    )
 
     private fun profile(name: String) = ProxyNode(
         id = "$name-id",

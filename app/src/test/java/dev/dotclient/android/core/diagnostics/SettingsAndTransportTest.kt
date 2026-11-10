@@ -27,14 +27,14 @@ class SettingsAndTransportTest {
         val a=Hysteria2UriParser.parse("hy2://secret@a.example#A").getOrThrow()
         val b=Hysteria2UriParser.parse("hy2://secret@b.example#B").getOrThrow()
         val settings=PingSettings()
-        fun result(ms: Long, method: PingMethod=PingMethod.PROXY_GET, age: Long=0) = PingResult(settings.copy(method=method),ms,System.currentTimeMillis()-age,true,null,listOf(ms))
+        fun result(ms: Long, method: PingMethod=PingMethod.PROXY_GET, age: Long=0) = PingResult(settings.copy(method=method),ms,System.currentTimeMillis()-age,PingStatus.OK,null,listOf(ms))
         fun select(results: Map<String,PingResult>, excluded: Set<String> = emptySet(), threshold: Long=0) = dev.dotclient.android.core.reliability.AutoNodeSelector.selectVerified(listOf(a,b),results,settings,excluded,threshold)
         assertEquals(b,select(mapOf(a.id to result(100),b.id to result(50))))
         assertNull(select(mapOf(a.id to result(1,PingMethod.TCP))))
         assertNull(select(mapOf(a.id to result(1,age=900_001))))
         assertNull(select(mapOf(a.id to result(1)),setOf(a.id)))
         assertNull(select(mapOf(a.id to result(200)),threshold=100))
-        assertNull(select(mapOf(a.id to result(1).copy(success=false))))
+        assertNull(select(mapOf(a.id to result(1).copy(latencyMs=null,status=PingStatus.UNAVAILABLE))))
     }
     @Test fun `settings migrate validate and roundtrip without node credentials`() {
         val settings=AppSettings.from(JSONObject())

@@ -119,9 +119,18 @@ class PingService : Service() {
             for (index in 0 until payload.length()) {
                 val item = payload.getJSONObject(index)
                 val nodeId = item.getString("id")
-                val outbound = runCatching { DiagnosticConfig.proxyOutbound(item.getString("uri")) }.getOrNull()
-                if (outbound == null) report(nodeId, failedProbe(settings, "Invalid proxy configuration"))
-                else add(ProbeNode(nodeId, outbound))
+                val outbound = try {
+                    DiagnosticConfig.proxyOutbound(item.getString("uri"))
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failed: ProbeFailure) {
+                    report(nodeId, failedProbe(settings, failed))
+                    continue
+                } catch (_: Exception) {
+                    report(nodeId, failedProbe(settings, "Diagnostics could not prepare the proxy outbound"))
+                    continue
+                }
+                add(ProbeNode(nodeId, outbound))
             }
         }
         if (proxies.isEmpty()) return
@@ -151,7 +160,7 @@ class PingService : Service() {
         currentCoroutineContext().ensureActive()
         val ports = allocateLoopbackPorts(nodes.size)
         val config = DiagnosticConfig.batch(nodes.map { it.outbound }, ports)
-        try {
+        val failure = try {
             val started = invoke("runXrayFromJson", JSONObject().put("configJSON", config.toString()))
             if (started.optBoolean("success")) {
                 coroutineScope {
@@ -165,13 +174,14 @@ class PingService : Service() {
                 }
                 return
             }
+            coreStartFailure(started.optString("error"))
         } finally {
             invoke("stopXray", JSONObject())
         }
 
-        Log.w("DotDiagnostics", "Diagnostics core rejected a configuration for ${nodes.size} node(s)")
+        Log.w("DotDiagnostics", "Diagnostics core startup failed for ${nodes.size} node(s)")
         if (nodes.size == 1) {
-            report(nodes.single().id, failedProbe(settings, "Diagnostics core rejected proxy configuration"))
+            report(nodes.single().id, failedProbe(settings, failure))
             return
         }
         val split = nodes.size / 2

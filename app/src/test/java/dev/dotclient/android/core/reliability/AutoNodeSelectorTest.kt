@@ -3,13 +3,14 @@ package dev.dotclient.android.core.reliability
 import dev.dotclient.android.core.model.ProxyNode
 import dev.dotclient.android.core.diagnostics.PingResult
 import dev.dotclient.android.core.diagnostics.PingSettings
+import dev.dotclient.android.core.diagnostics.PingStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class AutoNodeSelectorTest {
     private val settings=PingSettings()
-    private fun result(ms: Long, success: Boolean=true) = PingResult(settings,ms,System.currentTimeMillis(),success,null,listOf(ms))
+    private fun result(ms: Long) = PingResult(settings, ms, System.currentTimeMillis(), PingStatus.OK, null, listOf(ms))
     @Test
     fun `selects lowest successful latency`() {
         val slow = profile("slow")
@@ -25,13 +26,14 @@ class AutoNodeSelectorTest {
     }
 
     @Test
-    fun `ignores failed nodes even when they have stale latency`() {
+    fun `ignores unavailable nodes even when they have a fast partial sample`() {
         val failed = profile("failed")
         val healthy = profile("healthy")
+        val partial = PingResult(settings, null, System.currentTimeMillis(), PingStatus.UNAVAILABLE, "Connection timed out", listOf(10L))
 
         val selected = AutoNodeSelector.selectVerified(
             profiles = listOf(failed, healthy),
-            results = mapOf(failed.id to result(10L,false), healthy.id to result(80L)),
+            results = mapOf(failed.id to partial, healthy.id to result(80L)),
             settings = settings,
         )
 

@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.dotclient.android.core.diagnostics.PingStatus
 import dev.dotclient.android.core.geo.NodeGeoLocation
 import dev.dotclient.android.core.geo.NodeGeoResolver
 import dev.dotclient.android.core.geo.NodeGeoSource
@@ -208,7 +209,7 @@ private fun CountrySheet(
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 170.dp)) {
             items(orderedProfiles, key = ProxyNode::id) { profile ->
                 val running = state.vpnConnected && profile.id == state.runningNodeId
-                val failed = profile.id in state.nodeLatencyFailedIds
+                val diagnostic = state.nodeDiagnosticDisplay(profile.id, if (running) "LIVE" else "CONNECT")
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -228,24 +229,21 @@ private fun CountrySheet(
                             .background(if (running) NodeMapRed else Color(0xFF555555), RoundedCornerShape(1.dp))
                     )
                     Spacer(Modifier.width(9.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            profile.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        diagnostic.detail?.let { error ->
+                            Text(error, color = Color(0xFF777777),
+                                style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
                     Text(
-                        profile.name,
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    val latency = state.nodeLatenciesMs[profile.id]
-                    Text(
-                        when {
-                            profile.id in state.testingNodeIds -> "··"
-                            latency != null -> "$latency ms"
-                            state.pingResults[profile.id]?.unavailable == true -> "UNAVAILABLE"
-                            failed -> "FAIL"
-                            running -> "LIVE"
-                            else -> "CONNECT"
-                        },
-                        color = if (running || failed) NodeMapRed else Color(0xFF777777),
+                        diagnostic.badge,
+                        color = if (running || diagnostic.result?.status == PingStatus.FAIL) NodeMapRed else Color(0xFF777777),
                         style = MaterialTheme.typography.labelMedium,
                     )
                 }

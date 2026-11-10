@@ -65,7 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.dotclient.android.BuildConfig
-import dev.dotclient.android.core.diagnostics.PingResult
+import dev.dotclient.android.core.diagnostics.PingStatus
 import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.model.ProxyNode
@@ -302,7 +302,7 @@ private fun HomeScreen(
         ActiveNodeCard(
             profile = selectedProfile,
             runningName = state.runningNodeName,
-            latencyMs = selectedProfile?.let { state.nodeLatenciesMs[it.id] },
+            latencyMs = selectedProfile?.let { state.pingResults[it.id]?.latencyMs },
             onClick = onOpenNodes,
         )
 
@@ -451,16 +451,10 @@ private fun NodesScreen(
                         profile = profile,
                         selected = profile.id == group.selectedProfileId,
                         running = state.vpnConnected && profile.id == state.runningNodeId,
-                        latencyMs = state.nodeLatenciesMs[profile.id],
                         compact = state.settings.compactNodes,
                         showLatency = state.settings.showLatency || state.diagnosticBatch?.let { it.groupId == group.id && profile.id in it.nodeIds } == true,
                         showTransport = state.settings.showTransport,
-                        testing = profile.id in state.testingNodeIds,
-                        skipped = state.diagnosticBatch?.let {
-                            it.groupId == group.id && !it.running && profile.id in it.nodeIds && profile.id !in it.results
-                        } == true && profile.id !in state.pingResults,
-                        failed = profile.id in state.nodeLatencyFailedIds,
-                        diagnostic = state.pingResults[profile.id],
+                        diagnostic = state.nodeDiagnosticDisplay(profile.id),
                         testEnabled = !state.diagnosticsRunning && !state.loading && !state.savingSettings,
                         onSelect = {
                             if (state.vpnConnected && profile.id != state.runningNodeId) viewModel.switchProfile(profile.id)
@@ -483,10 +477,7 @@ private fun NodesScreen(
 
 @Composable
 private fun AutoNodeRow(state: DotUiState, onClick: () -> Unit) {
-    val profileIds = state.profiles.mapTo(hashSetOf()) { it.id }
-    val bestLatency = state.nodeLatenciesMs
-        .filterKeys { it in profileIds }
-        .minByOrNull { it.value }
+    val bestLatency = state.profiles.mapNotNull { state.pingResults[it.id]?.latencyMs }.minOrNull()
     val autoTesting = state.autoNodeEnabled && state.diagnosticsRunning
     val canUseCachedWhileConnected = !state.vpnConnected || bestLatency != null
     val enabled = !state.vpnBusy && !state.diagnosticsRunning && canUseCachedWhileConnected
@@ -528,7 +519,7 @@ private fun AutoNodeRow(state: DotUiState, onClick: () -> Unit) {
         Text(
             when {
                 autoTesting -> "··"
-                bestLatency != null -> "${bestLatency.value} ms"
+                bestLatency != null -> "$bestLatency ms"
                 else -> "›"
             },
             color = if (bestLatency != null) Color(0xFFB8B8B8) else Color(0xFF666666),
@@ -613,7 +604,8 @@ private fun GroupToolbar(state: DotUiState, viewModel: MainViewModel) {
 
 @Composable
 private fun DiagnosticBatchSummary(batch: DiagnosticBatch, groupName: String?, onCancel: () -> Unit) {
-    val checked = batch.results.size
+    val counts = batch.counts
+    val checked = counts.checked
     val total = batch.nodeIds.size
     val phase = when (batch.phase) {
         DiagnosticBatchPhase.RUNNING -> "TESTING"
@@ -622,14 +614,12 @@ private fun DiagnosticBatchSummary(batch: DiagnosticBatch, groupName: String?, o
         DiagnosticBatchPhase.CANCELLED -> "CANCELLED"
         DiagnosticBatchPhase.FAILED -> "INTERRUPTED"
     }
-    val succeeded = batch.results.values.count { it.success }
-    val unavailable = batch.results.values.count { it.unavailable }
     Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(listOfNotNull(groupName, phase, "$checked/$total checked").joinToString(" · "),
                     style = MaterialTheme.typography.labelMedium)
-                Text("$succeeded OK · ${checked - succeeded - unavailable} failed · $unavailable unavailable",
+                Text("${counts.ok} OK · ${counts.failed} FAIL · ${counts.unavailable} UNAVAILABLE",
                     style = MaterialTheme.typography.labelMedium, color = Color(0xFF777777))
             }
             if (batch.running) TextButton(
@@ -701,14 +691,10 @@ private fun NodeRow(
     profile: ProxyNode,
     selected: Boolean,
     running: Boolean,
-    latencyMs: Long?,
     compact: Boolean = false,
     showLatency: Boolean = true,
     showTransport: Boolean = true,
-    testing: Boolean,
-    skipped: Boolean,
-    failed: Boolean,
-    diagnostic: PingResult?,
+    diagnostic: NodeDiagnosticDisplay,
     testEnabled: Boolean,
     onSelect: () -> Unit,
     onTest: () -> Unit,
@@ -746,27 +732,18 @@ private fun NodeRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (showLatency && !testing) diagnostic?.error?.let { error ->
-                Text(error, color = if (failed) DotRed else Color(0xFF777777),
+            diagnostic.detail?.let { error ->
+                Text(error, color = Color(0xFF777777),
                     style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
         Spacer(Modifier.width(10.dp))
         if(showLatency) Text(
-            when {
-                testing -> "··"
-                skipped -> "SKIPPED"
-                latencyMs != null -> "$latencyMs ms"
-                diagnostic?.unavailable == true -> "UNAVAILABLE"
-                failed -> "FAIL"
-                else -> "--"
-            },
+            diagnostic.badge,
             color = when {
-                failed -> DotRed
-                testing -> Color(0xFF777777)
-                latencyMs != null && latencyMs > 300 -> Color(0xFF777777)
-                latencyMs != null -> Color(0xFFB8B8B8)
-                else -> Color(0xFF3F3F3F)
+                diagnostic.result?.status == PingStatus.FAIL -> DotRed
+                (diagnostic.result?.latencyMs ?: Long.MAX_VALUE) <= 300 -> Color(0xFFB8B8B8)
+                else -> Color(0xFF777777)
             },
             style = MaterialTheme.typography.labelMedium,
         )
