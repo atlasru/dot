@@ -1,5 +1,6 @@
 package dev.dotclient.android.vpn
 
+import android.net.Network
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,6 +33,7 @@ data class VpnRuntimeSnapshot(
 object VpnRuntime {
     private val mutableState = MutableStateFlow(VpnRuntimeSnapshot())
     val state: StateFlow<VpnRuntimeSnapshot> = mutableState.asStateFlow()
+    @Volatile internal var underlyingNetwork: Network? = null
 
     fun update(
         state: VpnConnectionState,

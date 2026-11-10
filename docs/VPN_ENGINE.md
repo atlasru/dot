@@ -6,7 +6,7 @@ dot. v0.4.0 uses pinned **Xray/libXray v26.7.28**. Android uses `VpnService`, a 
 
 1. Request VPN permission with `VpnService.prepare()`.
 2. Create a TUN interface through `DotVpnService` and apply the saved split-tunnel policy.
-3. Configure protected outbound sockets with `VpnService.protect()` and a protected DNS resolver.
+3. Select the best matching non-VPN network. Protect Xray's outbound and bootstrap DNS sockets with `VpnService.protect()` and bind them to that network. Android app DNS is configured on the IPv4 TUN interface.
 4. Construct a client outbound for the selected URI:
    - **VLESS:** libXray share-link conversion followed by normalization of invalid `sendThrough` and server-only REALITY data, preserving the client's SNI/fingerprint/public key/short ID.
    - **Hysteria2:** `Hysteria2UriParser` + `Hysteria2XrayConfig` generate a native Hysteria v2 outbound (TLS/SNI/ALPN; optional congestion, Salamander and packet-size parameters).
@@ -15,7 +15,9 @@ dot. v0.4.0 uses pinned **Xray/libXray v26.7.28**. Android uses `VpnService`, a 
 
 ## Reliability and network handoff
 
-Android observes default-network changes. A lost Wi-Fi/mobile connection becomes waiting-for-network rather than an immediate permanent error. Reconnect attempts use a capped **1, 2, 5, 10, 30-second** backoff (30 seconds thereafter); disconnect cancels retries. The selected VLESS/HY2 URI and split-tunnel policy are retained. Configuration errors can stop reconnecting rather than retrying an invalid config.
+Android observes non-VPN network changes even when the VPN itself is the app's default network. On a Wi-Fi/mobile handoff the service establishes the replacement TUN, closes the old core and opens the new core on the replacement network. If no underlay is available, network recovery keeps the established TUN in place and waits for a network. Turning off network recovery disconnects the VPN after a network outage.
+
+Startup retry delays use the **1, 2, 5, 10, 30** backoff multipliers with the configured base interval and maximum. A newer connection or disconnect invalidates pending retries. A permanent configuration error ends the session.
 
 ## Windows backend
 
@@ -35,5 +37,15 @@ Android samples UID traffic counters for Home and its foreground notification. D
 - For HY2, QUIC/UDP must be allowed by the network and server.
 - CI validates configuration and compilation; real-world provider auth, routing, QUIC behavior and network handoff still need representative manual testing.
 - Download **the patched [v0.4.0 release assets](releases/0.4.0.md)**, not old assets cached from 14 October 2026.
+
+### Android TUN verification on a device
+
+1. Use a real VLESS profile and a real HY2 profile with UDP connectivity. Record baseline public egress and DNS behavior from an Android app on the device before connecting. Use an endpoint and resolver you control where possible.
+2. Connect and repeat the external request from an app included in the tunnel. Verify the endpoint receives traffic from the node's egress and verify a fresh DNS query reaches the configured resolver. Use an app that uses Android system DNS for the DNS check.
+3. Repeat with one included and one excluded app. Compare external egress for both apps and check that IPv6 is blocked for included apps on an IPv6-capable network.
+4. Move between Wi-Fi and mobile data in both directions with the VPN connected. After each transition, use a fresh request and a fresh DNS name to confirm the node's egress and resolution. Repeat after losing both networks, restoring one, switching nodes and manually disconnecting during a retry.
+5. Use `adb shell dumpsys connectivity` to inspect the VPN's routes, DNS and underlay. Use `adb logcat -s DotVpnService` for lifecycle transitions. Record the device, build, protocol and network for each scenario. Keep network dumps and profile credentials private.
+
+The app's Connected state reports TUN and core startup. Device verification requires the external traffic and DNS observations above.
 
 See [architecture](../ARCHITECTURE.md) and [Hysteria2 manual tests](hysteria2-manual-test.md).
