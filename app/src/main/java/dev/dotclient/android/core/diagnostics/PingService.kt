@@ -81,9 +81,11 @@ class PingService : Service() {
     private suspend fun runBatch(data: Bundle, id: Int, reply: Messenger) {
         val settings = PingSettings.from(JSONObject(data.getString("settings")!!))
         val payload = JSONArray(data.getString("nodes")!!)
+        val activeProxyDns = data.getString("active_proxy_dns")
         require(payload.length() in 1..settings.parallelism)
-        fun report(nodeId: String, result: PingResult) {
-            val response = Message.obtain(null, RESULT, id, 0)
+        require(activeProxyDns == null || (settings.method.proxy && payload.length() == 1))
+        fun report(nodeId: String, result: PingResult, proxySetupFailed: Boolean = false) {
+            val response = Message.obtain(null, RESULT, id, if (proxySetupFailed) PROXY_SETUP_FAILED else 0)
             response.data = Bundle().apply {
                 putString("node", nodeId)
                 putString("result", result.json().toString())
@@ -92,10 +94,12 @@ class PingService : Service() {
         }
 
         val connectivity = getSystemService(ConnectivityManager::class.java)
-        val network = connectivity.diagnosticNetwork(data.getParcelable<Network>("underlay"))
+        val network = connectivity.diagnosticNetwork(data.getParcelable<Network>("underlay"), activeProxyDns != null)
         if (network == null) {
+            val reason = if (activeProxyDns != null) "The VPN's underlying network is unavailable"
+                else "No underlying network for diagnostics"
             for (index in 0 until payload.length()) {
-                report(payload.getJSONObject(index).getString("id"), failedProbe(settings, "No underlying network for diagnostics"))
+                report(payload.getJSONObject(index).getString("id"), failedProbe(settings, reason), proxySetupFailed = true)
             }
             return
         }
@@ -120,14 +124,17 @@ class PingService : Service() {
                 val item = payload.getJSONObject(index)
                 val nodeId = item.getString("id")
                 val outbound = try {
-                    DiagnosticConfig.proxyOutbound(item.getString("uri"))
+                    if (activeProxyDns == null) DiagnosticConfig.proxyOutbound(item.getString("uri"))
+                    else item.getJSONObject("outbound").also {
+                        if (!DiagnosticConfig.isProxyOutbound(it)) throw ProbeFailure("Active proxy outbound is unavailable")
+                    }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (failed: ProbeFailure) {
-                    report(nodeId, failedProbe(settings, failed))
+                    report(nodeId, failedProbe(settings, failed), proxySetupFailed = true)
                     continue
                 } catch (_: Exception) {
-                    report(nodeId, failedProbe(settings, "Diagnostics could not prepare the proxy outbound"))
+                    report(nodeId, failedProbe(settings, "Diagnostics could not prepare the proxy outbound"), proxySetupFailed = true)
                     continue
                 }
                 add(ProbeNode(nodeId, outbound))
@@ -135,9 +142,9 @@ class PingService : Service() {
         }
         if (proxies.isEmpty()) return
 
-        val dns = link?.dnsServers?.firstOrNull()?.hostAddress
+        val dns = activeProxyDns ?: link?.dnsServers?.firstOrNull()?.hostAddress
         if (dns == null) {
-            proxies.forEach { report(it.id, failedProbe(settings, "Underlying network has no DNS resolver")) }
+            proxies.forEach { report(it.id, failedProbe(settings, "Underlying network has no DNS resolver"), proxySetupFailed = true) }
             return
         }
 
@@ -155,7 +162,7 @@ class PingService : Service() {
     private suspend fun testProxyBatch(
         nodes: List<ProbeNode>,
         settings: PingSettings,
-        report: (String, PingResult) -> Unit,
+        report: (String, PingResult, Boolean) -> Unit,
     ) {
         currentCoroutineContext().ensureActive()
         val ports = allocateLoopbackPorts(nodes.size)
@@ -168,7 +175,7 @@ class PingService : Service() {
                         launch {
                             val result = measure(settings) { httpAttempt(settings, loopbackProxy(port)) }
                             ensureActive()
-                            report(node.id, result)
+                            report(node.id, result, false)
                         }
                     }
                 }
@@ -181,7 +188,7 @@ class PingService : Service() {
 
         Log.w("DotDiagnostics", "Diagnostics core startup failed for ${nodes.size} node(s)")
         if (nodes.size == 1) {
-            report(nodes.single().id, failedProbe(settings, failure))
+            report(nodes.single().id, failedProbe(settings, failure), true)
             return
         }
         val split = nodes.size / 2
@@ -201,6 +208,7 @@ class PingService : Service() {
         const val FAILED = 3
         const val CANCEL = 4
         const val FINISHED = 5
+        const val PROXY_SETUP_FAILED = 1
 
         private val coreGate = Mutex()
         private val outboundNetwork = AtomicReference<Network?>()
@@ -223,12 +231,13 @@ class PingService : Service() {
 }
 
 @Suppress("DEPRECATION")
-private fun ConnectivityManager.diagnosticNetwork(preferred: Network?): Network? {
+private fun ConnectivityManager.diagnosticNetwork(preferred: Network?, requirePreferred: Boolean): Network? {
     fun Network.capabilities() = getNetworkCapabilities(this)?.takeIf {
         it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) &&
             it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
     if (preferred?.capabilities() != null) return preferred
+    if (requirePreferred) return null
     activeNetwork?.let { if (it.capabilities() != null) return it }
     return allNetworks.mapNotNull { network -> network.capabilities()?.let { network to it } }
         .maxByOrNull { (_, capabilities) ->

@@ -15,6 +15,13 @@ enum class VpnConnectionState {
     ERROR,
 }
 
+/** Identity and effective proxy settings for one successful core startup. */
+class ActiveProxySession internal constructor(
+    internal val outboundJson: String,
+    internal val dns: String,
+    internal val underlay: Network?,
+)
+
 data class VpnRuntimeSnapshot(
     val state: VpnConnectionState = VpnConnectionState.DISCONNECTED,
     val nodeId: String? = null,
@@ -28,6 +35,7 @@ data class VpnRuntimeSnapshot(
     val uploadBytesPerSecond: Long = 0L,
     val sessionDownloadBytes: Long = 0L,
     val sessionUploadBytes: Long = 0L,
+    val proxySession: ActiveProxySession? = null,
 )
 
 object VpnRuntime {
@@ -47,6 +55,7 @@ object VpnRuntime {
         uploadBytesPerSecond: Long = if (state == VpnConnectionState.CONNECTED) mutableState.value.uploadBytesPerSecond else 0L,
         sessionDownloadBytes: Long = if (state == VpnConnectionState.CONNECTED) mutableState.value.sessionDownloadBytes else 0L,
         sessionUploadBytes: Long = if (state == VpnConnectionState.CONNECTED) mutableState.value.sessionUploadBytes else 0L,
+        proxySession: ActiveProxySession? = null,
     ) {
         mutableState.value = VpnRuntimeSnapshot(
             state = state,
@@ -61,6 +70,7 @@ object VpnRuntime {
             uploadBytesPerSecond = uploadBytesPerSecond,
             sessionDownloadBytes = sessionDownloadBytes,
             sessionUploadBytes = sessionUploadBytes,
+            proxySession = proxySession,
         )
     }
 

@@ -13,6 +13,7 @@ import android.os.Messenger
 import android.util.Log
 import dev.dotclient.android.core.model.ProxyConfig
 import dev.dotclient.android.core.model.ProxyNode
+import dev.dotclient.android.vpn.ActiveProxySession
 import dev.dotclient.android.vpn.VpnRuntime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -43,17 +44,9 @@ class PingEngine(private val context: Context) {
     suspend fun test(
         nodes: List<ProxyNode>,
         settings: PingSettings,
-        activeTunnel: Boolean = false,
         onResult: suspend (ProxyNode, PingResult) -> Unit = { _, _ -> },
     ): Map<String, PingResult> {
         settings.validate()
-        if (activeTunnel) {
-            require(nodes.size == 1 && settings.method.proxy) { "An active tunnel probe requires one node and HTTP" }
-            val node = nodes.single()
-            val result = measure(settings, active = true) { httpAttempt(settings, Proxy.NO_PROXY) }
-            onResult(node, result)
-            return mapOf(node.id to result)
-        }
 
         val results = linkedMapOf<String, PingResult>()
         suspend fun report(node: ProxyNode, result: PingResult) {
@@ -67,7 +60,15 @@ class PingEngine(private val context: Context) {
                 report(node, failedProbe(settings, "Node URI exceeds diagnostic limit"))
             }
             if (valid.isEmpty()) continue
-            val failure = testBatch(valid, settings, ::report)
+            val byId = valid.associateBy(ProxyNode::id)
+            val requests = valid.map { node ->
+                JSONObject().put("id", node.id).apply {
+                    if (settings.method.proxy) put("uri", node.rawUri)
+                    else put("host", node.host).put("port", node.port)
+                        .put("hysteria2", node.config is ProxyConfig.Hysteria2)
+                }
+            }
+            val failure = testBatch(requests, settings) { id, result, _ -> report(byId.getValue(id), result) }
             if (failure != null) {
                 for (node in valid.filterNot { results.containsKey(it.id) }) {
                     report(node, failedProbe(settings, failure))
@@ -77,14 +78,29 @@ class PingEngine(private val context: Context) {
         return results
     }
 
+    internal suspend fun testConnection(settings: PingSettings): ConnectionProbeResult =
+        probeConnection(settings, { VpnRuntime.state.value }, ::testActiveProxy)
+
+    private suspend fun testActiveProxy(session: ActiveProxySession, settings: PingSettings): PingResult {
+        val request = JSONObject().put("id", "connection").put("outbound", JSONObject(session.outboundJson))
+        var result: PingResult? = null
+        val failure = testBatch(listOf(request), settings, session) { _, measured, proxySetupFailed ->
+            if (proxySetupFailed) throw ProbeFailure(measured.error ?: "Could not prepare the active proxy")
+            result = measured
+        }
+        if (failure != null) throw ProbeFailure(failure)
+        return result ?: throw ProbeFailure("Diagnostics service returned no connection result")
+    }
+
     private suspend fun testBatch(
-        nodes: List<ProxyNode>,
+        requests: List<JSONObject>,
         settings: PingSettings,
-        onResult: suspend (ProxyNode, PingResult) -> Unit,
+        session: ActiveProxySession? = null,
+        onResult: suspend (String, PingResult, Boolean) -> Unit,
     ): String? = withContext(Dispatchers.Main) {
         val id = nextRequest.incrementAndGet()
-        val byId = nodes.associateBy { it.id }
-        val responses = Channel<Message>(nodes.size + 1, onUndeliveredElement = Message::recycle)
+        val nodeIds = requests.mapTo(hashSetOf()) { it.getString("id") }
+        val responses = Channel<Message>(requests.size + 1, onUndeliveredElement = Message::recycle)
         var remote: Messenger? = null
         val reply = Messenger(Handler(Looper.getMainLooper()) { message ->
             if (message.arg1 == id) {
@@ -101,14 +117,9 @@ class PingEngine(private val context: Context) {
                 message.replyTo = reply
                 message.data = Bundle().apply {
                     putString("settings", settings.json().toString())
-                    putParcelable("underlay", VpnRuntime.underlyingNetwork)
-                    putString("nodes", JSONArray(nodes.map { node ->
-                        JSONObject().put("id", node.id).apply {
-                            if (settings.method.proxy) put("uri", node.rawUri)
-                            else put("host", node.host).put("port", node.port)
-                                .put("hysteria2", node.config is ProxyConfig.Hysteria2)
-                        }
-                    }).toString())
+                    putParcelable("underlay", if (session == null) VpnRuntime.underlyingNetwork else session.underlay)
+                    putString("active_proxy_dns", session?.dns)
+                    putString("nodes", JSONArray(requests).toString())
                 }
                 runCatching { messenger.send(message) }.onFailure { responses.close() }
             }
@@ -126,7 +137,7 @@ class PingEngine(private val context: Context) {
         try {
             val budget = (settings.timeoutSeconds * settings.attempts + 15) * 1000L
             var completed = 0
-            while (completed <= nodes.size) {
+            while (completed <= requests.size) {
                 val response = withTimeoutOrNull(budget) { responses.receiveCatching() }
                 if (response == null) {
                     Log.w("DotDiagnostics", "Diagnostics batch exceeded its deadline")
@@ -136,14 +147,14 @@ class PingEngine(private val context: Context) {
                 try {
                     when (message.what) {
                         PingService.RESULT -> {
-                            val node = byId[message.data.getString("node")]
+                            val node = message.data.getString("node")
                             val payload = message.data.getString("result")
-                            if (node != null && payload != null) {
-                                onResult(node, PingResult.from(JSONObject(payload)))
+                            if (node != null && node in nodeIds && payload != null) {
+                                onResult(node, PingResult.from(JSONObject(payload)), message.arg2 == PingService.PROXY_SETUP_FAILED)
                                 completed++
                             }
                         }
-                        PingService.FINISHED -> return@withContext if (completed == nodes.size) null
+                        PingService.FINISHED -> return@withContext if (completed == requests.size) null
                             else "Diagnostics service returned incomplete results"
                         PingService.FAILED -> return@withContext "Diagnostics service could not run the test"
                     }
@@ -170,7 +181,6 @@ internal fun failedProbe(settings: PingSettings, failure: ProbeFailure): PingRes
 
 internal suspend fun measure(
     settings: PingSettings,
-    active: Boolean = false,
     attempt: suspend () -> Long,
 ): PingResult {
     val samples = mutableListOf<Long>()
@@ -192,7 +202,7 @@ internal suspend fun measure(
     val latency = if (samples.size == settings.attempts) aggregate(samples, settings.aggregation) else null
     return PingResult(settings, latency, System.currentTimeMillis(),
         if (latency != null) PingStatus.OK else failure?.status ?: PingStatus.UNAVAILABLE,
-        failure?.message, samples, active)
+        failure?.message, samples)
 }
 
 internal fun loopbackProxy(port: Int): Proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", port))

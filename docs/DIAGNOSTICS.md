@@ -27,7 +27,9 @@ Android diagnostics use a private `:diagnostics` service process. It owns **one 
 
 Windows uses at most the configured number of isolated Xray processes. Job Objects terminate their process trees and temporary configs are removed when the processes stop. Windows selects an underlying route for the server endpoint outside dot's TUN and binds outbound connections to that interface. Both platforms use a loopback HTTP proxy as the entry point to the chosen node's Xray outbound, with a blocked default route if the rule does not match.
 
-Node diagnostics run independently of connection commands, including when a VPN connection starts during Test All. A dedicated active-connection check uses the default public HTTPS endpoint through the current tunnel. Android checks that dot is included in the applied app split tunnel for that check. Third-party VPNs and administrator routing policies can affect access to the underlying network.
+Node diagnostics run independently of connection commands, including when a VPN connection starts during Test All. Third-party VPNs and administrator routing policies can affect access to the underlying network.
+
+On Android, **Test Connection** requires a current VPN session and uses a temporary proxy with that session's Xray outbound, underlying network, and bootstrap DNS. The check takes the same proxy path when app split tunneling includes or excludes dot. It uses the HTTPS **Test URL** setting, including when node diagnostics is set to TCP or ICMP. The result measures the active node's proxy path. Device-level TUN routing needs separate verification.
 
 Cancellation stops new probes, cancels HTTP and TCP operations, and releases temporary cores. Android terminates the ping process when cancelled. A Windows native ICMP call or a blocking system resolver call can retain a bounded worker slot until it returns. Test All shows completed per-node measurements and keeps results already delivered when cancellation begins.
 

@@ -48,8 +48,13 @@ class MainViewModel(
 
     init {
         viewModelScope.launch {
+            var previousRuntime = VpnRuntime.state.value
             VpnRuntime.state.collect { runtime ->
-                if (runtime.state != VpnConnectionState.CONNECTED) diagnostics.cancelConnection()
+                val sameConnection = runtime.state == VpnConnectionState.CONNECTED &&
+                    previousRuntime.state == VpnConnectionState.CONNECTED &&
+                    runtime.proxySession === previousRuntime.proxySession
+                previousRuntime = runtime
+                if (!sameConnection) diagnostics.cancelConnection()
                 mutableState.update {
                     it.copy(
                         requestingVpnPermission = false,
@@ -69,9 +74,8 @@ class MainViewModel(
                         sessionUploadBytes = runtime.sessionUploadBytes,
                         runningNodeId = runtime.nodeId,
                         runningNodeName = runtime.nodeName,
-                        connectionTestRunning = if (runtime.state == VpnConnectionState.CONNECTED) it.connectionTestRunning else false,
-                        connectionTestLatencyMs = if (runtime.state == VpnConnectionState.CONNECTED) it.connectionTestLatencyMs else null,
-                        connectionTestError = if (runtime.state == VpnConnectionState.CONNECTED) it.connectionTestError else null,
+                        connectionTestRunning = sameConnection && it.connectionTestRunning,
+                        connectionTestResult = it.connectionTestResult.takeIf { sameConnection },
                     )
                 }
 
@@ -431,8 +435,8 @@ class MainViewModel(
                 vpnFailureCategory = null,
                 vpnFailureDetail = null,
                 reconnectAttempt = 0,
-                connectionTestLatencyMs = null,
-                connectionTestError = null,
+                connectionTestRunning = false,
+                connectionTestResult = null,
             )
         }
         startVpn(profile)
@@ -448,8 +452,7 @@ class MainViewModel(
                 vpnFailureDetail = null,
                 reconnectAttempt = 0,
                 connectionTestRunning = false,
-                connectionTestLatencyMs = null,
-                connectionTestError = null,
+                connectionTestResult = null,
             )
         }
         startVpn(profile)
@@ -462,8 +465,7 @@ class MainViewModel(
                 vpnState = VpnConnectionState.DISCONNECTING,
                 message = "disconnecting…",
                 connectionTestRunning = false,
-                connectionTestLatencyMs = null,
-                connectionTestError = null,
+                connectionTestResult = null,
             )
         }
         val application = getApplication<Application>()
@@ -504,8 +506,7 @@ class MainViewModel(
         }
     }
     fun testConnection() {
-        val node=state.value.subscriptions.flatMap {it.profiles}.firstOrNull { it.id==VpnRuntime.state.value.nodeId } ?: return
-        if(state.value.vpnConnected) viewModelScope.launch { diagnostics.run(listOf(node), connection = true) }
+        viewModelScope.launch { diagnostics.runConnection() }
     }
     private fun runScheduledDiagnostics() {
         if(state.value.vpnConnected || state.value.vpnBusy || state.value.diagnosticsRunning) return
@@ -529,6 +530,7 @@ class MainViewModel(
                         settings = saved,
                         pingResults = results,
                         diagnosticBatch = old.diagnosticBatch.takeIf { old.settings.ping == saved.ping },
+                        connectionTestResult = old.connectionTestResult.takeIf { old.settings.ping == saved.ping },
                         message = if (old.vpnConnected && needsReconnect) {
                             "Saved · DNS/routing/log changes apply after reconnect"
                         } else "Settings saved",
@@ -560,8 +562,7 @@ class MainViewModel(
                 vpnFailureCategory = null,
                 vpnFailureDetail = null,
                 connectionTestRunning = false,
-                connectionTestLatencyMs = null,
-                connectionTestError = null,
+                connectionTestResult = null,
             )
         }
         startVpn(profile)

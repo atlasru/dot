@@ -2,10 +2,11 @@ package dev.dotclient.android.ui
 
 import android.content.Context
 import android.util.Log
+import dev.dotclient.android.core.diagnostics.ConnectionProbeFailure
+import dev.dotclient.android.core.diagnostics.ConnectionProbeResult
 import dev.dotclient.android.core.diagnostics.PingEngine
 import dev.dotclient.android.core.model.ProxyNode
 import dev.dotclient.android.core.settings.SettingsRepository
-import dev.dotclient.android.vpn.VpnRuntime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -37,53 +38,58 @@ internal class NodeDiagnostics(
     }
 
     fun cancelConnection() {
-        if (testingConnection) cancel()
+        if (testingConnection) job?.cancel()
     }
 
-    suspend fun run(nodes: List<ProxyNode>, groupId: String? = null, connection: Boolean = false): Boolean {
+    suspend fun runConnection() {
+        val current = state.value
+        if (job != null || current.savingSettings) return
+        job = currentCoroutineContext()[Job]
+        testingConnection = true
+        state.update {
+            it.copy(diagnosticsRunning = true, connectionTestRunning = true, connectionTestResult = null)
+        }
+        try {
+            val result = engine.testConnection(current.settings.ping)
+            currentCoroutineContext().ensureActive()
+            state.update { it.copy(connectionTestResult = result) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            currentCoroutineContext().ensureActive()
+            state.update {
+                it.copy(connectionTestResult = ConnectionProbeResult.Failure(ConnectionProbeFailure.PROXY_UNAVAILABLE))
+            }
+        } finally {
+            testingConnection = false
+            job = null
+            state.update { it.copy(diagnosticsRunning = false, connectionTestRunning = false) }
+        }
+    }
+
+    suspend fun run(nodes: List<ProxyNode>, groupId: String? = null): Boolean {
         val current = state.value
         if (nodes.isEmpty() || job != null || current.loading || current.savingSettings) return false
         val settings = current.settings.ping
-        if (connection) {
-            val runtime = VpnRuntime.state.value
-            if (!current.vpnConnected || nodes.singleOrNull()?.id != runtime.nodeId || !settings.method.proxy ||
-                !runtime.appInTunnel || settings.url != dev.dotclient.android.core.diagnostics.PingSettings().url
-            ) {
-                state.update {
-                    it.copy(connectionTestError = "Active tunnel diagnostics require dot inside the VPN and the default Via Proxy endpoint")
-                }
-                return false
-            }
-        }
         val ids = nodes.mapTo(hashSetOf()) { it.id }
         val batch = groupId?.let { DiagnosticBatch(it, ids) }
         job = currentCoroutineContext()[Job]
-        testingConnection = connection
         state.update {
             it.copy(
                 diagnosticsRunning = true,
                 testingNodeIds = ids,
                 diagnosticBatch = batch ?: it.diagnosticBatch,
-                connectionTestRunning = connection,
-                connectionTestError = if (connection) null else it.connectionTestError,
             )
         }
 
         var phase = DiagnosticBatchPhase.FAILED
         var completed = 0
         try {
-            engine.test(nodes, settings, connection) { node, result ->
+            engine.test(nodes, settings) { node, result ->
                 withContext(Dispatchers.Main.immediate) {
                     ensureActive()
                     state.update { old ->
                         val pending = old.testingNodeIds - node.id
-                        if (connection) {
-                            return@update old.copy(
-                                testingNodeIds = pending,
-                                connectionTestLatencyMs = result.latencyMs,
-                                connectionTestError = result.error,
-                            )
-                        }
                         if (old.settings.ping != settings || old.subscriptions.none { group ->
                                 group.profiles.any { it.id == node.id }
                             }
@@ -110,7 +116,7 @@ internal class NodeDiagnostics(
             if (batch == null) state.update { it.copy(message = "Diagnostics unavailable") }
         } finally {
             try {
-                if (completed > 0 && !connection) {
+                if (completed > 0) {
                     val results = state.value.pingResults
                     withContext(NonCancellable + Dispatchers.IO) { repository.saveResults(results) }
                 }
@@ -120,7 +126,6 @@ internal class NodeDiagnostics(
                 phase = DiagnosticBatchPhase.FAILED
                 Log.w("dot.diagnostics", "Could not save diagnostics")
             } finally {
-                testingConnection = false
                 job = null
                 state.update { old ->
                     val nextBatch = if (batch == null) old.diagnosticBatch else old.diagnosticBatch?.copy(phase = phase)
@@ -128,7 +133,6 @@ internal class NodeDiagnostics(
                         diagnosticsRunning = false,
                         testingNodeIds = emptySet(),
                         diagnosticBatch = nextBatch,
-                        connectionTestRunning = false,
                     )
                 }
                 Log.i("dot.diagnostics", "${settings.method.key} $phase $completed/${ids.size}")

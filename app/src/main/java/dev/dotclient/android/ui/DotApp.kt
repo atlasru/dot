@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.dotclient.android.BuildConfig
+import dev.dotclient.android.core.diagnostics.ConnectionProbeResult
 import dev.dotclient.android.core.diagnostics.PingStatus
 import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.Subscription
@@ -306,7 +307,7 @@ private fun HomeScreen(
             onClick = onOpenNodes,
         )
 
-        if (state.vpnConnected) {
+        if (state.vpnConnected || state.connectionTestResult is ConnectionProbeResult.Failure) {
             Spacer(Modifier.height(12.dp))
             ConnectionTestButton(state, onTestConnection)
         }
@@ -1086,26 +1087,31 @@ private fun SubscriptionRow(
 
 @Composable
 private fun ConnectionTestButton(state: DotUiState, onClick: () -> Unit) {
-    val result = when {
-        state.connectionTestRunning -> "TESTING…"
-        state.connectionTestLatencyMs != null -> "${state.connectionTestLatencyMs} ms"
-        state.connectionTestError != null -> state.connectionTestError
-        else -> null
-    }
-
-    Row(
-        Modifier.border(1.dp, Color(0xFF303030), RoundedCornerShape(2.dp))
-            .clickable(enabled = !state.diagnosticsRunning && !state.savingSettings, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("TEST CONNECTION", color = Color(0xFFBDBDBD), style = MaterialTheme.typography.labelMedium)
-        result?.let {
-            Spacer(Modifier.width(9.dp))
+    val display = state.connectionTestDisplay()
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(
+            Modifier.border(1.dp, Color(0xFF303030), RoundedCornerShape(2.dp))
+                .clickable(enabled = !state.diagnosticsRunning && !state.loading && !state.savingSettings, onClick = onClick)
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("TEST CONNECTION", color = Color(0xFFBDBDBD), style = MaterialTheme.typography.labelMedium)
+            display.label?.let {
+                Spacer(Modifier.width(9.dp))
+                Text(
+                    it,
+                    color = if (display.failed) DotRed else Color(0xFF777777),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+        }
+        listOfNotNull(display.advice, display.detail).forEach {
             Text(
                 it,
-                color = if (state.connectionTestError != null) DotRed else Color(0xFF777777),
+                modifier = Modifier.padding(top = 5.dp),
+                color = Color(0xFF777777),
                 style = MaterialTheme.typography.labelMedium,
+                textAlign = TextAlign.Center,
             )
         }
     }

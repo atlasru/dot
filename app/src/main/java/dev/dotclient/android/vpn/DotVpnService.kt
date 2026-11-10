@@ -20,6 +20,7 @@ import android.os.Process
 import android.util.Log
 import dev.dotclient.android.MainActivity
 import dev.dotclient.android.R
+import dev.dotclient.android.core.diagnostics.DiagnosticConfig
 import dev.dotclient.android.core.parser.Hysteria2UriParser
 import dev.dotclient.android.core.parser.VlessUriParser
 import dev.dotclient.android.core.settings.AppSettings
@@ -262,6 +263,11 @@ class DotVpnService : VpnService() {
             val controller = VpnSocketControllers.activate(this, network)
             LibXray.setDNS(controller, "${appliedSettings.dns}:53")
             val config = RuntimeSettings.apply(buildXrayConfig(connection.rawUri, vpnInterface.fd), appliedSettings)
+            val proxySession = runCatching {
+                DiagnosticConfig.selectedProxyOutbound(JSONObject(config))?.let {
+                    ActiveProxySession(it.toString(), appliedSettings.dns, network)
+                }
+            }.getOrNull()
             invokeRunXrayFromJson(config)
             if (!isCurrent(connection.generation)) {
                 shutdownCore()
@@ -271,7 +277,7 @@ class DotVpnService : VpnService() {
             runningUnderlay = network
             reconnectAttempt = 0
             Log.i(TAG, "TUN and Xray started")
-            publishState(VpnConnectionState.CONNECTED, connection, "connected")
+            publishState(VpnConnectionState.CONNECTED, connection, "connected", proxySession = proxySession)
             startTrafficMeter(connection)
         } catch (error: Throwable) {
             shutdownCore()
@@ -474,6 +480,7 @@ class DotVpnService : VpnService() {
         message: String? = null,
         failure: VpnFailure? = null,
         reconnectAttempt: Int = 0,
+        proxySession: ActiveProxySession? = null,
     ) {
         VpnRuntime.update(
             state = state,
@@ -483,6 +490,7 @@ class DotVpnService : VpnService() {
             message = message,
             failure = failure,
             reconnectAttempt = reconnectAttempt,
+            proxySession = proxySession,
         )
         runCatching { DotQuickTileService.requestRefresh(this) }
     }

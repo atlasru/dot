@@ -1,5 +1,6 @@
 package dev.dotclient.android.ui
 
+import dev.dotclient.android.core.diagnostics.ConnectionProbeResult
 import dev.dotclient.android.core.diagnostics.PingResult
 import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.NodeSorter
@@ -35,8 +36,7 @@ data class DotUiState(
     val testingNodeIds: Set<String> = emptySet(),
     val diagnosticBatch: DiagnosticBatch? = null,
     val connectionTestRunning: Boolean = false,
-    val connectionTestLatencyMs: Long? = null,
-    val connectionTestError: String? = null,
+    val connectionTestResult: ConnectionProbeResult? = null,
     val subscriptionUpdateResult: SubscriptionUpdateResult? = null,
 ) {
     val selectedSubscription: Subscription?

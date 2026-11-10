@@ -8,11 +8,18 @@ import dev.dotclient.android.vpn.Hysteria2XrayConfig
 import java.net.URISyntaxException
 
 internal object DiagnosticConfig {
-    fun proxyOutbound(rawUri: String): JSONObject {
-        val outbounds = convertProfile(rawUri).getJSONArray("outbounds")
-        return (0 until outbounds.length()).map { outbounds.getJSONObject(it) }.firstOrNull {
-            it.optString("protocol") in listOf("vless", "hysteria")
-        } ?: throw ProbeFailure("Proxy configuration has no supported outbound", PingStatus.FAIL)
+    fun proxyOutbound(rawUri: String): JSONObject = selectedProxyOutbound(convertProfile(rawUri))
+        ?: throw ProbeFailure("Proxy configuration has no supported outbound", PingStatus.FAIL)
+
+    fun selectedProxyOutbound(config: JSONObject): JSONObject? {
+        val outbounds = config.optJSONArray("outbounds") ?: return null
+        return (0 until outbounds.length()).asSequence().mapNotNull(outbounds::optJSONObject)
+            .firstOrNull(::isProxyOutbound)
+    }
+
+    fun isProxyOutbound(outbound: JSONObject): Boolean = when (outbound.optString("protocol")) {
+        "vless", "hysteria" -> true
+        else -> false
     }
 
     fun batch(outbounds: List<JSONObject>, ports: List<Int>): JSONObject {
