@@ -16,7 +16,7 @@ import dev.dotclient.android.core.settings.AppSettings
 import org.json.JSONObject
 
 @Composable
-internal fun AdvancedSettingsPanel(state: DotUiState, viewModel: MainViewModel) {
+internal fun AdvancedSettingsPanel(state: DotUiState, viewModel: MainViewModel, active: Boolean = true) {
     val context=LocalContext.current
     val settings=state.settings
     var section by remember { mutableStateOf<String?>(null) }
@@ -106,7 +106,7 @@ internal fun AdvancedSettingsPanel(state: DotUiState, viewModel: MainViewModel) 
         }
         ActionSetting("Reset advanced settings","confirm…") { edit("Reset", "") }
     }
-    if(editor!=null) AlertDialog(onDismissRequest={editor=null},title={Text(editor!!)},text={Column { OutlinedTextField(value=text,onValueChange={text=it},label={Text(if(editor=="Reset") "Type RESET" else editor!!)},maxLines=8); error?.let { Text(it,color=MaterialTheme.colorScheme.error) } }},confirmButton={TextButton(onClick={
+    if(active && editor!=null) AlertDialog(onDismissRequest={editor=null},title={Text(editor!!)},text={Column { OutlinedTextField(value=text,onValueChange={text=it},label={Text(if(editor=="Reset") "Type RESET" else editor!!)},maxLines=8); error?.let { Text(it,color=MaterialTheme.colorScheme.error) } }},confirmButton={TextButton(onClick={
         try {
             val next=when(editor) { "URL"->settings.copy(ping=settings.ping.copy(url=text.trim())); "DNS"->settings.copy(dns=text.trim()); "User-Agent"->settings.copy(subscriptionUserAgent=text); "Import"->AppSettings.from(JSONObject(text)); "Reset"->{ require(text=="RESET") { "Type RESET to confirm" }; AppSettings() }; else->settings }
             next.validate()

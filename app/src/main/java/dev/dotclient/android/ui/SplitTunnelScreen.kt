@@ -1,6 +1,5 @@
 package dev.dotclient.android.ui
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -56,7 +55,6 @@ fun SplitTunnelScreen(
     var appliedConfig by remember { mutableStateOf(config) }
     var query by remember { mutableStateOf("") }
 
-    BackHandler(onBack = onBack)
 
     LaunchedEffect(vpnConnected) {
         if (vpnConnected) appliedConfig = config

@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -60,6 +59,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.ui.Alignment
@@ -92,9 +92,8 @@ import dev.dotclient.android.vpn.VpnConnectionState
 import dev.dotclient.android.vpn.VpnRuntime
 import kotlin.math.max
 
-private enum class Screen { HOME, NODES, SETTINGS, SPLIT_TUNNEL, ABOUT }
 private enum class NodeViewMode { LIST, MAP }
-private val DotRed = Color(0xFFFF2D2D)
+internal val DotRed = Color(0xFFFF2D2D)
 
 @Composable
 fun DotApp(viewModel: MainViewModel) {
@@ -102,7 +101,8 @@ fun DotApp(viewModel: MainViewModel) {
     val context = LocalContext.current
     val splitTunnelStore = remember(context.applicationContext) { SplitTunnelStore(context.applicationContext) }
     var splitTunnelConfig by remember { mutableStateOf(splitTunnelStore.load()) }
-    var screen by remember { mutableStateOf(Screen.HOME) }
+    var screen by rememberSaveable { mutableStateOf(Screen.HOME) }
+    var requestingNotificationPermission by rememberSaveable { mutableStateOf(false) }
 
     val vpnPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
@@ -121,15 +121,21 @@ fun DotApp(viewModel: MainViewModel) {
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
-    ) { beginVpnPermissionFlow() }
+    ) {
+        requestingNotificationPermission = false
+        beginVpnPermissionFlow()
+    }
 
-    val toggleVpn = {
-        when (state.vpnState) {
+    val toggleVpn: () -> Unit = toggle@{
+        val current = viewModel.state.value
+        if (current.loading || current.requestingVpnPermission || requestingNotificationPermission) return@toggle
+        when (current.vpnState) {
             VpnConnectionState.CONNECTED,
             VpnConnectionState.CONNECTING,
             VpnConnectionState.WAITING_FOR_NETWORK,
-            VpnConnectionState.RECONNECTING,
-            VpnConnectionState.DISCONNECTING -> viewModel.disconnect()
+            VpnConnectionState.RECONNECTING -> viewModel.disconnect()
+
+            VpnConnectionState.DISCONNECTING -> Unit
 
             VpnConnectionState.DISCONNECTED,
             VpnConnectionState.ERROR -> {
@@ -137,6 +143,7 @@ fun DotApp(viewModel: MainViewModel) {
                     Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                     ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
                 ) {
+                    requestingNotificationPermission = true
                     notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 } else {
                     beginVpnPermissionFlow()
@@ -150,117 +157,61 @@ fun DotApp(viewModel: MainViewModel) {
         splitTunnelStore.save(updated)
     }
 
-    val topLevel = screen == Screen.HOME || screen == Screen.NODES || screen == Screen.SETTINGS
+    BackHandler(enabled = screen.backDestination != null) {
+        screen.backDestination?.let { screen = it }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            if (topLevel) {
+            if (screen.isTab) {
                 BottomNavigation(screen) { screen = it }
             }
         },
     ) { padding ->
-        when (screen) {
-            Screen.HOME -> HomeScreen(
-                state = state,
-                splitTunnelConfig = splitTunnelConfig,
-                onToggleVpn = toggleVpn,
-                onOpenNodes = { screen = Screen.NODES },
-                onOpenSettings = { screen = Screen.SETTINGS },
-                onTestConnection = viewModel::testConnection,
-                modifier = Modifier.padding(padding),
-            )
+        ScreenTransition(screen, modifier = Modifier.padding(padding)) { destination, active ->
+            when (destination) {
+                Screen.HOME -> HomeScreen(
+                    state = state,
+                    splitTunnelConfig = splitTunnelConfig,
+                    onToggleVpn = toggleVpn,
+                    onOpenNodes = { screen = Screen.NODES },
+                    onOpenSettings = { screen = Screen.SETTINGS },
+                    onTestConnection = viewModel::testConnection,
+                    visible = active,
+                )
 
-            Screen.NODES -> NodesScreen(
-                state = state,
-                viewModel = viewModel,
-                onToggleVpn = toggleVpn,
-                onOpenSettings = { screen = Screen.SETTINGS },
-                modifier = Modifier.padding(padding),
-            )
+                Screen.NODES -> NodesScreen(
+                    state = state,
+                    viewModel = viewModel,
+                    onToggleVpn = toggleVpn,
+                    onOpenSettings = { screen = Screen.SETTINGS },
+                )
 
-            Screen.SETTINGS -> SettingsScreen(
-                state = state,
-                viewModel = viewModel,
-                splitTunnelConfig = splitTunnelConfig,
-                onSplitTunnel = { screen = Screen.SPLIT_TUNNEL },
-                onAbout = { screen = Screen.ABOUT },
-                modifier = Modifier.padding(padding),
-            )
+                Screen.SETTINGS -> SettingsScreen(
+                    state = state,
+                    viewModel = viewModel,
+                    splitTunnelConfig = splitTunnelConfig,
+                    onSplitTunnel = { screen = Screen.SPLIT_TUNNEL },
+                    onAbout = { screen = Screen.ABOUT },
+                    active = active,
+                )
 
-            Screen.SPLIT_TUNNEL -> SplitTunnelScreen(
-                config = splitTunnelConfig,
-                vpnConnected = state.vpnConnected,
-                onChange = updateSplitTunnel,
-                onReconnect = viewModel::reconnectCurrentProfile,
-                onBack = { screen = Screen.SETTINGS },
-                modifier = Modifier.padding(padding),
-            )
+                Screen.SPLIT_TUNNEL -> SplitTunnelScreen(
+                    config = splitTunnelConfig,
+                    vpnConnected = state.vpnConnected,
+                    onChange = updateSplitTunnel,
+                    onReconnect = viewModel::reconnectCurrentProfile,
+                    onBack = { screen = Screen.SETTINGS },
+                )
 
-            Screen.ABOUT -> AboutScreen(
-                onBack = { screen = Screen.SETTINGS },
-                modifier = Modifier.padding(padding),
-            )
+                Screen.ABOUT -> AboutScreen(onBack = { screen = Screen.SETTINGS })
+            }
         }
     }
 
     state.subscriptionUpdateResult?.let { result ->
         SubscriptionUpdateResultDialog(result, viewModel::dismissSubscriptionUpdateResult)
-    }
-}
-
-@Composable
-private fun BottomNavigation(selected: Screen, onSelect: (Screen) -> Unit) {
-    Box(
-        Modifier.fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(start = 22.dp, end = 22.dp, top = 6.dp, bottom = 14.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(
-            Modifier.fillMaxWidth()
-                .background(Color(0xFF0D0D0D), RoundedCornerShape(30.dp))
-                .border(1.dp, Color(0xFF292929), RoundedCornerShape(30.dp))
-                .padding(5.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            NavItem("HOME", selected == Screen.HOME, Modifier.weight(1f)) { onSelect(Screen.HOME) }
-            NavItem("NODES", selected == Screen.NODES, Modifier.weight(1f)) { onSelect(Screen.NODES) }
-            NavItem("SETTINGS", selected == Screen.SETTINGS, Modifier.weight(1f)) { onSelect(Screen.SETTINGS) }
-        }
-    }
-}
-
-@Composable
-private fun NavItem(label: String, active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val background by animateColorAsState(
-        targetValue = if (active) Color(0xFF202020) else Color.Transparent,
-        label = "dot-nav-background",
-    )
-    val border by animateColorAsState(
-        targetValue = if (active) Color(0xFF3B3B3B) else Color.Transparent,
-        label = "dot-nav-border",
-    )
-    val textColor by animateColorAsState(
-        targetValue = if (active) Color.White else Color(0xFF666666),
-        label = "dot-nav-text",
-    )
-
-    Box(
-        modifier.background(background, RoundedCornerShape(24.dp))
-            .border(1.dp, border, RoundedCornerShape(24.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 12.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-            if (active) {
-                Box(Modifier.size(5.dp).background(DotRed, CircleShape))
-                Spacer(Modifier.width(7.dp))
-            }
-            Text(label, color = textColor, style = MaterialTheme.typography.labelMedium)
-        }
     }
 }
 
@@ -876,6 +827,7 @@ private fun SettingsScreen(
     onSplitTunnel: () -> Unit,
     onAbout: () -> Unit,
     modifier: Modifier = Modifier,
+    active: Boolean = true,
 ) {
     var editorOpen by remember { mutableStateOf(false) }
     var editingId by remember { mutableStateOf<String?>(null) }
@@ -901,9 +853,9 @@ private fun SettingsScreen(
         editorOpen = true
     }
 
-    BackHandler(enabled = editorOpen) { editorOpen = false }
+    BackHandler(enabled = active && editorOpen) { editorOpen = false }
 
-    if (confirmRegenerate) {
+    if (active && confirmRegenerate) {
         AlertDialog(
             onDismissRequest = { confirmRegenerate = false },
             title = { Text("Generate a new HWID?") },
@@ -961,7 +913,7 @@ private fun SettingsScreen(
             }
         } else {
             item {
-                AdvancedSettingsPanel(state,viewModel)
+                AdvancedSettingsPanel(state, viewModel, active = active)
                 SettingsSectionTitle("VPN")
                 SettingsLink(
                     "split tunneling",
@@ -1047,7 +999,6 @@ private fun SettingsLink(name: String, value: String, onClick: () -> Unit) {
 @Composable
 private fun AboutScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    BackHandler(onBack = onBack)
 
     fun openUrl(url: String) {
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
