@@ -11,7 +11,15 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,9 +41,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -48,15 +56,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -68,14 +78,15 @@ import dev.dotclient.android.BuildConfig
 import dev.dotclient.android.core.diagnostics.ConnectionProbeResult
 import dev.dotclient.android.core.diagnostics.PingStatus
 import dev.dotclient.android.core.model.NodeSortMode
-import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.model.ProxyNode
-import dev.dotclient.android.core.subscription.SubscriptionIdentity
+import dev.dotclient.android.core.model.Subscription
 import dev.dotclient.android.core.splittunnel.SplitTunnelConfig
 import dev.dotclient.android.core.splittunnel.SplitTunnelMode
 import dev.dotclient.android.core.splittunnel.SplitTunnelStore
+import dev.dotclient.android.core.subscription.SubscriptionIdentity
 import dev.dotclient.android.ui.theme.DotThemeMode
 import dev.dotclient.android.vpn.VpnConnectionState
+import dev.dotclient.android.vpn.VpnRuntime
 import kotlin.math.max
 
 private enum class Screen { HOME, NODES, SETTINGS, SPLIT_TUNNEL, ABOUT }
@@ -259,8 +270,15 @@ private fun HomeScreen(
     onOpenSettings: () -> Unit,
     onTestConnection: () -> Unit,
     modifier: Modifier = Modifier,
+    visible: Boolean = true,
 ) {
     val selectedProfile = state.selectedProfile
+    val nodeName = when {
+        state.vpnConnected -> state.runningNodeName ?: selectedProfile?.name ?: "connected"
+        state.vpnBusy -> state.runningNodeName ?: selectedProfile?.name ?: "working…"
+        selectedProfile != null -> selectedProfile.name
+        else -> "select a node"
+    }
 
     Column(
         modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp),
@@ -269,35 +287,46 @@ private fun HomeScreen(
         DotHeader("dot.", BuildConfig.VERSION_NAME.removeSuffix("-debug"))
         Spacer(Modifier.height(24.dp))
 
-        PixelOrb(state, onToggleVpn)
-        Spacer(Modifier.height(12.dp))
-        Text(connectionLabel(state), style = MaterialTheme.typography.headlineLarge)
-        Spacer(Modifier.height(4.dp))
-        Text(
-            when {
-                state.vpnConnected -> state.runningNodeName ?: selectedProfile?.name ?: "connected"
-                state.vpnBusy -> state.runningNodeName ?: selectedProfile?.name ?: "working…"
-                selectedProfile != null -> selectedProfile.name
-                else -> "select a node"
-            },
-            color = Color(0xFF777777),
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        HomeOrb(
+            state = state.vpnState,
+            requestingPermission = state.requestingVpnPermission,
+            enabled = !state.loading && !state.requestingVpnPermission,
+            visible = visible,
+            accent = DotRed,
+            onClick = onToggleVpn,
         )
+        Spacer(Modifier.height(12.dp))
+        Crossfade(
+            targetState = connectionLabel(state),
+            modifier = Modifier.animateContentSize(DotMotion.tween()),
+            animationSpec = DotMotion.tween(),
+            label = "connection status",
+        ) { label ->
+            Text(label, style = MaterialTheme.typography.headlineLarge, textAlign = TextAlign.Center)
+        }
+        Spacer(Modifier.height(4.dp))
+        Crossfade(nodeName, animationSpec = DotMotion.tween(), label = "connected node name") { name ->
+            Text(
+                name,
+                color = Color(0xFF777777),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
 
         if (splitTunnelConfig.isActive) {
             Spacer(Modifier.height(7.dp))
             Text(
                 splitTunnelSummary(splitTunnelConfig),
-                Modifier.clickable(onClick = onOpenSettings).padding(vertical = 3.dp),
+                Modifier.motionClickable(onClick = onOpenSettings).padding(vertical = 3.dp),
                 color = Color(0xFF666666),
                 style = MaterialTheme.typography.labelMedium,
             )
         }
 
         Spacer(Modifier.height(22.dp))
-        TrafficSummary(state)
+        TrafficSummary(collectTraffic = visible)
         Spacer(Modifier.height(18.dp))
 
         ActiveNodeCard(
@@ -307,9 +336,12 @@ private fun HomeScreen(
             onClick = onOpenNodes,
         )
 
-        if (state.vpnConnected || state.connectionTestResult is ConnectionProbeResult.Failure) {
-            Spacer(Modifier.height(12.dp))
-            ConnectionTestButton(state, onTestConnection)
+        AnimatedVisibility(
+            visible = state.vpnConnected || state.connectionTestResult is ConnectionProbeResult.Failure,
+            enter = fadeIn(DotMotion.tween()) + expandVertically(DotMotion.tween()),
+            exit = fadeOut(DotMotion.tween(DotMotion.Fast)) + shrinkVertically(DotMotion.tween()),
+        ) {
+            Box(Modifier.padding(top = 12.dp)) { ConnectionTestButton(state, onTestConnection) }
         }
 
         Spacer(Modifier.weight(1f))
@@ -328,19 +360,29 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun TrafficSummary(state: DotUiState) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Column {
+private fun TrafficSummary(collectTraffic: Boolean = true) {
+    val runtime = if (collectTraffic) VpnRuntime.state.collectAsStateWithLifecycle().value else VpnRuntime.state.value
+    Row(Modifier.fillMaxWidth()) {
+        Column(Modifier.weight(1f)) {
             Text("DOWNLOAD", color = Color(0xFF555555), style = MaterialTheme.typography.labelMedium)
-            Text("↓ ${formatRate(state.downloadBytesPerSecond)}", style = MaterialTheme.typography.bodyLarge)
-            Text(formatBytes(state.sessionDownloadBytes), color = Color(0xFF666666), style = MaterialTheme.typography.labelMedium)
+            TrafficRate("↓", runtime.downloadBytesPerSecond)
+            Text(formatBytes(runtime.sessionDownloadBytes), color = Color(0xFF666666), style = MaterialTheme.typography.labelMedium)
         }
-        Column(horizontalAlignment = Alignment.End) {
+        Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
             Text("UPLOAD", color = Color(0xFF555555), style = MaterialTheme.typography.labelMedium)
-            Text("↑ ${formatRate(state.uploadBytesPerSecond)}", style = MaterialTheme.typography.bodyLarge)
-            Text(formatBytes(state.sessionUploadBytes), color = Color(0xFF666666), style = MaterialTheme.typography.labelMedium)
+            TrafficRate("↑", runtime.uploadBytesPerSecond)
+            Text(formatBytes(runtime.sessionUploadBytes), color = Color(0xFF666666), style = MaterialTheme.typography.labelMedium)
         }
     }
+}
+
+@Composable
+private fun TrafficRate(direction: String, bytesPerSecond: Long) {
+    val animatedRate = animateFloatAsState(bytesPerSecond.toFloat(), DotMotion.tween(), label = "traffic rate")
+    val rate by remember(animatedRate) {
+        derivedStateOf(structuralEqualityPolicy()) { formatRate(animatedRate.value.toLong()) }
+    }
+    Text("$direction $rate", style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 @Composable
@@ -354,26 +396,32 @@ private fun ActiveNodeCard(
         Modifier.fillMaxWidth()
             .background(Color(0xFF101010), RoundedCornerShape(6.dp))
             .border(1.dp, Color(0xFF242424), RoundedCornerShape(6.dp))
-            .clickable(onClick = onClick)
+            .motionClickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(3.dp).height(38.dp).background(if (runningName != null) DotRed else Color(0xFF333333)))
         Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(profile?.name ?: "choose a node", style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(3.dp))
+        Crossfade(profile, Modifier.weight(1f), DotMotion.tween(), label = "selected node") { node ->
+            Column {
+                Text(node?.name ?: "choose a node", style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    node?.let { "${it.security.name.lowercase()} · ${it.transport.name.lowercase()}" } ?: "open nodes to select a server",
+                    color = Color(0xFF606060),
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Crossfade(latencyMs, animationSpec = DotMotion.tween(DotMotion.Fast), label = "node latency") { latency ->
             Text(
-                profile?.let { "${it.security.name.lowercase()} · ${it.transport.name.lowercase()}" } ?: "open nodes to select a server",
-                color = Color(0xFF606060),
-                style = MaterialTheme.typography.labelMedium,
+                latency?.let { "$it ms" } ?: "›",
+                color = Color(0xFF777777),
+                style = MaterialTheme.typography.bodyMedium,
             )
         }
-        Text(
-            latencyMs?.let { "$it ms" } ?: "›",
-            color = Color(0xFF777777),
-            style = MaterialTheme.typography.bodyMedium,
-        )
     }
 }
 
@@ -1091,75 +1139,45 @@ private fun ConnectionTestButton(state: DotUiState, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Row(
             Modifier.border(1.dp, Color(0xFF303030), RoundedCornerShape(2.dp))
-                .clickable(enabled = !state.diagnosticsRunning && !state.loading && !state.savingSettings, onClick = onClick)
+                .motionClickable(enabled = !state.diagnosticsRunning && !state.loading && !state.savingSettings, onClick = onClick)
                 .padding(horizontal = 12.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("TEST CONNECTION", color = Color(0xFFBDBDBD), style = MaterialTheme.typography.labelMedium)
-            display.label?.let {
-                Spacer(Modifier.width(9.dp))
-                Text(
-                    it,
-                    color = if (display.failed) DotRed else Color(0xFF777777),
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-        }
-        listOfNotNull(display.advice, display.detail).forEach {
-            Text(
-                it,
-                modifier = Modifier.padding(top = 5.dp),
-                color = Color(0xFF777777),
-                style = MaterialTheme.typography.labelMedium,
-                textAlign = TextAlign.Center,
-            )
-        }
-    }
-}
-
-@Composable
-private fun PixelOrb(state: DotUiState, onClick: () -> Unit) {
-    val active = state.vpnConnected
-    val busy = state.requestingVpnPermission || state.vpnBusy
-    val error = state.vpnState == VpnConnectionState.ERROR
-    val pattern = listOf(
-        "00011111000", "00110001100", "01100000110", "11001010011", "10010101001",
-        "10001010001", "10010101001", "11001010011", "01100000110", "00110001100", "00011111000",
-    )
-
-    Box(
-        Modifier.size(142.dp)
-            .border(1.dp, if (active) Color(0xFF444444) else MaterialTheme.colorScheme.outline, CircleShape)
-            .clickable(enabled = !state.loading && !state.requestingVpnPermission, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            pattern.forEachIndexed { rowIndex, row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    row.forEachIndexed { colIndex, cell ->
-                        val busyPixel = busy && (rowIndex + colIndex) % 4 == 0
-                        val color = when {
-                            error && (rowIndex == colIndex || rowIndex + colIndex == 10) -> DotRed
-                            cell == '1' && active -> Color.White
-                            cell == '1' && busyPixel -> Color(0xFFBDBDBD)
-                            cell == '1' -> Color(0xFF555555)
-                            else -> Color.Transparent
-                        }
-                        Box(Modifier.size(6.dp).background(color))
-                    }
+            Crossfade(
+                display.label to display.failed,
+                modifier = Modifier.animateContentSize(DotMotion.tween()),
+                animationSpec = DotMotion.tween(),
+                label = "connection test result",
+            ) { (label, failed) ->
+                label?.let {
+                    Text(
+                        it,
+                        modifier = Modifier.padding(start = 9.dp),
+                        color = if (failed) DotRed else Color(0xFF777777),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
                 }
             }
         }
-        Box(
-            Modifier.size(if (active) 12.dp else 8.dp).background(
-                when {
-                    error || active -> DotRed
-                    busy -> Color(0xFF8A8A8A)
-                    else -> Color(0xFF383838)
-                },
-                CircleShape,
-            ),
-        )
+        Crossfade(
+            display.advice to display.detail,
+            modifier = Modifier.animateContentSize(DotMotion.tween()),
+            animationSpec = DotMotion.tween(),
+            label = "connection test details",
+        ) { (advice, detail) ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                listOfNotNull(advice, detail).forEach {
+                    Text(
+                        it,
+                        modifier = Modifier.padding(top = 5.dp),
+                        color = Color(0xFF777777),
+                        style = MaterialTheme.typography.labelMedium,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+        }
     }
 }
 
