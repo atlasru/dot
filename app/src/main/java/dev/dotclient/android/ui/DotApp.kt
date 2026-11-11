@@ -64,13 +64,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -435,18 +438,22 @@ private fun NodesScreen(
 ) {
     var nodeViewMode by remember(state.selectedSubscriptionId) { mutableStateOf(NodeViewMode.LIST) }
     val group = state.selectedSubscription
+    val batch = state.diagnosticBatch?.takeIf { it.running || it.groupId == group?.id }
 
     Column(modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 14.dp)) {
         DotHeader("nodes.", BuildConfig.VERSION_NAME.removeSuffix("-debug"))
         Spacer(Modifier.height(14.dp))
 
         GroupToolbar(state, viewModel)
-        state.diagnosticBatch?.takeIf { it.running || it.groupId == group?.id }?.let { batch ->
-            DiagnosticBatchSummary(
-                batch,
-                state.subscriptions.firstOrNull { it.id == batch.groupId }?.name.takeIf { batch.groupId != group?.id },
-                viewModel::cancelDiagnostics,
-            )
+        Box(Modifier.fillMaxWidth().animateContentSize(animationSpec = DotMotion.tween())) {
+            batch?.let { currentBatch ->
+                DiagnosticBatchSummary(
+                    currentBatch,
+                    state.subscriptions.firstOrNull { it.id == currentBatch.groupId }?.name
+                        .takeIf { currentBatch.groupId != group?.id },
+                    viewModel::cancelDiagnostics,
+                )
+            }
         }
         Spacer(Modifier.height(8.dp))
         Divider()
@@ -483,41 +490,46 @@ private fun NodesScreen(
                 modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 8.dp, bottom = 8.dp),
             )
 
-            else -> LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                contentPadding = PaddingValues(top = 7.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                item(key = "auto-node") {
-                    AutoNodeRow(
-                        state = state,
-                        onClick = { viewModel.setAutoNodeEnabled(true) },
-                    )
-                    Spacer(Modifier.height(5.dp))
-                }
-                items(state.sortedProfiles, key = { it.id }) { profile ->
-                    NodeRow(
-                        profile = profile,
-                        selected = profile.id == group.selectedProfileId,
-                        running = state.vpnConnected && profile.id == state.runningNodeId,
-                        compact = state.settings.compactNodes,
-                        showLatency = state.settings.showLatency || state.diagnosticBatch?.let { it.groupId == group.id && profile.id in it.nodeIds } == true,
-                        showTransport = state.settings.showTransport,
-                        diagnostic = state.nodeDiagnosticDisplay(profile.id),
-                        testEnabled = !state.diagnosticsRunning && !state.loading && !state.savingSettings,
-                        onSelect = {
-                            if (state.vpnConnected && profile.id != state.runningNodeId) viewModel.switchProfile(profile.id)
-                            else viewModel.selectProfile(profile.id)
-                        },
-                        onTest = { viewModel.testNode(profile) },
-                        onConnect = {
-                            if (state.vpnConnected) viewModel.switchProfile(profile.id)
-                            else {
-                                viewModel.selectProfile(profile.id)
-                                onToggleVpn()
-                            }
-                        },
-                    )
+            else -> {
+                val profiles = rememberSortedNodeProfiles(state)
+                val placement = remember { DotMotion.spring(visibilityThreshold = IntOffset(1, 1)) }
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    contentPadding = PaddingValues(top = 7.dp, bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    item(key = "auto-node") {
+                        AutoNodeRow(
+                            state = state,
+                            onClick = { viewModel.setAutoNodeEnabled(true) },
+                        )
+                        Spacer(Modifier.height(5.dp))
+                    }
+                    items(profiles, key = ProxyNode::id) { profile ->
+                        NodeRow(
+                            profile = profile,
+                            selected = profile.id == group.selectedProfileId,
+                            running = state.vpnConnected && profile.id == state.runningNodeId,
+                            compact = state.settings.compactNodes,
+                            showLatency = state.settings.showLatency || state.diagnosticBatch?.let { it.groupId == group.id && profile.id in it.nodeIds } == true,
+                            showTransport = state.settings.showTransport,
+                            diagnostic = state.nodeDiagnosticDisplay(profile.id),
+                            testEnabled = !state.diagnosticsRunning && !state.loading && !state.savingSettings,
+                            onSelect = {
+                                if (state.vpnConnected && profile.id != state.runningNodeId) viewModel.switchProfile(profile.id)
+                                else viewModel.selectProfile(profile.id)
+                            },
+                            onTest = { viewModel.testNode(profile) },
+                            onConnect = {
+                                if (state.vpnConnected) viewModel.switchProfile(profile.id)
+                                else {
+                                    viewModel.selectProfile(profile.id)
+                                    onToggleVpn()
+                                }
+                            },
+                            modifier = Modifier.animateItem(fadeInSpec = null, placementSpec = placement, fadeOutSpec = null),
+                        )
+                    }
                 }
             }
         }
@@ -526,7 +538,10 @@ private fun NodesScreen(
 
 @Composable
 private fun AutoNodeRow(state: DotUiState, onClick: () -> Unit) {
-    val bestLatency = state.profiles.mapNotNull { state.pingResults[it.id]?.latencyMs }.minOrNull()
+    val profiles = state.profiles
+    val bestLatency = remember(profiles, state.pingResults) {
+        profiles.asSequence().mapNotNull { state.pingResults[it.id]?.latencyMs }.minOrNull()
+    }
     val autoTesting = state.autoNodeEnabled && state.diagnosticsRunning
     val canUseCachedWhileConnected = !state.vpnConnected || bestLatency != null
     val enabled = !state.vpnBusy && !state.diagnosticsRunning && canUseCachedWhileConnected
@@ -535,7 +550,7 @@ private fun AutoNodeRow(state: DotUiState, onClick: () -> Unit) {
         Modifier.fillMaxWidth()
             .background(Color(0xFF121212), RoundedCornerShape(7.dp))
             .border(1.dp, if (autoTesting) Color(0xFF444444) else Color(0xFF282828), RoundedCornerShape(7.dp))
-            .clickable(enabled = enabled, onClick = onClick)
+            .motionClickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 13.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -592,7 +607,7 @@ private fun GroupToolbar(state: DotUiState, viewModel: MainViewModel) {
     ) {
         Box {
             Row(
-                Modifier.clickable { groupMenuOpen = true }.padding(vertical = 8.dp, horizontal = 2.dp),
+                Modifier.motionClickable { groupMenuOpen = true }.padding(vertical = 8.dp, horizontal = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column {
@@ -625,7 +640,7 @@ private fun GroupToolbar(state: DotUiState, viewModel: MainViewModel) {
         Box {
             Text(
                 "⋮",
-                Modifier.clickable(enabled = group != null) { actionsOpen = true }.padding(horizontal = 12.dp, vertical = 5.dp),
+                Modifier.motionClickable(enabled = group != null) { actionsOpen = true }.padding(horizontal = 12.dp, vertical = 5.dp),
                 color = if (group != null) Color(0xFFAAAAAA) else Color(0xFF444444),
                 style = MaterialTheme.typography.headlineLarge,
             )
@@ -653,7 +668,7 @@ private fun GroupToolbar(state: DotUiState, viewModel: MainViewModel) {
 
 @Composable
 private fun DiagnosticBatchSummary(batch: DiagnosticBatch, groupName: String?, onCancel: () -> Unit) {
-    val counts = batch.counts
+    val counts = remember(batch.results) { batch.counts }
     val checked = counts.checked
     val total = batch.nodeIds.size
     val phase = when (batch.phase) {
@@ -676,8 +691,19 @@ private fun DiagnosticBatchSummary(batch: DiagnosticBatch, groupName: String?, o
                 enabled = batch.phase == DiagnosticBatchPhase.RUNNING,
             ) { Text("CANCEL") }
         }
-        if (batch.running && total > 0) {
-            LinearProgressIndicator(progress = { checked.toFloat() / total }, modifier = Modifier.fillMaxWidth())
+        if (total > 0) {
+            val progress = animateFloatAsState(
+                targetValue = checked.toFloat() / total,
+                animationSpec = DotMotion.tween(),
+                label = "node test progress",
+            )
+            AnimatedVisibility(
+                visible = batch.running,
+                enter = fadeIn(DotMotion.tween(DotMotion.Fast)),
+                exit = fadeOut(DotMotion.tween()),
+            ) {
+                LinearProgressIndicator(progress = { progress.value }, modifier = Modifier.fillMaxWidth())
+            }
         }
     }
 }
@@ -699,7 +725,7 @@ private fun NodeViewSwitcher(
             Text(
                 "SORT: ${state.selectedSortMode.name}",
                 Modifier.border(1.dp, Color(0xFF252525), RoundedCornerShape(2.dp))
-                    .clickable { sortMenuOpen = true }
+                    .motionClickable { sortMenuOpen = true }
                     .padding(horizontal = 10.dp, vertical = 6.dp),
                 color = Color(0xFF777777),
                 style = MaterialTheme.typography.labelMedium,
@@ -724,7 +750,7 @@ private fun NodeViewSwitcher(
                     mode.name,
                     Modifier.border(1.dp, if (active) Color(0xFF505050) else Color(0xFF252525), RoundedCornerShape(2.dp))
                         .background(if (active) Color(0xFF141414) else Color.Transparent)
-                        .clickable { onViewSelect(mode) }
+                        .motionClickable { onViewSelect(mode) }
                         .padding(horizontal = 11.dp, vertical = 6.dp),
                     color = if (active) Color(0xFFD0D0D0) else Color(0xFF626262),
                     style = MaterialTheme.typography.labelMedium,
@@ -748,17 +774,33 @@ private fun NodeRow(
     onSelect: () -> Unit,
     onTest: () -> Unit,
     onConnect: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember(profile.id) { mutableStateOf(false) }
+    val highlight = animateColorAsState(
+        targetValue = if (selected) Color(0xFF111111) else Color.Transparent,
+        animationSpec = DotMotion.tween(),
+        label = "node highlight",
+    )
+    val rail = animateColorAsState(
+        targetValue = if (selected) DotRed else Color(0xFF181818),
+        animationSpec = DotMotion.tween(),
+        label = "node selection",
+    )
+    val menuAngle = animateFloatAsState(
+        targetValue = if (menuOpen) 90f else 0f,
+        animationSpec = DotMotion.tween(DotMotion.Fast),
+        label = "node menu",
+    )
 
     Row(
-        Modifier.fillMaxWidth()
-            .background(if (selected) Color(0xFF111111) else Color.Transparent)
-            .clickable(onClick = onSelect)
-            .padding(vertical = if(compact) 5.dp else 11.dp),
+        modifier.fillMaxWidth()
+            .motionClickable(pressedScale = 0.99f, onClick = onSelect)
+            .drawBehind { drawRect(highlight.value) }
+            .padding(vertical = if (compact) 5.dp else 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.width(3.dp).height(36.dp).background(if (selected) DotRed else Color(0xFF181818)))
+        Box(Modifier.width(3.dp).height(36.dp).drawBehind { drawRect(rail.value) })
         Spacer(Modifier.width(11.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -781,25 +823,23 @@ private fun NodeRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            diagnostic.detail?.let { error ->
-                Text(error, color = Color(0xFF777777),
-                    style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
+            NodeResultDetail(diagnostic.detail)
         }
         Spacer(Modifier.width(10.dp))
-        if(showLatency) Text(
+        if (showLatency) NodeResultBadge(
             diagnostic.badge,
             color = when {
                 diagnostic.result?.status == PingStatus.FAIL -> DotRed
                 (diagnostic.result?.latencyMs ?: Long.MAX_VALUE) <= 300 -> Color(0xFFB8B8B8)
                 else -> Color(0xFF777777)
             },
-            style = MaterialTheme.typography.labelMedium,
         )
         Box {
             Text(
                 "⋮",
-                Modifier.clickable { menuOpen = true }.padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                Modifier.motionClickable { menuOpen = true }
+                    .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
+                    .graphicsLayer { rotationZ = menuAngle.value },
                 color = Color(0xFF777777),
                 style = MaterialTheme.typography.titleLarge,
             )
