@@ -13,8 +13,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -40,9 +40,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -67,8 +67,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -81,12 +81,12 @@ import dev.dotclient.android.BuildConfig
 import dev.dotclient.android.core.diagnostics.ConnectionProbeResult
 import dev.dotclient.android.core.diagnostics.PingStatus
 import dev.dotclient.android.core.model.NodeSortMode
-import dev.dotclient.android.core.model.ProxyNode
 import dev.dotclient.android.core.model.Subscription
+import dev.dotclient.android.core.model.ProxyNode
+import dev.dotclient.android.core.subscription.SubscriptionIdentity
 import dev.dotclient.android.core.splittunnel.SplitTunnelConfig
 import dev.dotclient.android.core.splittunnel.SplitTunnelMode
 import dev.dotclient.android.core.splittunnel.SplitTunnelStore
-import dev.dotclient.android.core.subscription.SubscriptionIdentity
 import dev.dotclient.android.ui.theme.DotThemeMode
 import dev.dotclient.android.vpn.VpnConnectionState
 import dev.dotclient.android.vpn.VpnRuntime
@@ -858,6 +858,7 @@ private fun SettingsScreen(
     if (active && confirmRegenerate) {
         AlertDialog(
             onDismissRequest = { confirmRegenerate = false },
+            modifier = Modifier.settingsEntrance(),
             title = { Text("Generate a new HWID?") },
             text = { Text("The previous value will be replaced for this subscription when you save.") },
             confirmButton = { TextButton(onClick = { draftHwid = SubscriptionIdentity.generate(); confirmRegenerate = false }) { Text("Generate new") } },
@@ -875,41 +876,43 @@ private fun SettingsScreen(
         }
 
         if (editorOpen) {
-            item {
-                Text(if (editingId == null) "add subscription" else "edit subscription", style = MaterialTheme.typography.titleLarge)
-                Spacer(Modifier.height(16.dp))
-                FieldLabel("name")
-                DotTextField(draftName, { draftName = it }, "vpn1")
-                Spacer(Modifier.height(14.dp))
-                FieldLabel("url")
-                DotTextField(draftUrl, { draftUrl = it }, "https://.../sub/user/...", KeyboardType.Uri)
-                Spacer(Modifier.height(14.dp))
-                FieldLabel("device identity · HWID")
-                DotTextField(draftHwid, { draftHwid = it }, "dot-…", KeyboardType.Ascii)
-                if (!SubscriptionIdentity.isValid(draftHwid)) {
-                    Text(SubscriptionIdentity.VALIDATION_ERROR, color = DotRed, style = MaterialTheme.typography.bodySmall)
+            item(key = "subscription-editor") {
+                Column(Modifier.settingsEntrance(initialScale = 1f)) {
+                    Text(if (editingId == null) "add subscription" else "edit subscription", style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.height(16.dp))
+                    FieldLabel("name")
+                    DotTextField(draftName, { draftName = it }, "vpn1")
+                    Spacer(Modifier.height(14.dp))
+                    FieldLabel("url")
+                    DotTextField(draftUrl, { draftUrl = it }, "https://.../sub/user/...", KeyboardType.Uri)
+                    Spacer(Modifier.height(14.dp))
+                    FieldLabel("device identity · HWID")
+                    DotTextField(draftHwid, { draftHwid = it }, "dot-…", KeyboardType.Ascii)
+                    if (!SubscriptionIdentity.isValid(draftHwid)) {
+                        Text(SubscriptionIdentity.VALIDATION_ERROR, color = DotRed, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Row {
+                        TextButton(onClick = { clipboard.setText(AnnotatedString(draftHwid)) }) { Text("Copy") }
+                        TextButton(onClick = { confirmRegenerate = true }) { Text("Generate new") }
+                    }
+                    Spacer(Modifier.height(18.dp))
+                    Button(
+                        onClick = {
+                            if (viewModel.saveSubscription(editingId, draftName, draftUrl, draftHwid)) editorOpen = false
+                        },
+                        enabled = SubscriptionIdentity.isValid(draftHwid) && draftUrl.isNotBlank() && state.loadingSubscriptionId == null,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+                        shape = RoundedCornerShape(2.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("SAVE", style = MaterialTheme.typography.labelLarge) }
+                    state.message?.takeUnless { it.equals("connected", true) }?.let {
+                        Text(it, color = DotRed, style = MaterialTheme.typography.bodySmall)
+                    }
+                    TextButton(
+                        onClick = { editorOpen = false },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("cancel", color = Color(0xFF777777)) }
                 }
-                Row {
-                    TextButton(onClick = { clipboard.setText(AnnotatedString(draftHwid)) }) { Text("Copy") }
-                    TextButton(onClick = { confirmRegenerate = true }) { Text("Generate new") }
-                }
-                Spacer(Modifier.height(18.dp))
-                Button(
-                    onClick = {
-                        if (viewModel.saveSubscription(editingId, draftName, draftUrl, draftHwid)) editorOpen = false
-                    },
-                    enabled = SubscriptionIdentity.isValid(draftHwid) && draftUrl.isNotBlank() && state.loadingSubscriptionId == null,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
-                    shape = RoundedCornerShape(2.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("SAVE", style = MaterialTheme.typography.labelLarge) }
-                state.message?.takeUnless { it.equals("connected", true) }?.let {
-                    Text(it, color = DotRed, style = MaterialTheme.typography.bodySmall)
-                }
-                TextButton(
-                    onClick = { editorOpen = false },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("cancel", color = Color(0xFF777777)) }
             }
         } else {
             item {
@@ -929,7 +932,7 @@ private fun SettingsScreen(
                     SettingsSectionTitle("SUBSCRIPTIONS")
                     Text(
                         "+",
-                        Modifier.clickable { openNewEditor() }.padding(horizontal = 10.dp, vertical = 3.dp),
+                        Modifier.motionClickable(enabled = active) { openNewEditor() }.padding(horizontal = 10.dp, vertical = 3.dp),
                         style = MaterialTheme.typography.headlineLarge,
                     )
                 }
@@ -987,12 +990,12 @@ private fun SettingsSectionTitle(text: String) {
 @Composable
 private fun SettingsLink(name: String, value: String, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
+        Modifier.fillMaxWidth().motionClickable(pressedScale = 0.985f, onClick = onClick).padding(vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(name, color = Color(0xFFB8B8B8))
-        Text("$value  ›", color = Color(0xFF666666), style = MaterialTheme.typography.bodyMedium)
+        AnimatedSettingValue("$value  ›", Color(0xFF666666), MaterialTheme.typography.bodyMedium)
     }
 }
 
@@ -1068,11 +1071,16 @@ private fun SubscriptionRow(
     onDelete: () -> Unit,
 ) {
     var menuOpen by remember(subscription.id) { mutableStateOf(false) }
+    val background by animateColorAsState(
+        if (selected) Color(0xFF171717) else Color(0xFF101010),
+        SettingsSelectionSpec,
+        label = "Subscription selection",
+    )
 
     Row(
         Modifier.fillMaxWidth()
-            .background(if (selected) Color(0xFF171717) else Color(0xFF101010), RoundedCornerShape(8.dp))
-            .clickable(onClick = onSelect)
+            .motionClickable(pressedScale = 0.985f, onClick = onSelect)
+            .background(background, RoundedCornerShape(8.dp))
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1103,12 +1111,12 @@ private fun SubscriptionRow(
         if (loading) {
             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 1.5.dp, color = Color.White)
         } else {
-            Text("↻", Modifier.clickable(onClick = onRefresh).padding(8.dp), color = Color(0xFFB0B0B0))
+            Text("↻", Modifier.motionClickable(onClick = onRefresh).padding(8.dp), color = Color(0xFFB0B0B0))
         }
         Box {
             Text(
                 "⋮",
-                Modifier.clickable { menuOpen = true }.padding(horizontal = 8.dp, vertical = 4.dp),
+                Modifier.motionClickable { menuOpen = true }.padding(horizontal = 8.dp, vertical = 4.dp),
                 style = MaterialTheme.typography.titleLarge,
                 color = Color(0xFFB0B0B0),
             )
@@ -1234,18 +1242,7 @@ private fun DotTextField(
 private fun ThemePicker(selected: DotThemeMode, onSelect: (DotThemeMode) -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         DotThemeMode.entries.forEach { theme ->
-            val active = theme == selected
-            Text(
-                theme.label,
-                Modifier.weight(1f)
-                    .border(1.dp, if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
-                    .background(if (active) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface, RoundedCornerShape(4.dp))
-                    .clickable { onSelect(theme) }
-                    .padding(vertical = 11.dp),
-                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
-                textAlign = TextAlign.Center,
-            )
+            SettingsSelection(theme.label, theme == selected, Modifier.weight(1f)) { onSelect(theme) }
         }
     }
 }
@@ -1260,21 +1257,10 @@ private fun LauncherIconPicker() {
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             LauncherIcon.entries.forEach { icon ->
-                val active = icon == selected
-                Text(
-                    icon.label,
-                    Modifier.weight(1f)
-                        .border(1.dp, if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
-                        .background(if (active) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface, RoundedCornerShape(4.dp))
-                        .clickable {
-                            LauncherIconManager.apply(context, icon)
-                            selected = icon
-                        }
-                        .padding(vertical = 11.dp),
-                    color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelMedium,
-                    textAlign = TextAlign.Center,
-                )
+                SettingsSelection(icon.label, icon == selected, Modifier.weight(1f)) {
+                    LauncherIconManager.apply(context, icon)
+                    selected = icon
+                }
             }
         }
         Spacer(Modifier.height(5.dp))
@@ -1283,10 +1269,41 @@ private fun LauncherIconPicker() {
 }
 
 @Composable
+private fun SettingsSelection(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val border by animateColorAsState(
+        if (selected) colors.primary else colors.outline,
+        SettingsSelectionSpec,
+        label = "Setting selection border",
+    )
+    val background by animateColorAsState(
+        if (selected) colors.surfaceVariant else colors.surface,
+        SettingsSelectionSpec,
+        label = "Setting selection background",
+    )
+    val textColor by animateColorAsState(
+        if (selected) colors.primary else colors.onSurfaceVariant,
+        SettingsSelectionSpec,
+        label = "Setting selection text",
+    )
+    val shape = RoundedCornerShape(4.dp)
+    Text(
+        label,
+        modifier.motionClickable(onClick = onClick)
+            .border(1.dp, border, shape)
+            .background(background, shape)
+            .padding(vertical = 11.dp),
+        color = textColor,
+        style = MaterialTheme.typography.labelMedium,
+        textAlign = TextAlign.Center,
+    )
+}
+
+@Composable
 private fun SettingLine(name: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(name, color = Color(0xFFB0B0B0))
-        Text(value, color = Color(0xFF666666), style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+        AnimatedSettingValue(value, Color(0xFF666666), MaterialTheme.typography.bodyMedium, maxLines = 1)
     }
 }
 

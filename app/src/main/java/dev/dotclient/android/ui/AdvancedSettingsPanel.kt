@@ -3,17 +3,32 @@ package dev.dotclient.android.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import androidx.compose.foundation.clickable
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import dev.dotclient.android.core.diagnostics.*
 import dev.dotclient.android.core.settings.AppSettings
 import org.json.JSONObject
+
+private val SettingsSectionEnter = expandVertically(DotMotion.tween(), expandFrom = Alignment.Top) +
+    fadeIn(DotMotion.tween(DotMotion.Fast))
+private val SettingsSectionExit = shrinkVertically(DotMotion.tween(), shrinkTowards = Alignment.Top) +
+    fadeOut(DotMotion.tween(DotMotion.Fast))
 
 @Composable
 internal fun AdvancedSettingsPanel(state: DotUiState, viewModel: MainViewModel, active: Boolean = true) {
@@ -26,8 +41,20 @@ internal fun AdvancedSettingsPanel(state: DotUiState, viewModel: MainViewModel, 
     fun update(next: AppSettings) = viewModel.updateSettings(next,settings)
     fun edit(name: String, value: String) { editor=name; text=value; error=null }
     @Composable fun category(name: String, body: @Composable () -> Unit) {
-        Text("${if(section==name) "−" else "+"}  $name",Modifier.fillMaxWidth().clickable { section=if(section==name) null else name }.padding(vertical=13.dp),style=MaterialTheme.typography.titleSmall)
-        if(section==name) { body(); Spacer(Modifier.height(12.dp)) }
+        val expanded = section == name
+        Text(
+            "${if (expanded) "−" else "+"}  $name",
+            Modifier.fillMaxWidth().motionClickable(enabled = active, role = Role.Button, pressedScale = 0.985f) {
+                section = if (expanded) null else name
+            }.padding(vertical = 13.dp),
+            style = MaterialTheme.typography.titleSmall,
+        )
+        AnimatedVisibility(visible = expanded, enter = SettingsSectionEnter, exit = SettingsSectionExit) {
+            Column {
+                body()
+                Spacer(Modifier.height(12.dp))
+            }
+        }
     }
     category("GENERAL") {
         ToggleSetting("Connect on app launch",settings.autoConnect,"Requires previously granted Android VPN permission") { update(settings.copy(autoConnect=it)) }
@@ -62,7 +89,9 @@ internal fun AdvancedSettingsPanel(state: DotUiState, viewModel: MainViewModel, 
         state.selectedProfileId?.let { id ->
             val diagnostic = state.nodeDiagnosticDisplay(id)
             diagnostic.result?.let { result ->
-                val date = java.text.DateFormat.getDateTimeInstance().format(java.util.Date(result.testedAtMs))
+                val date = remember(result.testedAtMs) {
+                    java.text.DateFormat.getDateTimeInstance().format(java.util.Date(result.testedAtMs))
+                }
                 Text(
                     "${result.method.label} · ${diagnostic.badge} · $date\n${result.samples.size}/${result.settings.attempts} successful attempts",
                     color = Color.Gray,
@@ -106,21 +135,84 @@ internal fun AdvancedSettingsPanel(state: DotUiState, viewModel: MainViewModel, 
         }
         ActionSetting("Reset advanced settings","confirm…") { edit("Reset", "") }
     }
-    if(active && editor!=null) AlertDialog(onDismissRequest={editor=null},title={Text(editor!!)},text={Column { OutlinedTextField(value=text,onValueChange={text=it},label={Text(if(editor=="Reset") "Type RESET" else editor!!)},maxLines=8); error?.let { Text(it,color=MaterialTheme.colorScheme.error) } }},confirmButton={TextButton(onClick={
-        try {
-            val next=when(editor) { "URL"->settings.copy(ping=settings.ping.copy(url=text.trim())); "DNS"->settings.copy(dns=text.trim()); "User-Agent"->settings.copy(subscriptionUserAgent=text); "Import"->AppSettings.from(JSONObject(text)); "Reset"->{ require(text=="RESET") { "Type RESET to confirm" }; AppSettings() }; else->settings }
-            next.validate()
-            if(editor=="Import" || editor=="Reset") viewModel.updateSettings(next) else update(next)
-            editor=null
-        } catch(e: Exception) { error=e.message ?: "Invalid settings" }
-    }) {Text("save")}},dismissButton={TextButton(onClick={editor=null}) {Text("cancel")}})
+    editor?.takeIf { active }?.let { field ->
+        AlertDialog(
+            onDismissRequest = { editor = null },
+            modifier = Modifier.settingsEntrance(),
+            title = { Text(field) },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        label = { Text(if (field == "Reset") "Type RESET" else field) },
+                        maxLines = 8,
+                    )
+                    AnimatedVisibility(
+                        visible = error != null,
+                        enter = expandVertically(DotMotion.tween(DotMotion.Fast)) +
+                            fadeIn(DotMotion.tween(DotMotion.Fast)),
+                        exit = fadeOut(DotMotion.tween(DotMotion.Fast)),
+                    ) {
+                        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    try {
+                        val next = when (field) {
+                            "URL" -> settings.copy(ping = settings.ping.copy(url = text.trim()))
+                            "DNS" -> settings.copy(dns = text.trim())
+                            "User-Agent" -> settings.copy(subscriptionUserAgent = text)
+                            "Import" -> AppSettings.from(JSONObject(text))
+                            "Reset" -> {
+                                require(text == "RESET") { "Type RESET to confirm" }
+                                AppSettings()
+                            }
+                            else -> settings
+                        }
+                        next.validate()
+                        if (field == "Import" || field == "Reset") viewModel.updateSettings(next) else update(next)
+                        editor = null
+                    } catch (exception: Exception) {
+                        error = exception.message ?: "Invalid settings"
+                    }
+                }) { Text("save") }
+            },
+            dismissButton = { TextButton(onClick = { editor = null }) { Text("cancel") } },
+        )
+    }
 }
 
-@Composable private fun ToggleSetting(label: String, value: Boolean, detail: String, change: (Boolean)->Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical=5.dp)) { Column(Modifier.weight(1f)) { Text(label,style=MaterialTheme.typography.bodyMedium); if(detail.isNotEmpty()) Text(detail,color=Color.Gray,style=MaterialTheme.typography.labelMedium) }; Switch(value,change) }
+@Composable
+private fun ToggleSetting(label: String, value: Boolean, detail: String, change: (Boolean) -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale = animateFloatAsState(if (pressed) 0.96f else 1f, DotMotion.press, label = "Switch press")
+    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            if (detail.isNotEmpty()) Text(detail, color = Color.Gray, style = MaterialTheme.typography.labelMedium)
+        }
+        Switch(
+            checked = value,
+            onCheckedChange = change,
+            interactionSource = interactionSource,
+            modifier = Modifier.graphicsLayer {
+                scaleX = scale.value
+                scaleY = scale.value
+            },
+        )
+    }
 }
-@Composable private fun ActionSetting(label: String, value: String, action: ()->Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick=action).padding(vertical=9.dp)) { Text(label,style=MaterialTheme.typography.bodyMedium); Text(value,color=Color.Gray,style=MaterialTheme.typography.labelMedium) }
+
+@Composable
+private fun ActionSetting(label: String, value: String, action: () -> Unit) {
+    Column(Modifier.fillMaxWidth().motionClickable(role = Role.Button, pressedScale = 0.985f, onClick = action).padding(vertical = 9.dp)) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        AnimatedSettingValue(value, Color.Gray, MaterialTheme.typography.labelMedium)
+    }
 }
 @Composable private fun <T> ChoiceSetting(label: String, value: T, options: List<T>, display: (T)->String, change: (T)->Unit) {
     var open by remember { mutableStateOf(false) }
