@@ -21,6 +21,16 @@ mod tests {
 
         assert_xray_accepts(&xray, "tun", &build_xray_config(&node).expect("TUN config should build"));
         assert_xray_accepts(&xray, "url-test", &build_url_test_config(&node, 18080).expect("URL test config should build"));
+        let mut advanced=crate::settings::AdvancedSettings::default();
+        advanced.dns="8.8.8.8".into(); advanced.bypass_lan=true; advanced.log_level="error".into();
+        let mut configured=build_xray_config(&node).unwrap();
+        crate::config::apply_settings(&mut configured,&advanced);
+        assert_xray_accepts(&xray,"advanced-tun",&configured);
+        use base64::Engine;
+        let key=base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([1u8;32]);
+        let reality=parse_vless(&format!("vless://11111111-1111-4111-8111-111111111111@example.com:443?security=reality&sni=example.com&pbk={key}&type=tcp&fp=chrome&flow=xtls-rprx-vision")).unwrap();
+        assert_xray_accepts(&xray,"reality-tun",&build_xray_config(&reality).unwrap());
+        assert_xray_accepts(&xray,"reality-test",&build_url_test_config(&reality,18082).unwrap());
         for (name, uri) in [
             ("hy2-basic", "hy2://password@example.com:443?sni=example.com&alpn=h3#basic"),
             ("hy2-mask", "hysteria2://password@example.com:443?sni=example.com&obfs=salamander&obfs-password=mask&packetSize=512-1200&congestion=bbr#mask"),

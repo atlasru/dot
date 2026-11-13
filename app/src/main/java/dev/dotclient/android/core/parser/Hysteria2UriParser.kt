@@ -54,6 +54,7 @@ object Hysteria2UriParser {
         val sni = option("sni", "serverName", "peer")
         val alpn = option("alpn")?.split(',')?.map(String::trim)?.filter(String::isNotEmpty).orEmpty()
         ProxyNode(
+            id = java.util.UUID.nameUUIDFromBytes(raw.trim().toByteArray(Charsets.UTF_8)).toString(),
             name = uri.rawFragment?.decode()?.ifBlank { null } ?: "$host:$port",
             host = host, port = port, userId = "", security = ProxyNode.Security.TLS,
             transport = ProxyNode.Transport.UDP,

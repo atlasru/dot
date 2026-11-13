@@ -1,11 +1,11 @@
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
-/// Reserves a connection-changing or URL-test operation, including tray actions.
+/// Reserves a connection operation, including tray actions and active-tunnel tests.
 pub struct Operation(Arc<AtomicBool>);
 impl Operation {
     pub fn acquire(flag: &Arc<AtomicBool>) -> Result<Self, String> {
         flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .map_err(|_| "wait for the current connection or URL test operation to finish".to_string())?;
+            .map_err(|_| "wait for the current connection operation to finish".to_string())?;
         Ok(Self(Arc::clone(flag)))
     }
 }

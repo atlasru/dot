@@ -6,7 +6,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-archive, source = map(Path, sys.argv[1:3])
+archive, source = (Path(value).resolve() for value in sys.argv[1:3])
 binaries = {
     'dot-desktop.exe': source / 'src-tauri/target/release/dot-desktop.exe',
     'runtime/xray.exe': source / 'src-tauri/runtime/xray.exe',

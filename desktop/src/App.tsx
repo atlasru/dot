@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import AdvancedSettingsPanel, { DEFAULT_ADVANCED } from "./AdvancedSettings";
 import NodeBrowser from "./NodeBrowser";
 import SubscriptionManager from "./SubscriptionManager";
 import { getVersion } from "@tauri-apps/api/app";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   RefreshNotice,
   AppPreferences,
   AppTheme,
   EngineSnapshot,
-  GroupUrlTestResult,
+  DiagnosticBatch,
   GroupView,
   NodeSortMode,
   NodeView,
@@ -24,7 +25,7 @@ type View = "home" | "nodes" | "settings";
 const XRAY_VERSION = "v26.7.28";
 const OFFLINE: EngineSnapshot = { phase: "offline", node_name: null, node_id: null, message: null };
 const ZERO_TRAFFIC: TrafficSnapshot = { download_bytes_per_second: 0, upload_bytes_per_second: 0, session_download_bytes: 0, session_upload_bytes: 0, connected_seconds: 0 };
-const DEFAULT_PREFS: AppPreferences = { theme: "amoled", close_to_tray: true, refresh_on_start: false, refresh_interval_hours: 0 };
+const DEFAULT_PREFS: AppPreferences = { advanced: DEFAULT_ADVANCED, theme: "amoled", close_to_tray: true, refresh_on_start: false, refresh_interval_hours: 0 };
 
 export default function App() {
   const [version, setVersion] = useState("");
@@ -40,20 +41,31 @@ export default function App() {
   const [error, setError] = useState("");
   const [testingNodeId, setTestingNodeId] = useState<string | null>(null);
   const [groupTestingId, setGroupTestingId] = useState<string | null>(null);
-  const [groupTestResult, setGroupTestResult] = useState<GroupUrlTestResult | null>(null);
+  const [batch, setBatch] = useState<DiagnosticBatch | null>(null);
+  const [pendingDelayGroupId, setPendingDelayGroupId] = useState<string | null>(null);
+  const groupsRequest = useRef(0);
+  const batchActive = batch?.phase === "running" || batch?.phase === "cancelling";
+  const diagnosticsBusy = batchActive || !!groupTestingId || !!testingNodeId;
 
   const activeGroup = useMemo(() => groups.find(group => group.id === selection.group_id) ?? groups[0], [groups, selection.group_id]);
   const activeNode = useMemo(() => activeGroup?.nodes.find(node => node.id === selection.node_id) ?? activeGroup?.nodes[0], [activeGroup, selection.node_id]);
   const browseGroup = useMemo(() => groups.find(group => group.id === browseGroupId) ?? activeGroup ?? groups[0], [groups, browseGroupId, activeGroup]);
+  const browseNodeIds = useMemo(() => browseGroup?.nodes.map(node => node.id).sort().join(",") ?? "", [browseGroup]);
+
+  async function reloadGroups() {
+    const request = ++groupsRequest.current;
+    const nextGroups = await invoke<GroupView[]>("list_groups");
+    if (request === groupsRequest.current) setGroups(nextGroups);
+    return nextGroups;
+  }
 
   async function reloadData() {
     const [nextGroups, nextSelection, nextPrefs, nextNotices] = await Promise.all([
-      invoke<GroupView[]>("list_groups"),
+      reloadGroups(),
       invoke<SelectionView>("selection"),
       invoke<AppPreferences>("preferences"),
       invoke<RefreshNotice[]>("refresh_notices"),
     ]);
-    setGroups(nextGroups);
     setSelection(nextSelection);
     setPrefs(nextPrefs);
     setNotices(nextNotices);
@@ -78,10 +90,39 @@ export default function App() {
     return () => { window.clearInterval(timer); window.clearInterval(dataTimer); window.removeEventListener("keydown", escape); };
   }, []);
 
+  useEffect(() => {
+    let stopped = false;
+    let timer: number;
+    let previous: DiagnosticBatch | null = null;
+    async function poll() {
+      try {
+        const next = await invoke<DiagnosticBatch | null>("diagnostics_status");
+        if (stopped) return;
+        if (next?.run_id !== previous?.run_id || next?.phase !== previous?.phase || next?.checked !== previous?.checked) {
+          await reloadGroups();
+          if (!stopped) {
+            previous = next;
+            setBatch(next);
+          }
+        }
+      } catch { /* The next poll will retry. */ }
+      finally {
+        if (!stopped) timer = window.setTimeout(poll, 350);
+      }
+    }
+    void poll();
+    return () => { stopped = true; window.clearTimeout(timer); };
+  }, []);
+
   useEffect(() => { document.documentElement.dataset.theme = prefs.theme; }, [prefs.theme]);
+  useEffect(() => {
+    document.documentElement.dataset.compact = String(prefs.advanced.compact_nodes);
+    document.documentElement.dataset.latency = String(prefs.advanced.show_latency);
+    document.documentElement.dataset.transport = String(prefs.advanced.show_transport);
+  }, [prefs.advanced]);
 
   async function chooseNode(groupId: string, nodeId: string) {
-    if (busy || testingNodeId || groupTestingId || vpn.phase === "stopping") return;
+    if (busy || testingNodeId || vpn.phase === "stopping") return;
     setBusy(true);
     setError("");
     try {
@@ -106,7 +147,7 @@ export default function App() {
   }
 
   async function toggleVpn() {
-    if (vpn.phase === "stopping" || testingNodeId || groupTestingId) return;
+    if (vpn.phase === "stopping" || testingNodeId) return;
     setError("");
     if (vpn.phase === "connected" || vpn.phase === "starting") {
       try { setVpn(await invoke<EngineSnapshot>("disconnect")); } catch (e) { setError(String(e)); }
@@ -125,12 +166,12 @@ export default function App() {
     }
   }
 
-  async function runUrlTest(group = activeGroup, node = activeNode) {
-    if (!group || !node || testingNodeId || groupTestingId || busy || vpn.phase === "starting" || vpn.phase === "stopping") return;
+  async function runUrlTest(group = activeGroup, node = activeNode, connection = false) {
+    if (!group || !node || diagnosticsBusy || busy || vpn.phase === "starting" || vpn.phase === "stopping") return;
     setTestingNodeId(node.id);
     setError("");
     try {
-      await invoke<UrlTestResult>("url_test", { groupId: group.id, nodeId: node.id });
+      await invoke<UrlTestResult>("url_test", { groupId: group.id, nodeId: node.id, connection });
     } catch (caught) {
       setError(String(caught));
     } finally {
@@ -139,20 +180,40 @@ export default function App() {
     }
   }
 
-  async function runGroupTest(group = browseGroup) {
-    if (!group || groupTestingId || testingNodeId || busy || !["offline", "error"].includes(vpn.phase)) return;
+  async function runGroupTest(group = browseGroup, onlyMissing = false) {
+    if (!group?.nodes.length || diagnosticsBusy || busy) return;
     setGroupTestingId(group.id);
-    setGroupTestResult(null);
     setError("");
     try {
-      setGroupTestResult(await invoke<GroupUrlTestResult>("url_test_group", { groupId: group.id }));
+      await invoke("url_test_group", { groupId: group.id, onlyMissing });
     } catch (caught) {
       setError(String(caught));
     } finally {
+      await reloadGroups().catch(() => undefined);
       setGroupTestingId(null);
-      await reloadData().catch(() => undefined);
     }
   }
+
+  function cancelDiagnostics() {
+    invoke("cancel_diagnostics").catch(caught => setError(String(caught)));
+  }
+
+  useEffect(() => {
+    setPendingDelayGroupId(browseGroup?.sort_mode === "delay" ? browseGroup.id : null);
+  }, [browseGroup?.id, browseGroup?.sort_mode, browseNodeIds]);
+
+  useEffect(() => {
+    if (!pendingDelayGroupId) return;
+    const group = groups.find(group => group.id === pendingDelayGroupId);
+    const missing = group?.nodes.filter(node => node.diagnostic === null) ?? [];
+    if (!group || group.sort_mode !== "delay" || !missing.length ||
+        (batchActive && batch?.group_id === group.id && missing.every(node => batch.pending_node_ids.includes(node.id)))) {
+      setPendingDelayGroupId(null);
+    } else if (!diagnosticsBusy && !busy) {
+      setPendingDelayGroupId(null);
+      void runGroupTest(group, true);
+    }
+  }, [pendingDelayGroupId, groups, batch, diagnosticsBusy, busy]);
 
   async function refresh(group = browseGroup) {
     if (!group) return;
@@ -169,8 +230,7 @@ export default function App() {
   }
 
   async function changeSort(group: GroupView, mode: NodeSortMode) {
-    if (busy || groupTestingId) return;
-    const needsDelayTest = mode === "delay" && !group.nodes.some(node => node.latency_ms !== null || node.latency_failed);
+    if (busy) return;
     setBusy(true);
     setError("");
     try {
@@ -182,7 +242,6 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-    if (needsDelayTest && ["offline", "error"].includes(vpn.phase)) await runGroupTest(group);
   }
 
   async function changeTheme(theme: AppTheme) {
@@ -211,13 +270,13 @@ export default function App() {
         node={activeNode}
         vpn={vpn}
         traffic={traffic}
-        testing={!!testingNodeId || !!groupTestingId}
+        testing={diagnosticsBusy}
+        connectionBlocked={!!testingNodeId}
         onToggleVpn={toggleVpn}
         onUrlTest={() => runUrlTest()}
         onOpenNodes={() => setView("nodes")}
       />}
 
-      {view === "nodes" && groupTestResult?.group_id === browseGroup?.id && groupTestResult && <div className="test-summary">URL TEST · {groupTestResult.succeeded} OK · {groupTestResult.failed} FAILED</div>}
       {view === "nodes" && <NodeBrowser
         groups={groups}
         group={browseGroup}
@@ -226,7 +285,8 @@ export default function App() {
         vpn={vpn}
         busy={busy}
         testingNodeId={testingNodeId}
-        groupTesting={!!browseGroup && groupTestingId === browseGroup.id}
+        diagnosticsBusy={diagnosticsBusy}
+        batch={batchActive || batch?.group_id === browseGroup?.id ? batch : null}
         notices={notices}
         onChange={reloadData}
         onBrowseGroup={setBrowseGroupId}
@@ -234,6 +294,7 @@ export default function App() {
         onRefresh={() => refresh()}
         onTestNode={runUrlTest}
         onTestGroup={() => runGroupTest()}
+        onCancelDiagnostics={cancelDiagnostics}
         onSort={changeSort}
       />}
 
@@ -250,6 +311,7 @@ export default function App() {
       />}
     </section>
 
+    {(testingNodeId || (view !== "nodes" && batchActive)) && <button className="cancel-tests" disabled={batch?.phase === "cancelling"} onClick={cancelDiagnostics}>CANCEL DIAGNOSTICS</button>}
     {error && <button className="error-toast" onClick={() => setError("")}>{error}</button>}
   </main>;
 }
@@ -288,12 +350,13 @@ function NavButton({ label, glyph, detail, active, onClick }: { label: string; g
   </button>;
 }
 
-function ConnectionPanel({ group, node, vpn, traffic, testing, onToggleVpn, onUrlTest, onOpenNodes }: {
+function ConnectionPanel({ group, node, vpn, traffic, testing, connectionBlocked, onToggleVpn, onUrlTest, onOpenNodes }: {
   group?: GroupView;
   node?: NodeView;
   vpn: EngineSnapshot;
   traffic: TrafficSnapshot;
   testing: boolean;
+  connectionBlocked: boolean;
   onToggleVpn: () => void;
   onUrlTest: () => void;
   onOpenNodes: () => void;
@@ -301,7 +364,7 @@ function ConnectionPanel({ group, node, vpn, traffic, testing, onToggleVpn, onUr
   const connected = vpn.phase === "connected";
   const pending = vpn.phase === "starting" || vpn.phase === "stopping";
   const orbAction = vpn.phase === "starting" ? "Cancel connection" : connected ? "Disconnect VPN" : "Connect VPN";
-  const orbDisabled = vpn.phase === "stopping" || testing || (!node && !connected && vpn.phase !== "starting");
+  const orbDisabled = vpn.phase === "stopping" || connectionBlocked || (!node && !connected && vpn.phase !== "starting");
   const orbState = vpn.phase === "error" ? "error" : connected ? "connected" : pending ? "pending" : "";
   const currentNode = vpn.phase !== "connected" || vpn.node_id === node?.id;
   const testResult = testing ? "TESTING…" : node?.latency_failed ? "FAILED" : node?.latency_ms ? `${node.latency_ms} ms` : "READY";
@@ -354,6 +417,7 @@ function SettingsPanel({ version, vpn, notices, onChange, groups, prefs, busy, o
     <div className="workspace-head"><div><div className="view-kicker">SETTINGS</div><h2>settings.</h2></div></div>
 
     <div className="settings-scroll">
+      <AdvancedSettingsPanel prefs={prefs} groups={groups} onChange={onChange} />
       <SettingsSection title="APPEARANCE">
         <div className="theme-row">{(["amoled", "graphite", "matrix"] as AppTheme[]).map(theme => <button key={theme} className={prefs.theme === theme ? "choice selected" : "choice"} onClick={() => onTheme(theme)}>{theme.toUpperCase()}</button>)}</div>
       </SettingsSection>

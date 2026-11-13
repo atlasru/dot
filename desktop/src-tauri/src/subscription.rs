@@ -21,11 +21,13 @@ pub struct SubscriptionClient {
 }
 
 impl SubscriptionClient {
-    pub fn new() -> Result<Self, String> {
+    pub fn new() -> Result<Self, String> { Self::with_settings(&Default::default()) }
+    pub fn with_settings(settings: &crate::settings::AdvancedSettings) -> Result<Self,String> {
+        let agent=if settings.subscription_user_agent.is_empty() { concat!("dot-desktop/",env!("CARGO_PKG_VERSION")) } else { &settings.subscription_user_agent };
         let http = Client::builder()
             .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(20))
-            .user_agent(concat!("dot-desktop/", env!("CARGO_PKG_VERSION")))
+            .timeout(Duration::from_secs(settings.subscription_timeout_seconds))
+            .user_agent(agent)
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| "failed to initialize subscription HTTP client".to_string())?;

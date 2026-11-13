@@ -7,68 +7,94 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.TrafficStats
 import android.net.Uri
 import android.net.VpnService
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.Process
+import android.util.Log
 import dev.dotclient.android.MainActivity
 import dev.dotclient.android.R
-import dev.dotclient.android.core.splittunnel.SplitTunnelStore
+import dev.dotclient.android.core.diagnostics.DiagnosticConfig
 import dev.dotclient.android.core.parser.Hysteria2UriParser
+import dev.dotclient.android.core.parser.VlessUriParser
+import dev.dotclient.android.core.settings.AppSettings
+import dev.dotclient.android.core.settings.SettingsRepository
+import dev.dotclient.android.core.splittunnel.SplitTunnelMode
+import dev.dotclient.android.core.splittunnel.SplitTunnelStore
 import dev.dotclient.android.ui.LauncherIcon
 import dev.dotclient.android.ui.LauncherIconManager
-import libXray.DialerController
 import libXray.LibXray
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.min
 
 class DotVpnService : VpnService() {
-    private val worker = Executors.newSingleThreadExecutor()
-    private val trafficWorker = Executors.newSingleThreadScheduledExecutor()
-    private val reconnectWorker = Executors.newSingleThreadScheduledExecutor()
+    private data class Connection(val generation: Long, val startId: Int, val rawUri: String, val name: String?) {
+        val nodeId = if (rawUri.startsWith("vless://", true)) {
+            VlessUriParser.parse(rawUri).getOrNull()?.id
+        } else {
+            Hysteria2UriParser.parse(rawUri).getOrNull()?.id
+        }
+    }
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val generation = AtomicLong()
+    @Volatile private var destroyed = false
+    private val settingsRepository by lazy { SettingsRepository(this) }
     private val splitTunnelStore by lazy { SplitTunnelStore(this) }
     private val connectivityManager by lazy { getSystemService(ConnectivityManager::class.java) }
+
+    // The worker owns the connection, timers, network selection and all native core calls.
+    private val legacyUnderlays = linkedMapOf<Network, UnderlayCapabilities>()
+    private var underlay: Network? = null
+    private var runningUnderlay: Network? = null
+    private var lossFuture: ScheduledFuture<*>? = null
     private var trafficFuture: ScheduledFuture<*>? = null
     private var reconnectFuture: ScheduledFuture<*>? = null
+    private var desired: Connection? = null
     private var tun: ParcelFileDescriptor? = null
-    private var runningNodeName: String? = null
-    @Volatile private var desiredRawUri: String? = null
-    @Volatile private var desiredNodeName: String? = null
-    @Volatile private var userRequestedDisconnect = false
-    @Volatile private var networkAvailable = true
-    @Volatile private var reconnectAttempt = 0
+    private var appInTunnel = false
+    private var reconnectAttempt = 0
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            networkAvailable = true
-            val rawUri = desiredRawUri ?: return
-            if (userRequestedDisconnect) return
-            val state = VpnRuntime.state.value.state
-            if (state == VpnConnectionState.WAITING_FOR_NETWORK || state == VpnConnectionState.ERROR) {
-                reconnectFuture?.cancel(false)
-                reconnectFuture = null
-                worker.execute { connect(rawUri, desiredNodeName, reconnecting = true) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                worker.execute { updateUnderlay(network) }
+            }
+        }
+
+        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return
+            val details = UnderlayCapabilities(
+                validated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                cellular = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
+            )
+            worker.execute {
+                if (!destroyed) {
+                    legacyUnderlays[network] = details
+                    selectLegacyUnderlay()
+                }
             }
         }
 
         override fun onLost(network: Network) {
-            networkAvailable = connectivityManager.activeNetwork != null
-            if (networkAvailable || desiredRawUri == null || userRequestedDisconnect) return
             worker.execute {
-                synchronized(this@DotVpnService) {
-                    if (userRequestedDisconnect || desiredRawUri == null) return@synchronized
-                    shutdownCore()
-                    publishState(
-                        VpnConnectionState.WAITING_FOR_NETWORK,
-                        desiredNodeName,
-                        "waiting for network…",
-                    )
-                    notifyStatus("waiting for network", desiredNodeName)
+                if (destroyed) return@execute
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (network == underlay) updateUnderlay(null)
+                } else {
+                    legacyUnderlays.remove(network)
+                    selectLegacyUnderlay()
                 }
             }
         }
@@ -77,35 +103,55 @@ class DotVpnService : VpnService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        networkAvailable = connectivityManager.activeNetwork != null
-        runCatching { connectivityManager.registerDefaultNetworkCallback(networkCallback) }
+        worker.execute {
+            val active = connectivityManager.activeNetwork
+            val capabilities = connectivityManager.getNetworkCapabilities(active)
+            if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) == true) {
+                updateUnderlay(active)
+            }
+        }
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            .build()
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                connectivityManager.registerBestMatchingNetworkCallback(request, networkCallback, mainHandler)
+            } else {
+                connectivityManager.registerNetworkCallback(request, networkCallback, mainHandler)
+            }
+        }.onFailure {
+            Log.w(TAG, "Could not monitor the VPN's underlying networks")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_DISCONNECT -> disconnect()
+            ACTION_DISCONNECT -> requestDisconnect(startId)
             ACTION_CONNECT -> {
                 val rawUri = intent.getStringExtra(EXTRA_VLESS_URI)
                 val nodeName = intent.getStringExtra(EXTRA_NODE_NAME)
+                val requestGeneration = generation.incrementAndGet()
+                // Start foreground before queued native work, using the known-safe shield icon.
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification("connecting", nodeName, preferSelectedIcon = false),
+                )
                 if (rawUri.isNullOrBlank()) {
-                    publishState(VpnConnectionState.ERROR, message = "missing proxy node")
-                    stopSelf()
+                    worker.execute {
+                        if (!isCurrent(requestGeneration)) return@execute
+                        clearConnection()
+                        publishState(VpnConnectionState.ERROR, message = "missing proxy node")
+                        stopService(requestGeneration, startId)
+                    }
                 } else {
-                    userRequestedDisconnect = false
-                    desiredRawUri = rawUri
-                    desiredNodeName = nodeName
-                    reconnectAttempt = 0
-                    reconnectFuture?.cancel(false)
-                    reconnectFuture = null
-                    // Foreground startup must never depend on a user-selected icon. Android gives a
-                    // foreground service only a very small window to post a valid notification, so
-                    // always bootstrap with the long-tested shield vector and switch the glyph only
-                    // after Xray is actually connected.
-                    startForeground(
-                        NOTIFICATION_ID,
-                        notification("connecting", nodeName, preferSelectedIcon = false),
-                    )
-                    worker.execute { connect(rawUri, nodeName, reconnecting = false) }
+                    worker.execute {
+                        if (!isCurrent(requestGeneration)) return@execute
+                        val connection = Connection(requestGeneration, startId, rawUri, nodeName)
+                        desired = connection
+                        reconnectAttempt = 0
+                        connect(connection, reconnecting = false)
+                    }
                 }
             }
         }
@@ -113,146 +159,176 @@ class DotVpnService : VpnService() {
     }
 
     override fun onDestroy() {
-        reconnectFuture?.cancel(true)
+        destroyed = true
         runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
-        shutdownCore()
-        worker.shutdownNow()
-        trafficWorker.shutdownNow()
-        reconnectWorker.shutdownNow()
+        worker.execute {
+            lossFuture?.cancel(false)
+            VpnRuntime.underlyingNetwork = null
+            clearConnection()
+            if (VpnRuntime.state.value.state !in setOf(VpnConnectionState.ERROR, VpnConnectionState.DISCONNECTED)) {
+                publishState(VpnConnectionState.DISCONNECTED, message = "disconnected")
+            }
+        }
         super.onDestroy()
     }
 
     override fun onRevoke() {
-        userRequestedDisconnect = true
-        desiredRawUri = null
-        desiredNodeName = null
-        disconnect()
-        super.onRevoke()
+        requestDisconnect(startId = null)
     }
 
-    private fun connect(rawUri: String, nodeName: String?, reconnecting: Boolean) {
-        synchronized(this) {
-            if (userRequestedDisconnect || desiredRawUri == null) return
-            reconnectFuture?.cancel(false)
-            reconnectFuture = null
-            shutdownCore()
-            runningNodeName = nodeName
+    private fun selectLegacyUnderlay() {
+        updateUnderlay(selectLegacyUnderlay(legacyUnderlays, connectivityManager.activeNetwork, underlay))
+    }
 
-            if (!networkAvailable) {
-                publishState(VpnConnectionState.WAITING_FOR_NETWORK, nodeName, "waiting for network…")
-                notifyStatus("waiting for network", nodeName)
+    private fun updateUnderlay(network: Network?) {
+        if (destroyed || underlay == network) return
+        underlay = network
+        VpnRuntime.underlyingNetwork = network
+        lossFuture?.cancel(false)
+        if (network == null) {
+            // A replacement may arrive just after onLost. Wait briefly before declaring an outage.
+            lossFuture = worker.schedule({ handleUnderlayChange() }, NETWORK_LOSS_GRACE_MS, TimeUnit.MILLISECONDS)
+        } else {
+            handleUnderlayChange()
+        }
+    }
+
+    private fun handleUnderlayChange() {
+        val connection = desired ?: return
+        if (!isCurrent(connection.generation)) return
+        val reconnectOnNetwork = runCatching { settingsRepository.load().reconnectOnNetwork }.getOrDefault(true)
+        val waiting = VpnRuntime.state.value.state == VpnConnectionState.WAITING_FOR_NETWORK
+        when (underlayAction(underlay, runningUnderlay, waiting, reconnectOnNetwork)) {
+            UnderlayAction.KEEP -> Unit
+            UnderlayAction.WAIT -> {
+                Log.i(TAG, "VPN underlay lost")
+                waitForNetwork(connection)
+            }
+            UnderlayAction.RECONNECT -> {
+                Log.i(TAG, "VPN underlay changed or recovered")
+                connect(connection, reconnecting = true)
+            }
+            UnderlayAction.DISCONNECT -> disconnect(connection.generation, connection.startId)
+        }
+    }
+
+    private fun waitForNetwork(connection: Connection) {
+        cancelReconnect()
+        stopTrafficMeter()
+        // Keep the established routes in place while the VPN is waiting for an upstream network.
+        if (tun != null) runCatching { setUnderlyingNetworks(emptyArray()) }
+        publishState(VpnConnectionState.WAITING_FOR_NETWORK, connection, "waiting for network…")
+        notifyStatus("waiting for network", connection)
+    }
+
+    private fun connect(connection: Connection, reconnecting: Boolean) {
+        if (!isCurrent(connection.generation) || desired !== connection) return
+        cancelReconnect()
+        val network = underlay ?: run {
+            waitForNetwork(connection)
+            return
+        }
+
+        if (reconnecting) {
+            publishState(VpnConnectionState.RECONNECTING, connection, "reconnecting…", reconnectAttempt = reconnectAttempt)
+            notifyStatus("reconnecting", connection)
+        } else {
+            publishState(VpnConnectionState.CONNECTING, connection, "starting libXray…")
+        }
+
+        var settings: AppSettings? = null
+        try {
+            val appliedSettings = settingsRepository.load()
+            settings = appliedSettings
+            val splitTunnelConfig = splitTunnelStore.load()
+            val vpnInterface = Builder()
+                .setSession("dot.")
+                .setMtu(MTU)
+                .addAddress("10.77.0.2", 30)
+                .addRoute("0.0.0.0", 0)
+                .addDnsServer(appliedSettings.dns)
+                .setUnderlyingNetworks(arrayOf(network))
+                .applySplitTunnel(splitTunnelConfig)
+                .establish()
+                ?: error("Android failed to establish TUN")
+
+            // Establish the replacement before closing the old descriptor so app routes can hand over.
+            shutdownCore()
+            tun = vpnInterface
+            appInTunnel = when (splitTunnelConfig.mode) {
+                SplitTunnelMode.ALL_APPS -> true
+                SplitTunnelMode.EXCLUDE_SELECTED -> packageName !in splitTunnelConfig.normalizedPackages
+                SplitTunnelMode.INCLUDE_ONLY_SELECTED -> packageName in splitTunnelConfig.normalizedPackages
+            }
+            val controller = VpnSocketControllers.activate(this, network)
+            LibXray.setDNS(controller, "${appliedSettings.dns}:53")
+            val config = RuntimeSettings.apply(buildXrayConfig(connection.rawUri, vpnInterface.fd), appliedSettings)
+            val proxySession = runCatching {
+                DiagnosticConfig.selectedProxyOutbound(JSONObject(config))?.let {
+                    ActiveProxySession(it.toString(), appliedSettings.dns, network)
+                }
+            }.getOrNull()
+            invokeRunXrayFromJson(config)
+            if (!isCurrent(connection.generation)) {
+                shutdownCore()
                 return
             }
 
-            if (reconnecting) {
-                publishState(
-                    VpnConnectionState.RECONNECTING,
-                    nodeName,
-                    "reconnecting…",
-                    reconnectAttempt = reconnectAttempt,
-                )
-                notifyStatus("reconnecting", nodeName)
+            runningUnderlay = network
+            reconnectAttempt = 0
+            Log.i(TAG, "TUN and Xray started")
+            publishState(VpnConnectionState.CONNECTED, connection, "connected", proxySession = proxySession)
+            startTrafficMeter(connection)
+        } catch (error: Throwable) {
+            shutdownCore()
+            if (!isCurrent(connection.generation)) return
+            val failure = VpnErrorClassifier.classify(error, connection.rawUri)
+            Log.w(TAG, "VPN start failed (${failure.category.name})")
+            if (failure.category == VpnFailureCategory.CONFIG || settings?.reconnect != true) {
+                desired = null
+                publishState(VpnConnectionState.ERROR, connection, failure.userMessage, failure)
+                stopService(connection.generation, connection.startId)
             } else {
-                publishState(VpnConnectionState.CONNECTING, nodeName, "starting libXray…")
-            }
-
-            try {
-                val splitTunnelConfig = splitTunnelStore.load()
-                val vpnInterface = Builder()
-                    .setSession("dot.")
-                    .setMtu(MTU)
-                    .addAddress("10.77.0.2", 30)
-                    .addRoute("0.0.0.0", 0)
-                    .addDnsServer("1.1.1.1")
-                    .setBlocking(true)
-                    .applySplitTunnel(splitTunnelConfig)
-                    .establish()
-                    ?: error("Android failed to establish TUN")
-
-                tun = vpnInterface
-
-                val controller = object : DialerController {
-                    override fun protectFd(fd: Long): Boolean = protect(fd.toInt())
-                }
-
-                LibXray.registerDialerController(controller)
-                LibXray.registerListenerController(controller)
-                LibXray.setDNS(controller, "1.1.1.1:53")
-
-                val config = buildXrayConfig(rawUri, vpnInterface.fd)
-                invokeRunXrayFromJson(config)
-
-                reconnectAttempt = 0
-                publishState(VpnConnectionState.CONNECTED, nodeName, "connected")
-                startTrafficMeter(nodeName)
-            } catch (error: Throwable) {
-                val failure = VpnErrorClassifier.classify(error, rawUri)
-                shutdownCore()
-                if (userRequestedDisconnect || desiredRawUri == null) {
-                    publishState(VpnConnectionState.ERROR, nodeName, failure.userMessage, failure)
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
-                } else if (!networkAvailable) {
-                    publishState(
-                        VpnConnectionState.WAITING_FOR_NETWORK,
-                        nodeName,
-                        "waiting for network…",
-                        failure,
-                    )
-                    notifyStatus("waiting for network", nodeName)
-                } else if (failure.category == VpnFailureCategory.CONFIG) {
-                    publishState(VpnConnectionState.ERROR, nodeName, failure.userMessage, failure)
-                    notifyStatus("error", nodeName)
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
-                } else {
-                    scheduleReconnect(failure)
-                }
+                scheduleReconnect(connection, failure, settings)
             }
         }
     }
 
-    private fun scheduleReconnect(failure: VpnFailure) {
-        if (userRequestedDisconnect || desiredRawUri == null) return
+    private fun scheduleReconnect(connection: Connection, failure: VpnFailure, settings: AppSettings) {
         reconnectAttempt += 1
-        val delaySeconds = RECONNECT_DELAYS_SECONDS[min(reconnectAttempt - 1, RECONNECT_DELAYS_SECONDS.lastIndex)]
-        val nodeName = desiredNodeName
+        val delayIndex = min(reconnectAttempt - 1, RECONNECT_DELAYS_SECONDS.lastIndex)
+        val delaySeconds = (RECONNECT_DELAYS_SECONDS[delayIndex] * settings.retrySeconds)
+            .coerceAtMost(settings.maxRetrySeconds.toLong())
         publishState(
             VpnConnectionState.RECONNECTING,
-            nodeName,
+            connection,
             "${failure.userMessage} · retry in ${delaySeconds}s",
             failure,
             reconnectAttempt,
         )
-        notifyStatus("reconnecting", nodeName)
-        reconnectFuture?.cancel(false)
-        reconnectFuture = reconnectWorker.schedule({
-            val rawUri = desiredRawUri ?: return@schedule
-            if (userRequestedDisconnect) return@schedule
-            if (!networkAvailable) {
-                publishState(VpnConnectionState.WAITING_FOR_NETWORK, desiredNodeName, "waiting for network…", failure)
-                notifyStatus("waiting for network", desiredNodeName)
-                return@schedule
-            }
-            worker.execute { connect(rawUri, desiredNodeName, reconnecting = true) }
+        notifyStatus("reconnecting", connection)
+        reconnectFuture = worker.schedule({
+            connect(connection, reconnecting = true)
         }, delaySeconds, TimeUnit.SECONDS)
     }
 
-    private fun startTrafficMeter(nodeName: String?) {
-        trafficFuture?.cancel(true)
+    private fun cancelReconnect() {
+        reconnectFuture?.cancel(false)
+        reconnectFuture = null
+    }
+
+    private fun startTrafficMeter(connection: Connection) {
+        stopTrafficMeter()
         val uid = Process.myUid()
         val baselineRx = uidRxBytes(uid)
         val baselineTx = uidTxBytes(uid)
         var previousRx = baselineRx
         var previousTx = baselineTx
         var previousAt = System.nanoTime()
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(
-            NOTIFICATION_ID,
-            notification("connected", nodeName, 0L, 0L, preferSelectedIcon = true),
-        )
+        notifyStatus("connected", connection)
 
-        trafficFuture = trafficWorker.scheduleAtFixedRate({
+        trafficFuture = worker.scheduleAtFixedRate({
+            if (!isCurrent(connection.generation)) return@scheduleAtFixedRate
             val now = System.nanoTime()
             val rx = uidRxBytes(uid)
             val tx = uidTxBytes(uid)
@@ -271,19 +347,29 @@ class DotVpnService : VpnService() {
                 sessionDownloadBytes = sessionDown,
                 sessionUploadBytes = sessionUp,
             )
-            manager.notify(
-                NOTIFICATION_ID,
-                notification("connected", nodeName, downRate, upRate, preferSelectedIcon = true),
-            )
+            notifyStatus("connected", connection, downRate, upRate)
         }, 1L, 1L, TimeUnit.SECONDS)
     }
 
-    private fun notifyStatus(status: String, nodeName: String?) {
-        runCatching {
-            getSystemService(NotificationManager::class.java).notify(
-                NOTIFICATION_ID,
-                notification(status, nodeName, preferSelectedIcon = false),
-            )
+    private fun stopTrafficMeter() {
+        trafficFuture?.cancel(false)
+        trafficFuture = null
+    }
+
+    private fun notifyStatus(
+        status: String,
+        connection: Connection,
+        downRate: Long = 0L,
+        upRate: Long = 0L,
+    ) {
+        mainHandler.post {
+            if (!isCurrent(connection.generation)) return@post
+            runCatching {
+                getSystemService(NotificationManager::class.java).notify(
+                    NOTIFICATION_ID,
+                    notification(status, connection.name, downRate, upRate, preferSelectedIcon = status == "connected"),
+                )
+            }
         }
     }
 
@@ -352,47 +438,81 @@ class DotVpnService : VpnService() {
         if (!response.optBoolean("success")) error(response.optString("error", "runXrayFromJson failed"))
     }
 
-    private fun disconnect() {
-        userRequestedDisconnect = true
-        desiredRawUri = null
-        desiredNodeName = null
-        reconnectFuture?.cancel(true)
-        reconnectFuture = null
+    private fun isCurrent(requestGeneration: Long): Boolean =
+        !destroyed && requestGeneration == generation.get()
+
+    private fun requestDisconnect(startId: Int?) {
+        val requestGeneration = generation.incrementAndGet()
+        worker.execute { disconnect(requestGeneration, startId) }
+    }
+
+    private fun disconnect(requestGeneration: Long, startId: Int?) {
+        if (!isCurrent(requestGeneration)) return
+        publishState(VpnConnectionState.DISCONNECTING, desired, "disconnecting…")
+        clearConnection()
+        if (!isCurrent(requestGeneration)) return
+        publishState(VpnConnectionState.DISCONNECTED, message = "disconnected")
+        stopService(requestGeneration, startId)
+    }
+
+    private fun clearConnection() {
+        desired = null
+        cancelReconnect()
         reconnectAttempt = 0
-        worker.execute {
-            publishState(VpnConnectionState.DISCONNECTING, runningNodeName, "disconnecting…")
-            shutdownCore()
-            publishState(VpnConnectionState.DISCONNECTED, null, "disconnected")
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+        shutdownCore()
+    }
+
+    private fun stopService(requestGeneration: Long, startId: Int?) {
+        mainHandler.post {
+            if (!isCurrent(requestGeneration)) return@post
+            if (startId == null) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            } else if (stopSelfResult(startId)) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            }
         }
     }
 
     private fun publishState(
         state: VpnConnectionState,
-        nodeName: String? = null,
+        connection: Connection? = null,
         message: String? = null,
         failure: VpnFailure? = null,
         reconnectAttempt: Int = 0,
+        proxySession: ActiveProxySession? = null,
     ) {
-        VpnRuntime.update(state, nodeName, message, failure, reconnectAttempt)
+        VpnRuntime.update(
+            state = state,
+            nodeName = connection?.name,
+            nodeId = connection?.nodeId,
+            appInTunnel = appInTunnel,
+            message = message,
+            failure = failure,
+            reconnectAttempt = reconnectAttempt,
+            proxySession = proxySession,
+        )
         runCatching { DotQuickTileService.requestRefresh(this) }
     }
 
     private fun shutdownCore() {
-        trafficFuture?.cancel(true)
-        trafficFuture = null
+        stopTrafficMeter()
+        appInTunnel = false
+        runningUnderlay = null
+        val oldTun = tun ?: return
+        tun = null
         runCatching {
             val request = JSONObject()
                 .put("apiVersion", LIBXRAY_API_VERSION)
                 .put("method", "stopXray")
                 .put("payload", JSONObject())
-            LibXray.invoke(request.toString())
+            check(JSONObject(LibXray.invoke(request.toString())).optBoolean("success"))
+        }.onFailure {
+            Log.w(TAG, "Xray shutdown failed")
         }
         runCatching { LibXray.resetDNS() }
-        runCatching { tun?.close() }
-        tun = null
-        runningNodeName = null
+        VpnSocketControllers.clear()
+        runCatching { oldTun.close() }
     }
 
     @Suppress("DEPRECATION")
@@ -472,10 +592,15 @@ class DotVpnService : VpnService() {
         const val ACTION_DISCONNECT = "dev.dotclient.android.DISCONNECT"
         const val EXTRA_VLESS_URI = "vless_uri"
         const val EXTRA_NODE_NAME = "node_name"
+        private const val TAG = "DotVpnService"
         private const val LIBXRAY_API_VERSION = 1
         private const val CHANNEL_ID = "dot_vpn"
         private const val NOTIFICATION_ID = 1001
         private const val MTU = 1500
+        private const val NETWORK_LOSS_GRACE_MS = 250L
+        // libXray and its DNS resolver are process-wide, including across service restarts.
+        private val worker = ScheduledThreadPoolExecutor(1) { task -> Thread(task, "dot-vpn") }
+            .apply { removeOnCancelPolicy = true }
         private val RECONNECT_DELAYS_SECONDS = longArrayOf(1L, 2L, 5L, 10L, 30L)
         private val SAFE_NOTIFICATION_ICON = R.drawable.ic_notification_dot
         private val SERVER_ONLY_REALITY_KEYS = listOf(

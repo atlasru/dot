@@ -7,7 +7,7 @@ pub fn sort_nodes(nodes: &mut [NodeView], mode: NodeSortMode) {
         NodeSortMode::Origin => {}
         NodeSortMode::Name => nodes.sort_by(|left, right| natural_compare(&left.name, &right.name)),
         NodeSortMode::Delay => {
-            let has_results = nodes.iter().any(|node| node.latency_ms.is_some() || node.latency_failed);
+            let has_results = nodes.iter().any(|node| latency_rank(node) != 2);
             if !has_results { return; }
             nodes.sort_by(|left, right| {
                 let left_rank = latency_rank(left);
@@ -26,7 +26,7 @@ pub fn sort_nodes(nodes: &mut [NodeView], mode: NodeSortMode) {
 
 fn latency_rank(node: &NodeView) -> u8 {
     if node.latency_ms.is_some() { 0 }
-    else if node.latency_failed { 1 }
+    else if node.latency_failed || node.diagnostic.is_some() { 1 }
     else { 2 }
 }
 
@@ -83,12 +83,12 @@ pub fn natural_compare(left: &str, right: &str) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Security, Transport};
+    use crate::model::Security;
 
     fn node(id: &str, name: &str, latency_ms: Option<u64>, latency_failed: bool) -> NodeView {
         NodeView {
             id: id.into(), name: name.into(), host: "example.com".into(), port: 443, protocol: "VLESS",
-            security: Security::Tls, transport: Transport::Raw, latency_ms, latency_failed, favorite: false,
+            security: Security::Tls, transport: "tcp", diagnostic: None, latency_ms, latency_failed, favorite: false,
         }
     }
 

@@ -28,7 +28,7 @@ impl RefreshService {
         let result = (|| {
             let (url, hwid) = store.subscription_source(group_id)?;
             if url.is_empty() { return Err("local imports have no subscription URL".into()); }
-            let nodes = SubscriptionClient::new()?.fetch(&url, &hwid)?;
+            let nodes = SubscriptionClient::with_settings(&store.preferences().advanced)?.fetch(&url, &hwid)?;
             store.apply_refresh(group_id, nodes, now_ms())
         })();
         self.record(store, group_id, &result);

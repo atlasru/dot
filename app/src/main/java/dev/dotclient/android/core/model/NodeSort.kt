@@ -1,5 +1,8 @@
 package dev.dotclient.android.core.model
 
+import dev.dotclient.android.core.diagnostics.PingResult
+import dev.dotclient.android.core.diagnostics.PingStatus
+
 enum class NodeSortMode {
     ORIGIN,
     DELAY,
@@ -10,34 +13,18 @@ object NodeSorter {
     fun sort(
         profiles: List<ProxyNode>,
         mode: NodeSortMode,
-        latenciesMs: Map<String, Long>,
-        failedIds: Set<String> = emptySet(),
+        results: Map<String, PingResult>,
     ): List<ProxyNode> = when (mode) {
         NodeSortMode.ORIGIN -> profiles
         NodeSortMode.NAME -> profiles.sortedWith(naturalProfileComparator)
-        NodeSortMode.DELAY -> {
-            val hasResults = profiles.any { it.id in latenciesMs || it.id in failedIds }
-            if (!hasResults) profiles else profiles.sortedWith { left, right ->
-                val leftLatency = latenciesMs[left.id]
-                val rightLatency = latenciesMs[right.id]
-                val leftRank = when {
-                    leftLatency != null -> 0
-                    left.id in failedIds -> 1
-                    else -> 2
-                }
-                val rightRank = when {
-                    rightLatency != null -> 0
-                    right.id in failedIds -> 1
-                    else -> 2
-                }
-
-                when {
-                    leftRank != rightRank -> leftRank.compareTo(rightRank)
-                    leftLatency != null && rightLatency != null && leftLatency != rightLatency -> leftLatency.compareTo(rightLatency)
-                    else -> naturalCompare(left.name, right.name)
-                }
+        NodeSortMode.DELAY -> profiles.sortedWith(compareBy<ProxyNode> {
+            when (results[it.id]?.status) {
+                PingStatus.OK -> 0
+                PingStatus.UNAVAILABLE -> 1
+                PingStatus.FAIL -> 2
+                null -> 3
             }
-        }
+        }.thenBy { results[it.id]?.takeIf { result -> result.status == PingStatus.OK }?.latencyMs })
     }
 
     internal val naturalProfileComparator = Comparator<ProxyNode> { left, right ->

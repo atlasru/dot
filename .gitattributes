@@ -1,0 +1,2 @@
+# Release archives must contain identical source/license bytes on Windows and Linux.
+* text=auto eol=lf

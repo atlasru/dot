@@ -60,3 +60,9 @@ Android also exposes waiting-for-network and reconnecting states; configuration 
 - Read connection state from the runtime, not an optimistic frontend boolean.
 
 See [VPN engine](docs/VPN_ENGINE.md), [Desktop](docs/DESKTOP.md) and [Hysteria2 validation](docs/hysteria2-manual-test.md).
+
+## 0.5.0 candidate additions
+
+Android `core/diagnostics` owns typed diagnostic settings/results, an asynchronous PingEngine and a private-process PingService. The service uses one core at a time, binds diagnostics to an underlying network and streams per-node results to NodeDiagnostics. `core/settings/SettingsRepository` stores validated preferences and results alongside the subscription/theme stores. `RuntimeSettings` applies DNS/LAN/log controls at the next connection. UI categories live in AdvancedSettingsPanel.
+
+Windows `settings.rs` and `diagnostics.rs` define the same methods/defaults and verified-proxy policy. `url_test.rs` owns temporary processes and HTTP clients, and `diagnostic_network.rs` selects an underlying route and implements TCP and native ICMP probes. `diagnostic_batch.rs` tracks progress and cancellation independently of the VPN operation gate. Store persists versioned preferences and diagnostic metadata transactionally. See [full semantics and limitations](docs/DIAGNOSTICS.md).

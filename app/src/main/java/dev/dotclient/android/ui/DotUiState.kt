@@ -1,5 +1,7 @@
 package dev.dotclient.android.ui
 
+import dev.dotclient.android.core.diagnostics.ConnectionProbeResult
+import dev.dotclient.android.core.diagnostics.PingResult
 import dev.dotclient.android.core.model.NodeSortMode
 import dev.dotclient.android.core.model.NodeSorter
 import dev.dotclient.android.core.model.Subscription
@@ -9,6 +11,9 @@ import dev.dotclient.android.vpn.VpnConnectionState
 import dev.dotclient.android.vpn.VpnFailureCategory
 
 data class DotUiState(
+    val settings: dev.dotclient.android.core.settings.AppSettings = dev.dotclient.android.core.settings.AppSettings(),
+    val savingSettings: Boolean = false,
+    val pingResults: Map<String, PingResult> = emptyMap(),
     val subscriptions: List<Subscription> = emptyList(),
     val selectedSubscriptionId: String? = null,
     val loadingSubscriptionId: String? = null,
@@ -21,18 +26,13 @@ data class DotUiState(
     val reconnectAttempt: Int = 0,
     val autoNodeEnabled: Boolean = false,
     val themeMode: DotThemeMode = DotThemeMode.AMOLED,
-    val downloadBytesPerSecond: Long = 0L,
-    val uploadBytesPerSecond: Long = 0L,
-    val sessionDownloadBytes: Long = 0L,
-    val sessionUploadBytes: Long = 0L,
+    val runningNodeId: String? = null,
     val runningNodeName: String? = null,
-    val nodeLatenciesMs: Map<String, Long> = emptyMap(),
-    val nodeLatencyFailedIds: Set<String> = emptySet(),
+    val diagnosticsRunning: Boolean = false,
     val testingNodeIds: Set<String> = emptySet(),
-    val pendingDelaySortSubscriptionId: String? = null,
+    val diagnosticBatch: DiagnosticBatch? = null,
     val connectionTestRunning: Boolean = false,
-    val connectionTestLatencyMs: Long? = null,
-    val connectionTestError: String? = null,
+    val connectionTestResult: ConnectionProbeResult? = null,
     val subscriptionUpdateResult: SubscriptionUpdateResult? = null,
 ) {
     val selectedSubscription: Subscription?
@@ -45,14 +45,19 @@ data class DotUiState(
         get() = selectedSubscription?.sortMode ?: NodeSortMode.ORIGIN
 
     val sortedProfiles: List<ProxyNode>
-        get() = if (
-            selectedSortMode == NodeSortMode.DELAY &&
-            pendingDelaySortSubscriptionId == selectedSubscriptionId
-        ) {
-            profiles
-        } else {
-            NodeSorter.sort(profiles, selectedSortMode, nodeLatenciesMs, nodeLatencyFailedIds)
+        get() {
+            val batch = diagnosticBatch?.takeIf { it.groupId == selectedSubscriptionId && !it.running }
+            val results = if (selectedSortMode == NodeSortMode.DELAY && batch != null) {
+                pingResults.filterKeys { batch.uncheckedLabel(it) == null }
+            } else pingResults
+            return NodeSorter.sort(profiles, selectedSortMode, results)
         }
+
+    internal fun uncheckedDiagnosticLabel(groupId: String?, id: String): String? =
+        diagnosticBatch?.takeIf { it.groupId == groupId }?.uncheckedLabel(id)
+
+    internal fun measuredResult(groupId: String, id: String): PingResult? =
+        pingResults[id].takeUnless { uncheckedDiagnosticLabel(groupId, id) != null }
 
     val selectedProfileId: String?
         get() = selectedSubscription?.selectedProfileId

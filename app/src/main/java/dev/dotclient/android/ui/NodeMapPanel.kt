@@ -1,8 +1,8 @@
 package dev.dotclient.android.ui
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,10 +30,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import dev.dotclient.android.core.diagnostics.PingStatus
 import dev.dotclient.android.core.geo.NodeGeoLocation
 import dev.dotclient.android.core.geo.NodeGeoResolver
 import dev.dotclient.android.core.geo.NodeGeoSource
@@ -113,6 +116,17 @@ fun NodeMapPanel(
 
     val selectedCluster = clusters.firstOrNull { it.code == selectedCountry }
     val missing = (completed - locations.size).coerceAtLeast(0)
+    val markers = remember(clusters, state.runningNodeId) {
+        clusters.map { cluster ->
+            NodeMapMarker(
+                countryCode = cluster.code,
+                latitude = cluster.latitude,
+                longitude = cluster.longitude,
+                nodeCount = cluster.profiles.size,
+                active = cluster.profiles.any { it.id == state.runningNodeId },
+            )
+        }
+    }
 
     Column(modifier.fillMaxSize()) {
         Box(
@@ -123,15 +137,7 @@ fun NodeMapPanel(
                 .border(1.dp, Color(0xFF252525), RoundedCornerShape(4.dp)),
         ) {
             NodeMapView(
-                markers = clusters.map { cluster ->
-                    NodeMapMarker(
-                        countryCode = cluster.code,
-                        latitude = cluster.latitude,
-                        longitude = cluster.longitude,
-                        nodeCount = cluster.profiles.size,
-                        active = cluster.profiles.any { it.name == state.runningNodeName },
-                    )
-                },
+                markers = markers,
                 onMarkerClick = { selectedCountry = it },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -176,8 +182,10 @@ private fun CountrySheet(
     viewModel: MainViewModel,
     onToggleVpn: () -> Unit,
 ) {
-    val clusterIds = cluster.profiles.mapTo(hashSetOf()) { it.id }
-    val orderedProfiles = state.sortedProfiles.filter { it.id in clusterIds }
+    val clusterIds = remember(cluster.profiles) { cluster.profiles.mapTo(hashSetOf(), ProxyNode::id) }
+    val sortedProfiles = rememberSortedNodeProfiles(state)
+    val orderedProfiles = remember(sortedProfiles, clusterIds) { sortedProfiles.filter { it.id in clusterIds } }
+    val placement = remember { DotMotion.spring(visibilityThreshold = IntOffset(1, 1)) }
 
     Column(
         Modifier
@@ -207,12 +215,18 @@ private fun CountrySheet(
         Spacer(Modifier.height(7.dp))
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 170.dp)) {
             items(orderedProfiles, key = ProxyNode::id) { profile ->
-                val running = state.vpnConnected && profile.name == state.runningNodeName
-                val failed = profile.id in state.nodeLatencyFailedIds
+                val running = state.vpnConnected && profile.id == state.runningNodeId
+                val diagnostic = state.nodeDiagnosticDisplay(profile.id, if (running) "LIVE" else "CONNECT")
+                val indicator = animateColorAsState(
+                    targetValue = if (running) NodeMapRed else Color(0xFF555555),
+                    animationSpec = DotMotion.tween(),
+                    label = "map node selection",
+                )
                 Row(
                     Modifier
+                        .animateItem(fadeInSpec = null, placementSpec = placement, fadeOutSpec = null)
                         .fillMaxWidth()
-                        .clickable(enabled = !running) {
+                        .motionClickable(enabled = !running, pressedScale = 0.99f) {
                             if (state.vpnConnected) viewModel.switchProfile(profile.id)
                             else {
                                 viewModel.selectProfile(profile.id)
@@ -225,27 +239,22 @@ private fun CountrySheet(
                     Box(
                         Modifier
                             .size(5.dp)
-                            .background(if (running) NodeMapRed else Color(0xFF555555), RoundedCornerShape(1.dp))
+                            .clip(RoundedCornerShape(1.dp))
+                            .drawBehind { drawRect(indicator.value) }
                     )
                     Spacer(Modifier.width(9.dp))
-                    Text(
-                        profile.name,
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    val latency = state.nodeLatenciesMs[profile.id]
-                    Text(
-                        when {
-                            profile.id in state.testingNodeIds -> "··"
-                            latency != null -> "$latency ms"
-                            failed -> "FAIL"
-                            running -> "LIVE"
-                            else -> "CONNECT"
-                        },
-                        color = if (running || failed) NodeMapRed else Color(0xFF777777),
-                        style = MaterialTheme.typography.labelMedium,
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            profile.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        NodeResultDetail(diagnostic.detail)
+                    }
+                    NodeResultBadge(
+                        diagnostic.badge,
+                        color = if (running || diagnostic.result?.status == PingStatus.FAIL) NodeMapRed else Color(0xFF777777),
                     )
                 }
             }

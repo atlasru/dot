@@ -1,9 +1,8 @@
 package dev.dotclient.android.ui
 
-import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.dp
 import dev.dotclient.android.core.splittunnel.InstalledAppRepository
 import dev.dotclient.android.core.splittunnel.SplitTunnelConfig
 import dev.dotclient.android.core.splittunnel.SplitTunnelMode
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val SplitRed = Color(0xFFFF2D2D)
 
@@ -49,15 +51,12 @@ fun SplitTunnelScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
-    val apps = remember(context.applicationContext) {
-        InstalledAppRepository(context.applicationContext).loadLaunchableApps()
+    val context = LocalContext.current.applicationContext
+    val apps by produceState(emptyList<InstalledAppRepository.InstalledApp>(), context) {
+        value = withContext(Dispatchers.IO) { InstalledAppRepository(context).loadLaunchableApps() }
     }
     var appliedConfig by remember { mutableStateOf(config) }
     var query by remember { mutableStateOf("") }
-
-    BackHandler(onBack = onBack)
-
     LaunchedEffect(vpnConnected) {
         if (vpnConnected) appliedConfig = config
     }
@@ -76,7 +75,7 @@ fun SplitTunnelScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "‹",
-                Modifier.clickable(onClick = onBack).padding(end = 14.dp, top = 4.dp, bottom = 4.dp),
+                Modifier.motionClickable(onClick = onBack).padding(end = 14.dp, top = 4.dp, bottom = 4.dp),
                 style = MaterialTheme.typography.headlineLarge,
             )
             Text("split tunneling.", style = MaterialTheme.typography.headlineLarge)
@@ -120,7 +119,7 @@ fun SplitTunnelScreen(
                 if (config.packages.isNotEmpty()) {
                     Text(
                         "CLEAR",
-                        Modifier.clickable { onChange(config.copy(packages = emptySet())) }
+                        Modifier.motionClickable { onChange(config.copy(packages = emptySet())) }
                             .border(1.dp, Color(0xFF303030), RoundedCornerShape(2.dp))
                             .padding(horizontal = 10.dp, vertical = 7.dp),
                         color = Color(0xFFAAAAAA),
@@ -202,7 +201,7 @@ fun SplitTunnelScreen(
                 }
                 Text(
                     "RECONNECT",
-                    Modifier.clickable(onClick = onReconnect).padding(8.dp),
+                    Modifier.motionClickable(onClick = onReconnect).padding(8.dp),
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.labelMedium,
                 )
@@ -218,16 +217,26 @@ private fun SplitModeRow(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    val border by animateColorAsState(
+        if (selected) Color.White else Color(0xFF555555),
+        SettingsSelectionSpec,
+        label = "Split tunnel mode border",
+    )
+    val dot by animateColorAsState(
+        if (selected) SplitRed else SplitRed.copy(alpha = 0f),
+        SettingsSelectionSpec,
+        label = "Split tunnel mode selection",
+    )
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp),
+        Modifier.fillMaxWidth().motionClickable(pressedScale = 0.985f, onClick = onClick).padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             Modifier.size(18.dp)
-                .border(1.dp, if (selected) Color.White else Color(0xFF555555), CircleShape),
+                .border(1.dp, border, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            if (selected) Box(Modifier.size(8.dp).background(SplitRed, CircleShape))
+            Box(Modifier.size(8.dp).background(dot, CircleShape))
         }
         Spacer(Modifier.size(12.dp))
         Column {
@@ -244,17 +253,32 @@ private fun AppRuleRow(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    val background by animateColorAsState(
+        if (selected) Color(0xFF111111) else Color.Transparent,
+        SettingsSelectionSpec,
+        label = "App rule selection",
+    )
+    val border by animateColorAsState(
+        if (selected) SplitRed else Color(0xFF3A3A3A),
+        SettingsSelectionSpec,
+        label = "App rule border",
+    )
+    val fill by animateColorAsState(
+        if (selected) SplitRed else SplitRed.copy(alpha = 0f),
+        SettingsSelectionSpec,
+        label = "App rule fill",
+    )
     Row(
         Modifier.fillMaxWidth()
-            .background(if (selected) Color(0xFF111111) else Color.Transparent)
-            .clickable(onClick = onClick)
+            .motionClickable(pressedScale = 0.985f, onClick = onClick)
+            .background(background)
             .padding(vertical = 11.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             Modifier.size(18.dp)
-                .border(1.dp, if (selected) SplitRed else Color(0xFF3A3A3A), RoundedCornerShape(2.dp))
-                .background(if (selected) SplitRed else Color.Transparent, RoundedCornerShape(2.dp)),
+                .border(1.dp, border, RoundedCornerShape(2.dp))
+                .background(fill, RoundedCornerShape(2.dp)),
         )
         Spacer(Modifier.size(12.dp))
         Column(Modifier.weight(1f)) {

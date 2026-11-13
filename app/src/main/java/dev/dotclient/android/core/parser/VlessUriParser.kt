@@ -37,6 +37,7 @@ object VlessUriParser {
         }
 
         ProxyNode(
+            id = java.util.UUID.nameUUIDFromBytes(raw.trim().toByteArray(Charsets.UTF_8)).toString(),
             name = uri.rawFragment?.decode()?.ifBlank { null } ?: "$host:$port",
             host = host,
             port = port,

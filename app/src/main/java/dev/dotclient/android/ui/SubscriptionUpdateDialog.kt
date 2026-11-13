@@ -44,6 +44,7 @@ fun SubscriptionUpdateResultDialog(
         Column(
             Modifier
                 .fillMaxWidth()
+                .settingsEntrance()
                 .border(1.dp, Color(0xFF303030), RoundedCornerShape(3.dp))
                 .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(3.dp))
                 .padding(18.dp),
@@ -215,7 +216,7 @@ private fun DialogAction(label: String, onClick: () -> Unit, primary: Boolean = 
         Modifier
             .border(1.dp, if (primary) Color(0xFF555555) else Color(0xFF303030), RoundedCornerShape(2.dp))
             .background(if (primary) Color(0xFF141414) else Color.Transparent)
-            .clickable(onClick = onClick)
+            .motionClickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         color = if (primary) Color.White else Color(0xFF9A9A9A),
         style = MaterialTheme.typography.labelMedium,

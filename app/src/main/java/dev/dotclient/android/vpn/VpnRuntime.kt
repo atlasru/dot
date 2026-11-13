@@ -1,5 +1,6 @@
 package dev.dotclient.android.vpn
 
+import android.net.Network
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,8 +15,17 @@ enum class VpnConnectionState {
     ERROR,
 }
 
+/** Identity and effective proxy settings for one successful core startup. */
+class ActiveProxySession internal constructor(
+    internal val outboundJson: String,
+    internal val dns: String,
+    internal val underlay: Network?,
+)
+
 data class VpnRuntimeSnapshot(
     val state: VpnConnectionState = VpnConnectionState.DISCONNECTED,
+    val nodeId: String? = null,
+    val appInTunnel: Boolean = false,
     val nodeName: String? = null,
     val message: String? = null,
     val failureCategory: VpnFailureCategory? = null,
@@ -25,15 +35,19 @@ data class VpnRuntimeSnapshot(
     val uploadBytesPerSecond: Long = 0L,
     val sessionDownloadBytes: Long = 0L,
     val sessionUploadBytes: Long = 0L,
+    val proxySession: ActiveProxySession? = null,
 )
 
 object VpnRuntime {
     private val mutableState = MutableStateFlow(VpnRuntimeSnapshot())
     val state: StateFlow<VpnRuntimeSnapshot> = mutableState.asStateFlow()
+    @Volatile internal var underlyingNetwork: Network? = null
 
     fun update(
         state: VpnConnectionState,
         nodeName: String? = mutableState.value.nodeName,
+        nodeId: String? = mutableState.value.nodeId,
+        appInTunnel: Boolean = mutableState.value.appInTunnel,
         message: String? = null,
         failure: VpnFailure? = null,
         reconnectAttempt: Int = if (state == VpnConnectionState.RECONNECTING) mutableState.value.reconnectAttempt else 0,
@@ -41,10 +55,13 @@ object VpnRuntime {
         uploadBytesPerSecond: Long = if (state == VpnConnectionState.CONNECTED) mutableState.value.uploadBytesPerSecond else 0L,
         sessionDownloadBytes: Long = if (state == VpnConnectionState.CONNECTED) mutableState.value.sessionDownloadBytes else 0L,
         sessionUploadBytes: Long = if (state == VpnConnectionState.CONNECTED) mutableState.value.sessionUploadBytes else 0L,
+        proxySession: ActiveProxySession? = null,
     ) {
         mutableState.value = VpnRuntimeSnapshot(
             state = state,
             nodeName = nodeName,
+            nodeId = nodeId,
+            appInTunnel = appInTunnel,
             message = message,
             failureCategory = failure?.category,
             failureDetail = failure?.detail,
@@ -53,6 +70,7 @@ object VpnRuntime {
             uploadBytesPerSecond = uploadBytesPerSecond,
             sessionDownloadBytes = sessionDownloadBytes,
             sessionUploadBytes = sessionUploadBytes,
+            proxySession = proxySession,
         )
     }
 
