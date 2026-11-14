@@ -1,15 +1,17 @@
 # dot. Desktop
 
-Windows **VLESS + Hysteria2** client built with Tauri 2, React/TypeScript, Rust, Xray-core **v26.7.28** and Wintun. Latest published version: **[v0.4.0](https://github.com/atlasru/dot/releases/tag/v0.4.0)**.
+Windows **VLESS + Hysteria2** client built with Tauri 2, React/TypeScript, Rust, Xray-core **v26.7.28** and Wintun. Latest published version **[v0.5.0](https://github.com/atlasru/dot/releases/tag/v0.5.0)**.
 
-## Current release — 0.4.0
+## Install or update
 
-- Import VLESS and Hysteria2 (`hy2://` / `hysteria2://`) links, including mixed subscriptions. HY2 supports TLS/SNI/ALPN, congestion and optional Salamander obfuscation/packet-size parameters.
-- Generate protocol-aware Xray configs for TUN connection and individual/batch URL tests. The Windows CI checks representative configurations with the pinned real `xray.exe run -test`.
-- Maintain separate, persisted per-subscription HWIDs. `x-hwid`, OS/version and client metadata are sent with the subscription's HTTP requests, scoped to the original origin. They are not added to proxy traffic.
-- Migrate 0.3.0 VLESS state, selection, favorites, subscription URLs and preferences without reimporting.
-- The **18 October 2026** published Windows ZIP replaced the initial broken HY2 asset. Download [`dot-desktop-0.4.0-windows-x64.zip`](https://github.com/atlasru/dot/releases/download/v0.4.0/dot-desktop-0.4.0-windows-x64.zip) (SHA-256 `88e71c0eeb109a12b2fa9fb5bcb295fa6f6f0e56d7bcf01004f391a29f7596a3`), extracted as a complete portable folder.
-- The hotfix binary came from [CI #39111580483](https://github.com/atlasru/dot/actions/runs/39111580483), commit `9d7064c3`. The `v0.4.0` Git tag remains on an earlier revision; see [release notes](releases/0.4.0.md).
+Download the [Windows x64 portable ZIP](https://github.com/atlasru/dot/releases/download/v0.5.0/dot-desktop-0.5.0-windows-x64.zip) and verify it against the [release checksums](releases/0.5.0.md#published-downloads). Extract the entire archive and keep the `runtime/` directory beside the executable. Install Microsoft Edge WebView2 Runtime if needed and run `dot-desktop.exe` as administrator. To upgrade an existing portable build, exit dot. before replacing the portable files and keep `state.json` in the application data directory.
+
+## Current release — 0.5.0
+
+- Test individual nodes with Via Proxy GET/HEAD, direct TCP or system ICMP. Test All runs with bounded concurrency, streams per-node results and preserves results completed before cancellation. Isolated proxy tests can run while the VPN is connected.
+- AUTO uses recent successful GET/HEAD results, respecting per-node exclusions and an optional latency limit. Manual selection disables AUTO.
+- Advanced settings cover DNS/LAN bypass, subscription request and refresh controls, appearance and a redacted diagnostics export.
+- VLESS and Hysteria2 links, mixed subscriptions, per-subscription HWIDs and previously saved preferences remain supported. See [diagnostic semantics and platform limits](DIAGNOSTICS.md).
 
 ## 0.3.0 — original unified Desktop workspace (historical)
 
@@ -88,4 +90,4 @@ Manual Windows release checklist:
 - [ ] Scheduled refresh while the window is closed to the tray
 - [ ] DNS, IPv4/IPv6 behavior and routing cleanup after disconnect
 
-v0.3.0 established the unified Desktop functionality above. v0.4.0 adds Hysteria2 and subscription identities while retaining the workspace. Split tunneling, kill switch, automatic reconnect/AUTO node selection, custom DNS modes, autostart and application updating remain future milestones.
+The Desktop build provides numeric custom DNS and verified-proxy AUTO. Network-aware reconnect, per-app split tunneling, a kill switch, DoH/DoT controls, boot autostart and in-app updates are outside the current implementation.

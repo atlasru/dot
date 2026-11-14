@@ -1,13 +1,9 @@
 const repo = 'atlasru/dot';
 const releasePage = `https://github.com/${repo}/releases/latest`;
-const allReleasesPage = `https://github.com/${repo}/releases`;
-const androidFallback = `https://github.com/${repo}/releases/download/v0.4.0/dot-android-0.4.0-dev-debug.apk`;
-const desktopFallback = `https://github.com/${repo}/releases/download/v0.4.0/dot-desktop-0.4.0-windows-x64.zip`;
 
 const $ = (id) => document.getElementById(id);
 const formatBytes = (bytes) => {
-  if (!Number.isFinite(bytes)) return '';
-  const units = ['B', 'KB', 'MB', 'GB'];
+  const units = ['B', 'KiB', 'MiB', 'GiB'];
   let value = bytes;
   let unit = 0;
   while (value >= 1024 && unit < units.length - 1) {
@@ -28,8 +24,6 @@ const detectPlatform = () => {
   return 'other';
 };
 
-let releaseAssets = { android: null, desktop: null };
-
 const applyPlatform = () => {
   const kind = detectPlatform();
   const primary = $('primaryDownload');
@@ -44,14 +38,14 @@ const applyPlatform = () => {
   if (kind === 'android') {
     lead.textContent = 'Minimal VLESS and Hysteria 2 client for Android.';
     note.textContent = 'Android detected · debug APK available';
-    setPrimary('download for android', releaseAssets.android?.browser_download_url || androidFallback);
+    setPrimary('download for android', $('androidDownload').href);
     return;
   }
 
   if (kind === 'windows') {
     lead.textContent = 'Minimal VLESS and Hysteria 2 client for Windows.';
     note.textContent = 'Windows detected · portable x64 build available';
-    setPrimary('download for windows', releaseAssets.desktop?.browser_download_url || desktopFallback);
+    setPrimary('download for windows', $('desktopDownload').href);
     return;
   }
 
@@ -63,35 +57,30 @@ const applyPlatform = () => {
   }
 
   if (kind === 'mac') {
-    lead.textContent = 'Minimal VLESS client for Android & Windows.';
+    lead.textContent = 'Minimal VLESS and Hysteria 2 client for Android & Windows.';
     note.textContent = 'Current desktop build targets Windows x64';
     setPrimary('view releases', releasePage);
     return;
   }
 
   if (kind === 'linux') {
-    lead.textContent = 'Minimal VLESS client for Android & Windows.';
+    lead.textContent = 'Minimal VLESS and Hysteria 2 client for Android & Windows.';
     note.textContent = 'Current packaged desktop build targets Windows x64';
     setPrimary('view releases', releasePage);
     return;
   }
 
-  lead.textContent = 'Minimal VLESS client for Android & Windows.';
+  lead.textContent = 'Minimal VLESS and Hysteria 2 client for Android & Windows.';
   note.textContent = 'Android APK and Windows x64 builds available';
   setPrimary('view releases', releasePage);
 };
 
-const setDownloadFallbacks = () => {
-  $('androidDownload').href = androidFallback;
-  $('desktopDownload').href = desktopFallback;
-  $('androidVersion').textContent = 'v0.4.0-dev-debug';
-  $('desktopVersion').textContent = 'v0.4.0';
-  $('androidHash').textContent = 'SHA-256: 9c56aad2124e2b45acf54893e76fe44548fa3818dea55502a372925a106774c1';
-  $('desktopHash').textContent = 'SHA-256: 88e71c0eeb109a12b2fa9fb5bcb295fa6f6f0e56d7bcf01004f391a29f7596a3';
+const parseTag = (tag) => {
+  const match = /^v(\d+)\.(\d+)\.(\d+)$/.exec(tag);
+  return match ? match.slice(1).map(Number) : null;
 };
 
 const loadRelease = async () => {
-  setDownloadFallbacks();
   try {
     const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
       headers: { Accept: 'application/vnd.github+json' }
@@ -99,34 +88,39 @@ const loadRelease = async () => {
     if (!response.ok) throw new Error(`GitHub ${response.status}`);
     const release = await response.json();
     const assets = Array.isArray(release.assets) ? release.assets : [];
-    const displayVersion = release.tag_name
-      ? (release.tag_name.startsWith('v') ? release.tag_name : `v${release.tag_name}`)
-      : null;
+    const tag = release.tag_name;
+    const version = parseTag(tag);
+    if (!version || release.draft !== false || release.prerelease !== false) return;
+    const fallbackVersion = parseTag($('androidVersion').textContent.trim());
+    const differingPart = version.findIndex((part, index) => part !== fallbackVersion[index]);
+    if (differingPart >= 0 && version[differingPart] < fallbackVersion[differingPart]) return;
 
-    releaseAssets.android = assets.find((asset) => /^dot-android-.+\.apk$/i.test(asset.name)) || null;
-    releaseAssets.desktop = assets.find((asset) => /^dot-desktop-.+-windows-x64\.zip$/i.test(asset.name)) || null;
+    const base = `https://github.com/${repo}/releases`;
+    const assetFor = (name) => assets.find((asset) => asset?.name === name &&
+      asset.browser_download_url === `${base}/download/${tag}/${name}` &&
+      Number.isSafeInteger(asset.size) && asset.size > 0);
+    const android = assetFor(`dot-android-${tag.slice(1)}-dev-debug.apk`);
+    const desktop = assetFor(`dot-desktop-${tag.slice(1)}-windows-x64.zip`);
+    const checksums = assetFor('SHA256SUMS');
+    if (!android || !desktop || !checksums) return;
 
-    if (releaseAssets.android) {
-      if (displayVersion) $('androidVersion').textContent = displayVersion + (/-dev-debug\.apk$/i.test(releaseAssets.android.name) ? '-dev-debug' : '');
-      $('androidDownload').href = releaseAssets.android.browser_download_url;
-      $('androidSize').textContent = formatBytes(releaseAssets.android.size) || 'APK';
-      $('androidHash').textContent = /^sha256:[a-f0-9]{64}$/i.test(releaseAssets.android.digest || '')
-        ? releaseAssets.android.digest.replace(/^sha256:/i, 'SHA-256: ')
-        : 'See SHA256SUMS in the selected GitHub release';
-    }
-
-    if (releaseAssets.desktop) {
-      if (displayVersion) $('desktopVersion').textContent = displayVersion;
-      $('desktopDownload').href = releaseAssets.desktop.browser_download_url;
-      $('desktopSize').textContent = formatBytes(releaseAssets.desktop.size) || 'ZIP';
-      $('desktopHash').textContent = /^sha256:[a-f0-9]{64}$/i.test(releaseAssets.desktop.digest || '')
-        ? releaseAssets.desktop.digest.replace(/^sha256:/i, 'SHA-256: ')
-        : 'See SHA256SUMS in the selected GitHub release';
-    }
-
-    $('allReleases').href = allReleasesPage;
+    const updateCard = (platform, asset) => {
+      $(`${platform}Version`).textContent = tag;
+      $(`${platform}Download`).href = asset.browser_download_url;
+      $(`${platform}Size`).textContent = formatBytes(asset.size);
+      const hash = $(`${platform}Hash`);
+      if (/^sha256:[a-f0-9]{64}$/i.test(asset.digest || '')) {
+        hash.textContent = asset.digest.replace(/^sha256:/i, 'SHA-256: ');
+      } else if (differingPart >= 0) {
+        hash.textContent = 'See SHA256SUMS for this release';
+      }
+    };
+    updateCard('android', android);
+    updateCard('desktop', desktop);
+    $('selectedRelease').href = `${base}/tag/${tag}`;
+    $('releaseChecksums').href = checksums.browser_download_url;
   } catch {
-    setDownloadFallbacks();
+    // The HTML already contains a complete set of verified download links.
   } finally {
     applyPlatform();
   }
@@ -196,20 +190,20 @@ $('revealIp')?.addEventListener('click', () => {
 
 $('refreshNetwork')?.addEventListener('click', loadNetwork);
 
-const observer = new IntersectionObserver((entries) => {
-  for (const entry of entries) {
-    if (!entry.isIntersecting) continue;
-    const delay = Number(entry.target.dataset.delay || 0);
-    entry.target.style.transitionDelay = `${delay}ms`;
-    entry.target.classList.add('visible');
-    observer.unobserve(entry.target);
-  }
-}, { threshold: 0.08 });
+if ('IntersectionObserver' in window) {
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const delay = Number(entry.target.dataset.delay || 0);
+      entry.target.style.transitionDelay = `${delay}ms`;
+      entry.target.classList.add('visible');
+      observer.unobserve(entry.target);
+    }
+  }, { threshold: 0.08 });
+  document.documentElement.classList.add('animate-reveals');
+  document.querySelectorAll('.reveal').forEach((element) => observer.observe(element));
+}
 
-document.querySelectorAll('.reveal').forEach((element) => observer.observe(element));
-
-$('allReleases').href = allReleasesPage;
-setDownloadFallbacks();
 applyPlatform();
 loadRelease();
 loadNetwork();

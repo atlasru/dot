@@ -9,7 +9,8 @@
   <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png?v=1">
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png?v=1">
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?v=1">
-  <meta name="description" content="dot. — a minimal VPN client with VLESS and Hysteria 2 for Android and Windows.">
+  <meta name="description" content="dot. — a minimal VLESS and Hysteria 2 client for Android and Windows with Android Motion, node diagnostics and AUTO selection.">
+  <link rel="canonical" href="https://atlasru.github.io/dot/">
   <title>dot. — VPN client for Android and Windows</title>
   <link rel="preconnect" href="https://api.github.com">
   <link rel="preconnect" href="https://ipwho.is">
@@ -37,7 +38,7 @@
           <a class="button button-primary" id="primaryDownload" href="https://github.com/atlasru/dot/releases/latest">view releases</a>
           <a class="button" href="https://github.com/atlasru/dot">github</a>
         </div>
-        <p class="platform-note" id="platformNote">Detecting your platform…</p>
+        <p class="platform-note" id="platformNote">Android APK and Windows x64 portable ZIP</p>
       </div>
 
       <div class="network-card reveal" data-delay="80">
@@ -67,24 +68,28 @@
       </div>
       <div class="download-grid">
         <article class="download-card reveal">
-          <div class="download-title"><span>ANDROID</span><span class="badge">DEBUG APK</span></div>
-          <p class="version" id="androidVersion">v0.4.0-dev-debug</p>
-          <p>Kotlin · Jetpack Compose · Android VpnService · libXray</p>
-          <div class="download-meta"><span>Android 8.0+</span><span id="androidSize">APK</span></div>
-          <a class="button button-primary full" id="androidDownload" href="https://github.com/atlasru/dot/releases/download/v0.4.0/dot-android-0.4.0-dev-debug.apk">download apk</a>
-          <details class="verify"><summary>verify download</summary><code id="androidHash">SHA-256: 9c56aad2124e2b45acf54893e76fe44548fa3818dea55502a372925a106774c1</code></details>
+          <div class="download-title"><span>ANDROID</span><span class="badge">DEV-SIGNED DEBUG APK</span></div>
+          <p class="version" id="androidVersion">v0.5.0</p>
+          <p>Open the APK on Android and allow installation from your download app if prompted. Open dot. and import a compatible subscription.</p>
+          <div class="download-meta"><span>Android 8.0+</span><span id="androidSize">205.0 MiB</span></div>
+          <a class="button button-primary full" id="androidDownload" href="https://github.com/atlasru/dot/releases/download/v0.5.0/dot-android-0.5.0-dev-debug.apk">download apk</a>
+          <details class="verify"><summary>verify download</summary><code id="androidHash">SHA-256: f641f4b4f255cc8fd6a1a2deabcc75dfb3ccbd11d25326436df2970ff9ce47c8</code></details>
         </article>
         <article class="download-card reveal" data-delay="80">
           <div class="download-title"><span>WINDOWS</span><span class="badge">PORTABLE</span></div>
-          <p class="version" id="desktopVersion">v0.4.0</p>
-          <p>Rust · Xray-core · Wintun</p>
-          <div class="download-meta"><span>Windows x64 · portable</span><span id="desktopSize">ZIP</span></div>
-          <a class="button button-primary full" id="desktopDownload" href="https://github.com/atlasru/dot/releases/download/v0.4.0/dot-desktop-0.4.0-windows-x64.zip">download zip</a>
-          <details class="verify"><summary>verify download</summary><code id="desktopHash">SHA-256: 88e71c0eeb109a12b2fa9fb5bcb295fa6f6f0e56d7bcf01004f391a29f7596a3</code></details>
-          <p class="warning">Current Windows builds are unsigned.</p>
+          <p class="version" id="desktopVersion">v0.5.0</p>
+          <p>Extract the entire ZIP and run <code>dot-desktop.exe</code> as administrator. Keep <code>runtime/</code> beside it and install WebView2 Runtime if needed.</p>
+          <div class="download-meta"><span>Windows x64 · portable</span><span id="desktopSize">18.1 MiB</span></div>
+          <a class="button button-primary full" id="desktopDownload" href="https://github.com/atlasru/dot/releases/download/v0.5.0/dot-desktop-0.5.0-windows-x64.zip">download zip</a>
+          <details class="verify"><summary>verify download</summary><code id="desktopHash">SHA-256: fa43d74019e037f9aacb2606ba6602b95d9ab92283ab2e762cdaa73f7bf04682</code></details>
+          <p class="warning">The portable executable is unsigned.</p>
         </article>
       </div>
-      <a class="quiet-link reveal" id="allReleases" href="https://github.com/atlasru/dot/releases">all releases →</a>
+      <div class="download-links reveal">
+        <a class="quiet-link" id="selectedRelease" href="https://github.com/atlasru/dot/releases/tag/v0.5.0">release notes →</a>
+        <a class="quiet-link" id="releaseChecksums" href="https://github.com/atlasru/dot/releases/download/v0.5.0/SHA256SUMS">SHA256SUMS</a>
+        <a class="quiet-link" href="https://github.com/atlasru/dot/releases">all releases →</a>
+      </div>
     </section>
 
     <section class="preview shell section" aria-labelledby="previewTitle">
@@ -117,7 +122,7 @@
         <div class="mock mock-desktop reveal" data-delay="110">
           <div class="mock-top"><span>dot. desktop</span><span>WINDOWS</span></div>
           <div class="desktop-layout">
-            <div class="desktop-side"><span class="side-item current">HOME</span><span class="side-item">MAP</span><span class="side-item">SETTINGS</span></div>
+            <div class="desktop-side"><span class="side-item current">HOME</span><span class="side-item">NODES</span><span class="side-item">SETTINGS</span></div>
             <div class="desktop-main"><p class="mini-label">ACTIVE NODE</p><strong>Germany / Frankfurt #2</strong><p>41 ms · VLESS REALITY</p><div class="traffic"><span>↓ 12.4 MB</span><span>↑ 2.1 MB</span></div></div>
           </div>
         </div>
@@ -131,25 +136,27 @@
       </div>
       <div class="feature-lines">
         <article class="feature-line reveal"><span class="feature-index">01</span><div><h3>CONNECTION</h3><p>VLESS · Hysteria 2 · REALITY / TLS · Xray-core · live node switching</p></div></article>
-        <article class="feature-line reveal"><span class="feature-index">02</span><div><h3>NODES</h3><p>URL testing · delay sorting · natural name sorting · provider order</p></div></article>
+        <article class="feature-line reveal"><span class="feature-index">02</span><div><h3>DIAGNOSTICS</h3><p>Via Proxy GET/HEAD, direct TCP and system ICMP. Test All shows per-node progress and supports cancellation on Android and Windows.</p></div></article>
         <article class="feature-line reveal"><span class="feature-index">03</span><div><h3>SUBSCRIPTIONS</h3><p>Multiple groups · safe refresh · structured changes · failure rollback</p></div></article>
         <article class="feature-line reveal"><span class="feature-index">04</span><div><h3>MAP</h3><p>IP geolocation · country fallback · node clustering · pan and zoom</p></div></article>
+        <article class="feature-line reveal"><span class="feature-index">05</span><div><h3>ANDROID MOTION</h3><p>Animated connection states, tab transitions, node reordering and settings. VPN recovery follows Wi-Fi and mobile network changes.</p></div></article>
       </div>
     </section>
 
     <section class="split shell section reverse">
       <div class="node-test reveal">
-        <div class="panel-head"><span>SORT: DELAY</span><span>URL TEST</span></div>
-        <div class="test-row"><span>GERMANY #1</span><span class="latency good">42 ms</span></div>
-        <div class="test-row"><span>FINLAND #2</span><span class="latency good">61 ms</span></div>
-        <div class="test-row"><span>JAPAN #1</span><span class="latency">184 ms</span></div>
+        <div class="panel-head"><span>SORT: DELAY</span><span>TEST ALL · 4/4</span></div>
+        <div class="test-row"><span>GERMANY #1</span><span class="latency good">OK · 42 ms</span></div>
+        <div class="test-row"><span>FINLAND #2</span><span class="latency good">OK · 61 ms</span></div>
+        <div class="test-row"><span>JAPAN #1</span><span class="latency">UNAVAILABLE</span></div>
         <div class="test-row"><span>US WEST</span><span class="latency fail">FAIL</span></div>
       </div>
       <div class="split-copy reveal" data-delay="80">
         <p class="eyebrow">NODE TESTING</p>
         <h2>Sort by what matters.</h2>
-        <p>Keep provider order, sort naturally by name, or run URL tests and put successful low-latency nodes first.</p>
-        <p class="subtle">Missing latency data triggers the existing group test before delay sorting is applied.</p>
+        <p>Keep provider order, sort naturally by name, or put successful low-latency nodes first. Windows can run isolated node checks while the VPN is connected.</p>
+        <p>On Android, <strong>UNAVAILABLE</strong> covers timeouts and other network problems. <strong>FAIL</strong> indicates a confirmed configuration, protocol or authentication error. AUTO uses recent successful GET/HEAD results and respects exclusions and latency limits.</p>
+        <a class="quiet-link" href="https://github.com/atlasru/dot/blob/main/docs/DIAGNOSTICS.md">diagnostic guide →</a>
       </div>
     </section>
 
@@ -159,7 +166,7 @@
       </div>
       <div class="privacy-grid reveal">
         <div><p class="eyebrow">PRIVACY</p><h2>A client, not a provider.</h2></div>
-        <div><p>dot. does not operate VPN servers. You bring your own VLESS subscription.</p><p>Subscription URLs may contain credentials. Treat them like passwords.</p><a class="quiet-link" href="privacy.html">privacy details →</a></div>
+        <div><p>dot. does not operate VPN servers. Bring your own VLESS or Hysteria 2 subscription.</p><p>Subscription URLs may contain credentials. Treat them like passwords.</p><a class="quiet-link" href="privacy.html">privacy details →</a></div>
       </div>
     </section>
 
@@ -179,7 +186,7 @@
         <details><summary>Does dot. provide VPN servers?</summary><p>No. dot. is a client. You need your own compatible VLESS or Hysteria 2 subscription.</p></details>
         <details><summary>Which transports are supported?</summary><p>Android and Windows support VLESS and Hysteria 2 subscriptions through Xray/libXray.</p></details>
         <details><summary>Why is the Windows build unsigned?</summary><p>The Windows executable is unsigned. Extract the complete portable ZIP, including its runtime folder. Microsoft Edge WebView2 Runtime is required.</p></details>
-        <details><summary>Does the website track visitors?</summary><p>No analytics or advertising scripts are included. The network-status card optionally requests your public IP metadata from a third-party lookup service in your browser.</p></details>
+        <details><summary>Does the website track visitors?</summary><p>No analytics or advertising scripts are included. The network-status card requests public IP metadata directly from a third-party service when the page loads or you refresh the card.</p></details>
         <details><summary>Can I create a proprietary fork of dot.?</summary><p>Original dot. code is licensed under GPL-3.0-or-later. Forks and commercial redistribution are permitted, but distributing a derivative must comply with GPL copyleft and corresponding-source obligations. Bundled third-party components keep their own licenses; see the project LICENSE and third-party notices.</p></details>
       </div>
     </section>
@@ -191,6 +198,6 @@
     <span class="footer-mark">●</span>
   </footer>
 
-  <script src="assets/main.js?v=9d7064c" defer></script>
+  <script src="assets/main.js?v=0.5.0" defer></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-# Diagnostics and settings (0.5.0 candidate)
+# Diagnostics and settings in 0.5.0
 
 The default is **Via Proxy GET**, `https://cp.cloudflare.com/generate_204`, **5 seconds per attempt**, **3 attempts**, **median**, **4 concurrent nodes**. Startup testing and repeat testing are off. Each HTTP attempt opens a fresh client connection. Timing uses `System.nanoTime()` on Android and `Instant` on Windows. Config conversion, core startup, client construction and process startup are outside the timer. GET includes response body transfer (maximum 1 MiB); HEAD ends at response headers. Only HTTP 2xx responses pass; redirects are not followed.
 
@@ -27,7 +27,7 @@ Android diagnostics use a private `:diagnostics` service process. It owns **one 
 
 Windows uses at most the configured number of isolated Xray processes. Job Objects terminate their process trees and temporary configs are removed when the processes stop. Windows selects an underlying route for the server endpoint outside dot's TUN and binds outbound connections to that interface. Both platforms use a loopback HTTP proxy as the entry point to the chosen node's Xray outbound, with a blocked default route if the rule does not match.
 
-Node diagnostics run independently of connection commands, including when a VPN connection starts during Test All. Third-party VPNs and administrator routing policies can affect access to the underlying network.
+Node diagnostics run independently of connection commands, including when a VPN connection starts during Test All. The Windows Home URL TEST checks the selected node with the configured method. GET/HEAD use a separate Xray process. Third-party VPNs and administrator routing policies can affect access to the underlying network.
 
 On Android, **Test Connection** requires a current VPN session and uses a temporary proxy with that session's Xray outbound, underlying network, and bootstrap DNS. The check takes the same proxy path when app split tunneling includes or excludes dot. It uses the HTTPS **Test URL** setting, including when node diagnostics is set to TCP or ICMP. The result measures the active node's proxy path. Device-level TUN routing needs separate verification.
 
@@ -58,4 +58,4 @@ Android intentionally rejects IPv6 DNS while its tunnel only installs IPv4 route
 
 Android keeps application ID `dev.dotclient.android.debug`, stable development signing, versionCode **500** (0.4.0 hotfix: 401), and re-parses saved subscription URIs. Node IDs are now deterministic so diagnostic cache and AUTO exclusions survive reloads. HY2's effective display transport is UDP, including legacy nodes carrying a TCP field; VLESS transport parsing is unchanged. Windows preserves its state.json and protocol config; HY2 views derive UDP from the protocol rather than the legacy raw transport field.
 
-Unit/local HTTP tests and `xray run -test` validate parsing, config compatibility and diagnostic policy. They do not establish real provider VPN connections. Before publishing, manually verify VLESS TCP/TLS/REALITY and HY2 UDP/QUIC, Android permission/service lifecycle and split tunnel, Windows TUN routes, connect/disconnect/reconnect, Wi-Fi/mobile handoff, and an in-place 0.4.0 upgrade on actual devices. See [manual HY2 checks](hysteria2-manual-test.md).
+Unit/local HTTP tests and `xray run -test` validate parsing, config compatibility and diagnostic policy. They do not establish real provider VPN connections. For provider-specific troubleshooting, verify VLESS TCP/TLS/REALITY and HY2 UDP/QUIC, Android permission/service lifecycle and split tunnel, Windows TUN routes, connect/disconnect/reconnect, Wi-Fi/mobile handoff, and an in-place 0.4.0 upgrade on actual devices. See [manual HY2 checks](hysteria2-manual-test.md).

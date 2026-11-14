@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0 — unreleased
+## [0.5.0](https://github.com/atlasru/dot/releases/tag/v0.5.0) — released 14 November 2026
 
 - Categorized advanced settings for Android and Windows.
 - Android Motion animations for the VPN orb, tab transitions, node lists, settings and dialogs.
@@ -10,7 +10,7 @@
 - Verified-proxy AUTO, exclusions/threshold, manual priority; TCP/ICMP cannot verify a proxy or HY2 operation.
 - Numeric DNS and LAN bypass, subscription request controls, reconnect policy on Android, saved list appearance, settings JSON and redacted diagnostic metrics.
 - Includes Android HY2 UDP display fix `852e5a7` and Windows legacy HY2 display regression coverage.
-- VersionCode 500; pinned Xray/libXray unchanged. Candidate builds are separate from manually approved publication.
+- Android versionCode 500. Xray/libXray remains pinned to v26.7.28. Both published files came from [CI #63](https://github.com/atlasru/dot/actions/runs/43451993488) on the tagged source.
 - See [platform support and limitations](docs/DIAGNOSTICS.md) and [release notes](docs/releases/0.5.0.md).
 
 

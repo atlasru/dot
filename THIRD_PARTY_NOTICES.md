@@ -15,11 +15,11 @@ or copyright of third-party components.
 
 | Component | Project | Applicable license | License copy |
 | --- | --- | --- | --- |
-| Xray-core / `xray.exe` | [XTLS/Xray-core](https://github.com/XTLS/Xray-core) | Mozilla Public License 2.0 (MPL-2.0) | [Original license](third_party_licenses/Xray-core-MPL-2.0.txt) |
-| libXray Android wrapper / AAR | [XTLS/libXray](https://github.com/XTLS/libXray) | MIT | [Original license and XTLS copyright](third_party_licenses/libXray-MIT.txt) |
-| Prebuilt `wintun.dll` | [WireGuard/Wintun](https://www.wintun.net/) | **Wintun Prebuilt Binaries License (PBL)**, *not* GPL | [Original binary license](third_party_licenses/Wintun-PBL.txt) |
+| Xray-core / `xray.exe` | [XTLS/Xray-core](https://github.com/XTLS/Xray-core) | Mozilla Public License 2.0 (MPL-2.0) | [Original license](https://github.com/atlasru/dot/tree/main/third_party_licenses/Xray-core-MPL-2.0.txt) |
+| libXray Android wrapper / AAR | [XTLS/libXray](https://github.com/XTLS/libXray) | MIT | [Original license and XTLS copyright](https://github.com/atlasru/dot/tree/main/third_party_licenses/libXray-MIT.txt) |
+| Prebuilt `wintun.dll` | [WireGuard/Wintun](https://www.wintun.net/) | **Wintun Prebuilt Binaries License (PBL)**, *not* GPL | [Original binary license](https://github.com/atlasru/dot/tree/main/third_party_licenses/Wintun-PBL.txt) |
 
-The core / wrapper releases used by dot. v0.4.0 are pinned to `v26.7.28`.
+dot. pins Xray-core and libXray to `v26.7.28`.
 The Wintun DLL is taken unmodified from the pinned upstream Xray Windows
 archive and loaded as a separate runtime component. Wintun's *source code*
 has GPLv2 terms, but the **official prebuilt DLL** is distributed under its

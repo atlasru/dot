@@ -1,10 +1,8 @@
-> Source is being prepared for **0.5.0**. The published stable release remains 0.4.0 until owner approval. See [0.5.0 candidate notes](docs/releases/0.5.0.md) and [advanced settings / diagnostic methods](docs/DIAGNOSTICS.md). Default diagnostics: proxied HTTPS GET, 5s × 3, median, concurrency 4; startup testing off.
-
 # dot.
 
 Minimal VLESS and Hysteria2 client for Android and Windows with an AMOLED-first, Nothing-inspired interface.
 
-**Latest published release: [v0.4.0](https://github.com/atlasru/dot/releases/tag/v0.4.0)** (18 October 2026 Hysteria2 compatibility hotfix). Android is a development-signed debug APK; Windows is an unsigned portable x64 build. Both release downloads have been tested by their maintainer on real devices, but support still depends on the provider and network. [Website](https://atlasru.github.io/dot/) · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/0.4.0.md).
+**Latest stable release [v0.5.0](https://github.com/atlasru/dot/releases/tag/v0.5.0)**, published 14 November 2026. Android ships a development-signed debug APK and Windows ships an unsigned x64 portable ZIP. The maintainer tested both published builds manually. Provider and network compatibility varies. [Website](https://atlasru.github.io/dot/) · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/0.5.0.md).
 
 ## Features
 
@@ -17,19 +15,21 @@ Minimal VLESS and Hysteria2 client for Android and Windows with an AMOLED-first,
 - subscription refresh reports with added, edited and deleted node counts/details
 - classified subscription update errors with redacted raw-error viewing while keeping existing nodes intact
 - node selection and persistence
-- one-tap AUTO NODE action that picks the fastest successful tested node and connects to it
+- AUTO selection using recent successful proxy tests, with node exclusions and a latency limit
 - per-subscription node sorting by provider order, delay or natural name order
-- delay sorting runs URL tests first when current latency data is unavailable
+- delay sorting queues checks for nodes without compatible measurements
 - LIST / MAP views for nodes, with LIST as the default
 - interactive world map with real country geometry, borders, Mercator projection, pinch zoom and pan
 - DNS + IP geolocation for subscription nodes with local caching
 - fallback country detection from node flags, ISO codes and country names when IP geolocation fails
 - country-level node grouping so multiple nodes do not overlap on the map
-- node latency / connection tests through libXray URL testing
+- GET/HEAD proxy checks, direct TCP and system ICMP, with cancellable Test All and per-node progress
+- Android Motion for the connection orb, tabs, node reordering, settings and dialogs
+- advanced settings for diagnostics, DNS/LAN, subscription requests and Android reconnect policy
 - direct node selection and switching while connected
 - per-app split tunneling with all-apps, exclude-selected and only-selected modes
 - network-aware reconnect after Wi-Fi/mobile-data changes
-- capped reconnect backoff: 1s, 2s, 5s, 10s, then 30s
+- configurable reconnect backoff and retry cap
 - connection failure classification for DNS, timeout, refused, TLS, REALITY, TUN, config and Xray startup errors
 - Android VpnService + TUN integration
 - libXray / Xray-core backend
@@ -46,20 +46,16 @@ Minimal VLESS and Hysteria2 client for Android and Windows with an AMOLED-first,
 Android uses a small three-destination layout:
 
 - **Home** is connection-first: the pixel orb, connection state, active node, traffic and connection test stay in one place
-- **Nodes** contains the one-tap AUTO NODE action, subscription switching, refresh/test actions, sorting, LIST/MAP views and per-node controls
+- **Nodes** contains the AUTO toggle, subscription switching, refresh/test actions, sorting, LIST/MAP views and per-node controls
 - **Settings** contains subscriptions, split tunneling, connection state, appearance and app information
 
 The primary destinations use a floating pill navigation bar above the Android system navigation/gesture area. The selected destination is highlighted as an inner pill with the dot. red accent, while navigation automatically respects the system navigation inset.
 
-The redesign changes information hierarchy without removing the existing node map, latency tests, sorting, subscription management, theme selection or launcher-icon controls.
+Android Motion animates the VPN orb, tab transitions, node reordering, diagnostic results, settings and dialogs.
 
 ## AUTO NODE
 
-AUTO NODE is a one-shot action at the top of the Nodes list rather than a persistent mode.
-
-Tapping it chooses the successful node with the lowest available measured latency and connects to that node. If latency data is not available while the VPN core is idle, dot. runs the existing group URL test first, selects the fastest successful result and then continues into the normal Android VPN permission/connect flow.
-
-When a tunnel is already active, AUTO NODE can switch immediately when usable latency results are already available. It does not continuously override later manual node selections.
+AUTO is an opt-in setting on Android and Windows. It selects the lowest-latency node in the selected subscription with a compatible successful Via Proxy GET/HEAD result from the past 15 minutes. Exclusions and the optional maximum latency apply. Manual selection disables AUTO. If no node qualifies, run GET/HEAD diagnostics or choose a node manually.
 
 ## Connection reliability
 
@@ -67,7 +63,7 @@ The Android VPN service observes default-network changes through `ConnectivityMa
 
 If Wi-Fi or mobile data disappears while a tunnel is active, dot. moves to **waiting for network** instead of treating the interruption as a permanent failure. When connectivity returns, the same selected VLESS or Hysteria2 node and split-tunnel configuration are re-established automatically.
 
-Failed reconnects use capped backoff intervals of 1, 2, 5, 10 and 30 seconds; further retries stay at 30 seconds. A manual disconnect cancels the reconnect loop immediately.
+Reconnect delays use 1, 2, 5, 10 and 30 times the configured base interval, up to the configured maximum. A manual disconnect cancels the reconnect loop.
 
 Startup failures are classified into readable categories such as DNS, timeout, connection refused, TLS, REALITY, TUN, invalid configuration and Xray startup failure. The latest category and reconnect attempt are exposed in Settings while the detailed runtime error stays local to the process.
 
@@ -102,10 +98,10 @@ If downloading or parsing fails, the previous working node list is retained. The
 Sorting is stored independently for each subscription:
 
 - **ORIGIN** keeps the exact order received from the provider
-- **DELAY** orders successful URL-test results from lowest to highest latency, then failed and untested nodes
+- **DELAY** orders successful URL-test results from lowest to highest latency, then unavailable, failed and untested nodes on Android
 - **NAME** uses natural numeric ordering, so `France #2` comes before `France #10`
 
-Choosing **DELAY** without current test data starts the existing group URL test first and keeps the list stable until that batch completes. The selected sort mode is also applied to node lists opened from country markers on the map.
+Choosing **DELAY** can queue tests for nodes without compatible measurements. Test All streams results and keeps completed measurements when cancelled. On Android, **OK** reports valid latency, **FAIL** indicates a confirmed credential, configuration or protocol error, and **UNAVAILABLE** covers timeouts and other network failures. See [Diagnostics](docs/DIAGNOSTICS.md).
 
 ## Node map
 
@@ -125,23 +121,25 @@ Only the resolved node IP is sent to the geolocation provider; subscription URLs
 
 ## Installation
 
-Download from the **[current v0.4.0 release](https://github.com/atlasru/dot/releases/tag/v0.4.0)** (or from the [dot. website](https://atlasru.github.io/dot/)):
+Download from the [v0.5.0 release](https://github.com/atlasru/dot/releases/tag/v0.5.0) or the [dot. website](https://atlasru.github.io/dot/).
 
-| Platform | Download | Notes |
+| Platform | Download | Details |
 | --- | --- | --- |
-| Android 8.0+ (API 26) | [`dot-android-0.4.0-dev-debug.apk`](https://github.com/atlasru/dot/releases/download/v0.4.0/dot-android-0.4.0-dev-debug.apk) | `0.4.0-debug`, versionCode **401**, package `dev.dotclient.android.debug`; signed using the **public development key**, not production-signed |
-| Windows x64 | [`dot-desktop-0.4.0-windows-x64.zip`](https://github.com/atlasru/dot/releases/download/v0.4.0/dot-desktop-0.4.0-windows-x64.zip) | Unsigned release-mode portable executable; extract the complete ZIP and keep `runtime/` next to `dot-desktop.exe` |
+| Android 8.0+ (API 26) | [dot-android-0.5.0-dev-debug.apk](https://github.com/atlasru/dot/releases/download/v0.5.0/dot-android-0.5.0-dev-debug.apk) | Development-signed debug APK. Installed version: `0.5.0-debug`, code **500**, package `dev.dotclient.android.debug`. |
+| Windows x64 | [dot-desktop-0.5.0-windows-x64.zip](https://github.com/atlasru/dot/releases/download/v0.5.0/dot-desktop-0.5.0-windows-x64.zip) | Unsigned release-mode portable ZIP. |
 
-On Windows, Microsoft Edge WebView2 Runtime and administrator privileges are required for VPN routing. Android upgrades preserve existing application data **only if** the package ID and signing certificate match. The 401 build can replace an earlier development-signed `0.4.0-debug` build with versionCode 400 without uninstalling. No iOS, macOS or Linux binary is currently distributed.
+On Android, open the APK and allow installs from your download app if prompted. A compatible `0.4.0-debug` hotfix install (code 401) can upgrade in place when its package ID and signing certificate match. Then open dot. and import a compatible subscription if needed.
 
-**Verify the exact current release assets (SHA-256):**
+On Windows, extract the full ZIP and keep `runtime/` next to `dot-desktop.exe`. Run the executable as administrator for VPN routing. Microsoft Edge WebView2 Runtime is required. To update, close dot. before replacing the portable files and keep your existing settings directory.
+
+Verify the downloads against [SHA256SUMS](https://github.com/atlasru/dot/releases/download/v0.5.0/SHA256SUMS).
 
 ```text
-9c56aad2124e2b45acf54893e76fe44548fa3818dea55502a372925a106774c1  dot-android-0.4.0-dev-debug.apk
-88e71c0eeb109a12b2fa9fb5bcb295fa6f6f0e56d7bcf01004f391a29f7596a3  dot-desktop-0.4.0-windows-x64.zip
+f641f4b4f255cc8fd6a1a2deabcc75dfb3ccbd11d25326436df2970ff9ce47c8  dot-android-0.5.0-dev-debug.apk
+fa43d74019e037f9aacb2606ba6602b95d9ab92283ab2e762cdaa73f7bf04682  dot-desktop-0.5.0-windows-x64.zip
 ```
 
-The release also provides [`SHA256SUMS`](https://github.com/atlasru/dot/releases/download/v0.4.0/SHA256SUMS). On **18 October 2026**, both initial `v0.4.0` download assets were replaced with the verified Hysteria2-fix binaries from [Actions run #39111580483](https://github.com/atlasru/dot/actions/runs/39111580483), source commit [`9d7064c3`](https://github.com/atlasru/dot/commit/9d7064c3fd83f340f787e6656c2d6f0c915cfcce). **The original `v0.4.0` Git tag has not moved** and points to an earlier revision; use the release download assets above to get the patched binaries.
+Both published files come from [CI #63](https://github.com/atlasru/dot/actions/runs/43451993488), built from `57de8207348f9eaded4e9e92954008b90d328532`.
 
 See [Desktop](docs/DESKTOP.md), [Hysteria2 validation](docs/hysteria2-manual-test.md) and [Release process](docs/RELEASING.md) for limitations, tests and provenance.
 
@@ -188,8 +186,9 @@ Kotlin · Jetpack Compose · Android VpnService · OkHttp · libXray / Xray-core
 - [VPN engine](docs/VPN_ENGINE.md)
 - [Changelog](CHANGELOG.md)
 - [Desktop](docs/DESKTOP.md)
+- [Diagnostics and advanced settings](docs/DIAGNOSTICS.md)
 - [Subscription identity / HWID](docs/SUBSCRIPTION_IDENTITY.md)
-- [Release and checksums](docs/releases/0.4.0.md)
+- [Release and checksums](docs/releases/0.5.0.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## License

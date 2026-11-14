@@ -25,7 +25,7 @@ The model metadata is a generic client label. dot. does not collect a physical d
 | `User-Agent` | Existing `dot/<version> (Android)` | Existing `dot-desktop/<version>` |
 | `Accept` | Existing `*/*` | Existing `*/*` |
 
-The subscription request builder receives the subscription or its URL/identity snapshot, never a global selected identity. Initial fetch, retry, manual refresh and changed-source validation use the same builder. Windows scheduled/startup refresh re-reads that subscription under the existing refresh gate. Android currently has no scheduled subscription refresher; its download API requires an explicit subscription, including from a background coroutine. VLESS-only, Hysteria2-only and mixed subscription bodies use the same identity-aware download path.
+The subscription request builder receives the subscription or its URL/identity snapshot, never a global selected identity. Initial fetch, retry, manual refresh and changed-source validation use the same builder. Windows scheduled/startup refresh re-reads that subscription under the existing refresh gate. Android can refresh subscriptions at startup and on a configured interval while its ViewModel is active. Each scheduled request uses the subscription it is refreshing. VLESS-only, Hysteria2-only and mixed subscription bodies use the same identity-aware download path.
 
 Same-origin redirects retain the identity. Scheme, host or port changes strip all four identity headers; the destination can still supply the subscription body. A service requiring HWID on another origin must be configured using that destination's subscription URL. Unrelated headers and the existing User-Agent/Accept remain intact.
 
@@ -39,7 +39,7 @@ Windows adds an optional `hwid` field for legacy deserialization in `state.json`
 
 Both migrations are restart-safe: interruption leaves the previous or new complete state. Migrated values are persisted before any refresh can use them. Re-importing subscriptions is unnecessary.
 
-| Existing state | Unified 0.4.0 behavior |
+| Existing state | Upgrade behavior |
 | --- | --- |
 | 0.3.0 VLESS without HWID | Preserve nodes/credentials/selection; generate and save each missing HWID |
 | 0.4.0 VLESS/HY2 without HWID | Preserve both protocols and settings; generate and save each missing HWID |
@@ -63,7 +63,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri -- build --no-bundle
 ```
 
-The [v0.4.0 release](releases/0.4.0.md) includes this feature on both platforms. Unified CI builds Android and Windows from the same source revision, runs identity validation and persistence tests, and verifies packaged artifacts. The published **18 October 2026** hotfix APK and portable ZIP were built from source `9d7064c3` (Actions run [#39111580483](https://github.com/atlasru/dot/actions/runs/39111580483)); the historical `v0.4.0` tag remains on an older commit.
+Both platforms support subscription identity in [v0.5.0](releases/0.5.0.md). The feature first shipped in [v0.4.0](releases/0.4.0.md). Unified CI builds Android and Windows from the same source revision, runs identity validation and persistence tests, and verifies packaged artifacts. The published **18 October 2026** hotfix APK and portable ZIP were built from source `9d7064c3` (Actions run [#39111580483](https://github.com/atlasru/dot/actions/runs/39111580483)); the historical `v0.4.0` tag remains on an older commit.
 
 CI's standard Android checks are `gradle testDebugUnitTest` and `gradle assembleDebug`. Optional Android lint is separate from this tested release gate; a prior development snapshot reported a `StartActivityAndCollapseDeprecated` lint finding in `DotQuickTileService.kt`. Do not claim that the complete lint suite passed based only on the green release workflow.
 
