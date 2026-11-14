@@ -1,6 +1,6 @@
 # VPN engine
 
-dot. v0.4.0 uses pinned **Xray/libXray v26.7.28**. Android uses `VpnService`, a system TUN interface and the upstream libXray AAR. Windows uses an independently configured Xray-core executable with Wintun. Both platforms support VLESS with REALITY/TLS and Hysteria2 over UDP/QUIC.
+dot. v0.5.0 uses pinned **Xray/libXray v26.7.28**. Android uses `VpnService`, a system TUN interface and the upstream libXray AAR. Windows uses an independently configured Xray-core executable with Wintun. Both platforms support VLESS with REALITY/TLS and Hysteria2 over UDP/QUIC.
 
 ## Android startup
 
@@ -21,7 +21,7 @@ Startup retry delays use the **1, 2, 5, 10, 30** backoff multipliers with the co
 
 ## Windows backend
 
-The Rust backend builds protocol-specific TUN and URL-test Xray configurations. CI invokes the **real pinned `xray.exe run -test`** against representative VLESS and Hysteria2 configurations. Portable Windows ZIPs include `dot-desktop.exe`, `runtime/xray.exe`, `runtime/wintun.dll` and `BUILD.json`. Windows requires WebView2 Runtime and administrator privileges for routing/TUN. Automatic reconnect on network handoff, Android-style AUTO NODE and split tunneling are not currently Windows features.
+The Rust backend builds protocol-specific TUN and URL-test Xray configurations. CI invokes the **real pinned `xray.exe run -test`** against representative VLESS and Hysteria2 configurations. Portable Windows ZIPs include `dot-desktop.exe`, `runtime/xray.exe`, `runtime/wintun.dll` and `BUILD.json`. Windows requires WebView2 Runtime and administrator privileges for routing/TUN. Windows AUTO uses recent successful proxy results for node selection. Windows network-aware reconnect and per-app split tunneling are outside the current implementation.
 
 ## Network and identity boundaries
 
@@ -36,7 +36,7 @@ Android samples UID traffic counters for Home and its foreground notification. D
 - Only Hysteria **version 2** is supported; not Hysteria v1.
 - For HY2, QUIC/UDP must be allowed by the network and server.
 - CI validates configuration and compilation; real-world provider auth, routing, QUIC behavior and network handoff still need representative manual testing.
-- Download **the patched [v0.4.0 release assets](releases/0.4.0.md)**, not old assets cached from 14 October 2026.
+- Use the [v0.5.0 release assets](releases/0.5.0.md) for current verification.
 
 ### Android TUN verification on a device
 

@@ -1,6 +1,6 @@
 # dot. architecture
 
-Android and Windows share support for **VLESS** and **Hysteria2** (`hy2://`, `hysteria2://`), mixed subscriptions and per-subscription HTTP identity. The platforms have separate native VPN runtimes. The current published version is [v0.4.0](docs/releases/0.4.0.md); pinned Xray/libXray version: **v26.7.28**.
+Android and Windows share support for **VLESS** and **Hysteria2** (`hy2://`, `hysteria2://`), mixed subscriptions and per-subscription HTTP identity. The platforms have separate native VPN runtimes. The current published version is [v0.5.0](docs/releases/0.5.0.md); pinned Xray/libXray version: **v26.7.28**.
 
 ## Android data path
 
@@ -61,7 +61,7 @@ Android also exposes waiting-for-network and reconnecting states; configuration 
 
 See [VPN engine](docs/VPN_ENGINE.md), [Desktop](docs/DESKTOP.md) and [Hysteria2 validation](docs/hysteria2-manual-test.md).
 
-## 0.5.0 candidate additions
+## Diagnostics and settings in 0.5.0
 
 Android `core/diagnostics` owns typed diagnostic settings/results, an asynchronous PingEngine and a private-process PingService. The service uses one core at a time, binds diagnostics to an underlying network and streams per-node results to NodeDiagnostics. `core/settings/SettingsRepository` stores validated preferences and results alongside the subscription/theme stores. `RuntimeSettings` applies DNS/LAN/log controls at the next connection. UI categories live in AdvancedSettingsPanel.
 

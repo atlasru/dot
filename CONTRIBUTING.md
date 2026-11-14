@@ -2,7 +2,7 @@
 
 `dot.` is still pre-1.0, so small focused changes are preferred over large rewrites.
 
-Current published version is **v0.4.0** (Android `0.4.0-debug` / versionCode **401**, Windows `0.4.0`), using Xray/libXray **v26.7.28**. The `v0.4.0` release assets were updated independently of the original tag; see [release provenance](docs/releases/0.4.0.md).
+Current published version is **[v0.5.0](https://github.com/atlasru/dot/releases/tag/v0.5.0)** (Android `0.5.0-debug` / versionCode **500**, Windows `0.5.0`). Both platforms use Xray/libXray **v26.7.28**. See [release provenance](docs/releases/0.5.0.md).
 
 ## Licensing contributions
 
